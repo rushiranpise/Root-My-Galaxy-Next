@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Root My Galaxy</string>
+    <string name="app_name">Root My Galaxy Next</string>
     <string name="nav_overview">Home</string>
     <string name="nav_history">History</string>
     <string name="nav_logs">Logs</string>
@@ -316,8 +316,8 @@
     <string name="action_copy_log">Copy log</string>
     <string name="log_copied">Log copied to clipboard</string>
     <string name="about">About</string>
-    <string name="about_title">About Root My Galaxy</string>
-    <string name="about_description">Info Root My Galaxy</string>
+    <string name="about_title">About Root My Galaxy Next</string>
+    <string name="about_description">Info Root My Galaxy Next</string>
     <string name="about_body">Root supported Samsung Galaxy phones using a kernel exploit.</string>
 
     <string name="install_title">Install</string>
@@ -480,7 +480,7 @@
     <string name="repo_response_too_large">The response was too large</string>
     <string name="repo_api_limited">GitHub rate limit reached; try again in a few minutes</string>
     <string name="open_github">Open GitHub</string>
-    <string name="github_card_title">Explore Root My Galaxy</string>
+    <string name="github_card_title">Explore Root My Galaxy Next</string>
     <string name="github_card_description">View the source code and usage instructions.</string>
     <string name="action_continue">Continue anyway</string>
     <string name="action_next">Next</string>
@@ -676,7 +676,7 @@
     <string name="reboot_confirm_body">The phone will restart into %1$s and will not return to this screen on its own.
 
 Hold Power and Volume Down together for 7 seconds to restart it from there.</string>
-    <string name="recovery_shell_unavailable">KernelSU is running, but this app does not have a root shell yet. Grant Root My Galaxy superuser access in KernelSU or start Shizuku, then try again.</string>
+    <string name="recovery_shell_unavailable">KernelSU is running, but this app does not have a root shell yet. Grant Root My Galaxy Next superuser access in KernelSU or start Shizuku, then try again.</string>
     <string name="recovery_shizuku_needs_root">Shizuku is running, but this action requires root. A Shizuku shell is not root. Load KernelSU first, or run the installation again.</string>
     <string name="recovery_scheduled">Scheduled. The Android runtime will restart shortly.</string>
     <string name="recovery_reboot_scheduled">Scheduled. The phone will restart without root.</string>
