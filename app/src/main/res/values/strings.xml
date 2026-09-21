@@ -85,6 +85,7 @@
     <string name="staging_sweep_refused">Staging: tried to remove %1$d staged file(s) and the shell refused some: %2$s</string>
     <string name="staging_sweep_skipped">Staging: not swept</string>
     <string name="staging_sweep_no_shell">Staging: not swept, no shell answered - what earlier runs left is still in /data/local/tmp</string>
+    <string name="staging_sweep_other_install">Staging: left alone for the other Root My Galaxy install, which uses the same names: %1$s</string>
     <string name="residue_role_daemon">KernelSU daemon</string>
     <string name="residue_role_helper">root helper</string>
     <string name="residue_role_payload">exploit payload</string>

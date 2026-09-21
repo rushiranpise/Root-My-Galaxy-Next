@@ -348,12 +348,12 @@ internal object RootRecovery {
         }
         return runDetached(
         shell = shell,
-        scriptPath = "/data/local/tmp/rmg-restart-zygote.sh",
-        logPath = "/data/local/tmp/rmg-restart-zygote.log",
-        acceptedPath = "/data/local/tmp/.rmg-restart-zygote-accepted",
+        scriptPath = "/data/local/tmp/rmgnext-restart-zygote.sh",
+        logPath = "/data/local/tmp/rmgnext-restart-zygote.log",
+        acceptedPath = "/data/local/tmp/.rmgnext-restart-zygote-accepted",
         script = restartZygoteScript(
             bootToken = bootToken,
-            acceptedPath = "/data/local/tmp/.rmg-restart-zygote-accepted",
+            acceptedPath = "/data/local/tmp/.rmgnext-restart-zygote-accepted",
             reportPath = reportPath,
         ),
         // Outlasts the child's own wait for the module services, so a refusal is read as a refusal
@@ -384,10 +384,10 @@ internal object RootRecovery {
         }
         return runDetached(
             shell = shell,
-            scriptPath = "/data/local/tmp/rmg-soft-reboot-keeper.sh",
-            logPath = "/data/local/tmp/rmg-soft-reboot.log",
-            acceptedPath = "/data/local/tmp/.rmg-soft-reboot-accepted",
-            script = softRebootScript(bootToken, "/data/local/tmp/.rmg-soft-reboot-accepted"),
+            scriptPath = "/data/local/tmp/rmgnext-soft-reboot-keeper.sh",
+            logPath = "/data/local/tmp/rmgnext-soft-reboot.log",
+            acceptedPath = "/data/local/tmp/.rmgnext-soft-reboot-accepted",
+            script = softRebootScript(bootToken, "/data/local/tmp/.rmgnext-soft-reboot-accepted"),
             acceptPollAttempts = softRebootAcceptPollAttempts,
         )
     }
@@ -404,12 +404,12 @@ internal object RootRecovery {
         requiresRoot: Boolean = true,
     ): RecoveryOutcome = runDetached(
         shell = shell,
-        scriptPath = "/data/local/tmp/rmg-reboot.sh",
-        logPath = "/data/local/tmp/rmg-reboot.log",
-        acceptedPath = "/data/local/tmp/.rmg-reboot-accepted",
+        scriptPath = "/data/local/tmp/rmgnext-reboot.sh",
+        logPath = "/data/local/tmp/rmgnext-reboot.log",
+        acceptedPath = "/data/local/tmp/.rmgnext-reboot-accepted",
         script = rebootScript(
             bootToken = bootToken,
-            acceptedPath = "/data/local/tmp/.rmg-reboot-accepted",
+            acceptedPath = "/data/local/tmp/.rmgnext-reboot-accepted",
             requiresRoot = requiresRoot,
         ),
     )
@@ -597,8 +597,8 @@ internal object RootRecovery {
         EXPECTED_BOOT=${shellQuote(bootToken)}
         ACCEPTED=${shellQuote(acceptedPath)}
         ACCEPTED_VALUE='$ACCEPTED_MARKER'
-        LOCK='/data/local/tmp/.rmg-soft-reboot-owner'
-        KSUD_OUT='/data/local/tmp/rmg-soft-reboot-ksud.log'
+        LOCK='/data/local/tmp/.rmgnext-soft-reboot-owner'
+        KSUD_OUT='/data/local/tmp/rmgnext-soft-reboot-ksud.log'
         KSUD=$KSUD_PATH
 
         log() { echo "[keeper] ${'$'}(date +%s 2>/dev/null) ${'$'}*"; }
@@ -709,10 +709,10 @@ internal object RootRecovery {
         }
         return runDetached(
             shell = shell,
-            scriptPath = "/data/local/tmp/rmg-reload-modules.sh",
-            logPath = "/data/local/tmp/rmg-reload-modules.log",
-            acceptedPath = "/data/local/tmp/.rmg-reload-modules-accepted",
-            script = reloadModulesScript(bootToken, "/data/local/tmp/.rmg-reload-modules-accepted"),
+            scriptPath = "/data/local/tmp/rmgnext-reload-modules.sh",
+            logPath = "/data/local/tmp/rmgnext-reload-modules.log",
+            acceptedPath = "/data/local/tmp/.rmgnext-reload-modules-accepted",
+            script = reloadModulesScript(bootToken, "/data/local/tmp/.rmgnext-reload-modules-accepted"),
             acceptPollAttempts = reloadModulesAcceptPollAttempts,
         )
     }
@@ -739,8 +739,8 @@ internal object RootRecovery {
         EXPECTED_BOOT=${shellQuote(bootToken)}
         ACCEPTED=${shellQuote(acceptedPath)}
         ACCEPTED_VALUE='$ACCEPTED_MARKER'
-        LOCK='/data/local/tmp/.rmg-reload-modules-owner'
-        KSUD_OUT='/data/local/tmp/rmg-reload-modules-ksud.log'
+        LOCK='/data/local/tmp/.rmgnext-reload-modules-owner'
+        KSUD_OUT='/data/local/tmp/rmgnext-reload-modules-ksud.log'
         KSUD=$KSUD_PATH
         STAGE='/data/local/tmp/.ksud-stage'
 

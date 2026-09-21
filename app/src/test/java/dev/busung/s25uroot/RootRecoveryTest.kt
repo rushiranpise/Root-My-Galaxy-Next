@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val BOOT = "0f2a4c6e-1b2d-4f6a-8c0e-2d4f6a8c0e2d"
-private const val ACCEPTED = "/data/local/tmp/.rmg-restart-zygote-accepted"
+private const val ACCEPTED = "/data/local/tmp/.rmgnext-restart-zygote-accepted"
 private const val REPORT = "/data/user/0/dev.busung.s25uroot/files/framework-restart-report"
 
 
@@ -247,7 +247,7 @@ class RootRecoveryTest {
         val script = RootRecovery.softRebootScript(BOOT, ACCEPTED)
 
         assertTrue(script.contains("another-soft-reboot-owns-this-boot"))
-        assertTrue(script.contains("LOCK='/data/local/tmp/.rmg-soft-reboot-owner'"))
+        assertTrue(script.contains("LOCK='/data/local/tmp/.rmgnext-soft-reboot-owner'"))
     }
 
     @Test
@@ -483,10 +483,10 @@ class RootRecoveryTest {
         val script = RootRecovery.reloadModulesScript(BOOT, ACCEPTED)
 
         assertTrue(script.contains("another-reload-owns-this-boot"))
-        assertTrue(script.contains("LOCK='/data/local/tmp/.rmg-reload-modules-owner'"))
+        assertTrue(script.contains("LOCK='/data/local/tmp/.rmgnext-reload-modules-owner'"))
         // Its own lock: a reload and a soft reboot are different actions and must not exclude each
         // other by sharing one owner file.
-        assertFalse(script.contains(".rmg-soft-reboot-owner"))
+        assertFalse(script.contains(".rmgnext-soft-reboot-owner"))
     }
 
     @Test

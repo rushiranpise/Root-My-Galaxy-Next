@@ -2036,19 +2036,30 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
         // `mv` into an existing directory nests the source inside it, so the two scripts below
         // check for the backup first and refuse rather than bury a module tree somewhere else.
-        /** Where a wireless run stages its helper, payload and log, all under the shell's own directory. */
-        private const val ADB_HELPER_PATH = "/data/local/tmp/rmg-ksud-helper"
-        private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmg-payload"
-        private const val ADB_LOG_PATH = "/data/local/tmp/rmg-exploit.log"
+        /**
+         * Where a wireless run stages its helper, payload and log, all under the shell's own directory.
+         *
+         * The `rmgnext-` prefix is the fork's own generation of names. Both installs share one
+         * `/data/local/tmp`, and the names this app is free to choose are chosen apart from the ones the
+         * app it came from writes - [StagedResidue] is the whole picture, and [StagingSweep] is what
+         * reads it.
+         */
+        private const val ADB_HELPER_PATH = "/data/local/tmp/rmgnext-ksud-helper"
+        private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmgnext-payload"
+        private const val ADB_LOG_PATH = "/data/local/tmp/rmgnext-exploit.log"
 
         /**
          * Where the KernelSU daemon goes, whichever transport put it there.
          *
          * One path and not one per transport: the name is the payload's, not the app's - its helper
          * looks for the daemon at this exact path when it loads KernelSU itself - so a run that
-         * staged it anywhere else would leave the payload with nothing to load.
+         * staged it anywhere else would leave the payload with nothing to load. That is also why it is
+         * the one name here that does not carry the fork's prefix, and why a sweep only asks about it
+         * while there is no other install on the device that writes it too.
          */
         private const val KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
+
+        /** The copy the payload's late-load reads, and the second of the two names it owns. */
         private const val KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
         private const val ADB_KSUD_PATH = KSUD_PATH
 
@@ -2083,9 +2094,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_CACHE_OFFSET = "offset"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
-        private const val SHIZUKU_LOG_PATH = "/data/local/tmp/ksu-exploit.log"
-        private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/ksu-helper"
-        private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
+        private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
+        private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
+        private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
         private const val SHIZUKU_KSUD_PATH = KSUD_PATH
         private const val SHIZUKU_KSUD_STAGE_PATH = KSUD_STAGE_PATH
 

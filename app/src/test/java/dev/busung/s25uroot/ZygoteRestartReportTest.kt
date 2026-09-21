@@ -250,4 +250,4 @@ class ZygoteRestartReportTest {
 }
 
 /** The launcher's acknowledgement path, which this file's script checks use for their own reasons. */
-private const val REPORT_PATH_FOR_ACCEPTED = "/data/local/tmp/.rmg-restart-zygote-accepted"
+private const val REPORT_PATH_FOR_ACCEPTED = "/data/local/tmp/.rmgnext-restart-zygote-accepted"
