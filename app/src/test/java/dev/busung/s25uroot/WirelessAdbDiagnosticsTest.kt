@@ -73,7 +73,7 @@ class WirelessAdbDiagnosticsTest {
     @Test
     fun `the grant command names this app's own package`() {
         // It is shown to the user to paste, so it has to be the package they are looking at.
-        assertTrue(AdbPairing.GRANT_COMMAND.contains("dev.busung.s25uroot"))
+        assertTrue(AdbPairing.GRANT_COMMAND.contains(BuildConfig.APPLICATION_ID))
         assertTrue(AdbPairing.GRANT_COMMAND.contains("WRITE_SECURE_SETTINGS"))
     }
 

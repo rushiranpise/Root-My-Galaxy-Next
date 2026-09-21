@@ -2,6 +2,7 @@ package dev.busung.s25uroot
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -16,17 +17,67 @@ import java.io.File
 class StagingSweepTest {
 
     @Test
-    fun `every catalogued path is swept, the daemon included`() {
+    fun `every catalogued path is swept when this app is the only install`() {
         // Nothing staged in /data/local/tmp outlives the run that staged it, and the daemon is the
         // exemption worth pinning as absent: it is the largest artefact this app leaves behind and the
         // first name a detector prints.
         assertEquals(
             StagedResidue.catalog.map { it.path }.toSet(),
-            StagingSweep.removable.map { it.path }.toSet(),
+            StagingSweep.removable(otherInstallPresent = false).map { it.path }.toSet(),
         )
-        val names = StagingSweep.removable.map { it.name }
+        val names = StagingSweep.removable(false).map { it.name }
         assertTrue(names.contains("ksud-s25u-kdp"))
         assertTrue(names.contains(".ksud-stage"))
+    }
+
+    @Test
+    fun `the names both installs write are left alone while the other install is here`() {
+        // Those names are the payload's rather than either app's, so both apps write them and neither
+        // can tell whose file it is looking at. Deleting one while the other app is mid-run is deleting
+        // the payload that run is about to load, which is the one way this sweep can break something
+        // outside itself.
+        val swept = StagingSweep.removable(otherInstallPresent = true).map { it.name }.toSet()
+
+        StagedResidue.sharedWithTheOtherInstall.forEach { shared ->
+            assertFalse("$shared is swept even though the other install writes it", swept.contains(shared))
+        }
+        // And everything else still goes: the exemption must not become a sweep that stops sweeping.
+        val ours = StagedResidue.catalog
+            .map { it.name }
+            .filterNot { it in StagedResidue.sharedWithTheOtherInstall }
+        assertTrue("the exemption covers the whole catalogue", ours.isNotEmpty())
+        assertEquals(ours.toSet(), swept)
+    }
+
+    @Test
+    fun `no name this app chooses is ever exempt from the sweep`() {
+        // The list is "what we may not rename", not "what we decided not to clean": a name this fork
+        // picks that ended up on it would quietly shrink the sweep on every device that also has the
+        // other app installed, which is the failure nobody would report.
+        val catalogued = StagedResidue.catalog.map { it.name }.toSet()
+
+        StagedResidue.sharedWithTheOtherInstall.forEach { shared ->
+            assertTrue(
+                "$shared is exempted but is not in the catalogue, so nothing reads it",
+                catalogued.contains(shared),
+            )
+            assertFalse(
+                "$shared carries the fork's own prefix, so it is ours to name and should be swept",
+                shared.startsWith("rmgnext-"),
+            )
+        }
+        // The socket is nobody's to rename: the payload's daemon creates it, under that name, on both
+        // installs.
+        assertTrue(StagedResidue.sharedWithTheOtherInstall.contains("temp_su.sock"))
+    }
+
+    @Test
+    fun `the sibling check looks for the id this fork moved off, not for this app`() {
+        // A check for our own id would answer true on every device that has this app on it, so the
+        // sweep would be narrowed everywhere and the daemon copy would stay in /data/local/tmp after
+        // every run - a bug that reads like a deliberate policy.
+        assertNotEquals(BuildConfig.APPLICATION_ID, SiblingInstall.PACKAGE)
+        assertEquals("dev.busung.s25uroot", SiblingInstall.PACKAGE)
     }
 
     @Test
@@ -69,16 +120,23 @@ class StagingSweepTest {
 
     @Test
     fun `everything a detector names as temp-root residue is swept, the daemon aside`() {
-        val swept = StagingSweep.removable.map { it.name }
-        assertTrue(swept.contains("ksu-helper"))
-        assertTrue(swept.contains("ksu-payload"))
+        val swept = StagingSweep.removable(otherInstallPresent = false).map { it.name }
+
+        assertTrue(swept.contains("rmgnext-helper"))
+        assertTrue(swept.contains("rmgnext-shizuku-payload"))
         assertTrue(swept.contains("temp_su.sock"))
         assertTrue(swept.contains("ksud-s25u-kdp"))
+        assertTrue(swept.contains("rmgnext-ksud-helper"))
+        assertTrue(swept.contains("rmgnext-payload"))
+        assertTrue(swept.contains("rmgnext-shizuku-exploit.log"))
+        assertTrue(swept.contains("rmgnext-soft-reboot-keeper.sh"))
+        assertTrue(swept.contains(".rmgnext-soft-reboot-accepted"))
+        // The names this fork no longer writes are swept too, and that is deliberate: a device that ran
+        // one of its earlier builds still has them, and the older app's names are the ones detectors
+        // were reading when they reported this app.
+        assertTrue(swept.contains("ksu-helper"))
         assertTrue(swept.contains("rmg-ksud-helper"))
-        assertTrue(swept.contains("rmg-payload"))
-        assertTrue(swept.contains("ksu-exploit.log"))
-        assertTrue(swept.contains("rmg-soft-reboot-keeper.sh"))
-        assertTrue(swept.contains(".rmg-soft-reboot-accepted"))
+        assertTrue(swept.contains("rmg-reload-modules-ksud.log"))
     }
 
     @Test

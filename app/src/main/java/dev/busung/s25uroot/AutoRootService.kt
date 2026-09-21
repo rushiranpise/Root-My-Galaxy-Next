@@ -672,11 +672,16 @@ class AutoRootService : Service() {
         )
         .setContentText(message)
         .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-        // The run this notification is about, once there is one: the gate's run is in this process, so the
-        // screens cannot show it live and its record is what there is to open. Before the run starts there
-        // is no record at all - the gate is still deciding - and the tap goes Home, which is where the same
-        // notification's other signs are read.
-        .setContentIntent(runRecordPendingIntent(this, viewModel?.activeRunId))
+        // The run this notification is about, once there is one. It goes to the run screen, which is the
+        // screen that knows what it can do with the name: this process is not the UI process, so the run is
+        // shown there by following the record it is writing, and a tap that arrives after the run has ended
+        // lands on the record instead. Before the run starts there is no record at all - the gate is still
+        // deciding - and the tap goes Home, which is where the same notification's other signs are read.
+        .setContentIntent(
+            viewModel?.activeRunId
+                ?.let { liveRunPendingIntent(this, it) }
+                ?: runRecordPendingIntent(this, null),
+        )
         .setOnlyAlertOnce(true)
         .setOngoing(ongoing)
         .setAutoCancel(!ongoing)

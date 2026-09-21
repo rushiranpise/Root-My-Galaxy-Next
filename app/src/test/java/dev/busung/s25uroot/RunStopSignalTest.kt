@@ -10,6 +10,19 @@ import org.junit.Test
 class RunStopSignalTest {
 
     @Test
+    fun `a stop is written for the process the run is in, not for the one that pressed it`() {
+        // The boot gate's run is in `:autoroot_gate` while the broadcast lands in the app's own process, so
+        // naming this process would leave the request waiting on a run that is somewhere else - a Stop button
+        // that appears to work and stops nothing.
+        assertEquals(777, RunActionReceiver.stopTarget(RunHolder("boot-a", 777, "run-1"), ownPid = 111))
+        assertEquals(
+            "with no run on the device there is nothing to name but this process",
+            111,
+            RunActionReceiver.stopTarget(null, ownPid = 111),
+        )
+    }
+
+    @Test
     fun `a request names one run, in one boot`() {
         val request = RunStopRequest("boot-a", 4242)
 

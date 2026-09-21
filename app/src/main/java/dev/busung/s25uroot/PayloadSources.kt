@@ -37,8 +37,29 @@ data class PayloadSource(
         get() = if (isPinned) "$branch at ${pinnedCommit.take(7)}" else branch
 
     companion object {
-        const val DEFAULT_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
+        /**
+         * This fork's payload catalog.
+         *
+         * Its own rather than the upstream one, because a fresh install has to be able to see the
+         * flavours and builds this fork publishes - the upstream catalog never will. It is only the
+         * default: a source list already saved on the device is what a run reads, and this changes
+         * only what a device with no list yet starts from.
+         */
+        const val DEFAULT_REPOSITORY = "rushiranpise/Root-My-Galaxy-Payloads"
         const val DEFAULT_BRANCH = "main"
+
+        /**
+         * The catalog this fork's payloads were copied from, artifacts and all.
+         *
+         * Named here because a manifest records where its own artifacts live, and a fork's manifest is
+         * the original one with a different owner: every entry it was copied with still names this
+         * repository. A reader that only accepted the source's own prefix therefore refused the whole
+         * catalog on its first artifact, which is what this fork's own feed did until this existed.
+         * Reading one keeps the path and re-points it at the source that was actually read, so nothing
+         * is ever fetched from here.
+         */
+        const val LEGACY_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
+        const val LEGACY_BRANCH = "main"
 
         val COMMIT_PATTERN = Regex("^[0-9a-f]{40}$")
 

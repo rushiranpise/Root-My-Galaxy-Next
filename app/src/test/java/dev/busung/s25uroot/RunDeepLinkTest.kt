@@ -107,12 +107,16 @@ class RunDeepLinkTest {
     }
 
     @Test
-    fun `the boot gate names its run and opens the record, because that run is not this process's`() {
+    fun `the boot gate names its run and lets the run screen decide what it can do with it`() {
         val bootGate = source("src/main/java/dev/busung/s25uroot/AutoRootService.kt")
 
         assertTrue(
-            "the boot gate's notification no longer opens its own run's record",
-            bootGate.contains("runRecordPendingIntent(this, viewModel?.activeRunId)"),
+            "the boot gate's notification no longer sends its run to the run screen",
+            bootGate.contains("liveRunPendingIntent(this, it)"),
+        )
+        assertTrue(
+            "a notification posted before the run exists has no run to name, and goes Home as it did",
+            bootGate.contains("runRecordPendingIntent(this, null)"),
         )
     }
 
@@ -132,7 +136,7 @@ class RunDeepLinkTest {
         )
         assertTrue(
             "the boot gate's notification does not name the run it is about",
-            bootGate.contains("runRecordPendingIntent(this, viewModel?.activeRunId)"),
+            bootGate.contains("liveRunPendingIntent(this, it)"),
         )
         assertTrue(
             "the run keeps its entry id for the notification posted after it ends",
@@ -142,7 +146,7 @@ class RunDeepLinkTest {
     }
 
     @Test
-    fun `the run screen hands a run it does not have over to that run's record`() {
+    fun `the run screen follows a run it does not have, and hands over one that is not live`() {
         val screen = source("src/main/java/dev/busung/s25uroot/InstallActivity.kt")
 
         assertTrue(
@@ -150,10 +154,13 @@ class RunDeepLinkTest {
             screen.contains("intent.getStringExtra(EXTRA_RUN_ID)"),
         )
         assertTrue(
-            "a notification for a run this process does not have now opens a fresh install screen, which " +
-                "offers a second run while describing the first",
-            screen.contains("openedRunId != installViewModel.activeRunId") &&
-                screen.contains("runRecordIntent(this@InstallActivity, openedRunId)"),
+            "a notification for a run another process is writing no longer reaches the follow loop, so the " +
+                "screen would fall back to one about a run of its own",
+            screen.contains("handedOverRun") && screen.contains("followedRun("),
+        )
+        assertTrue(
+            "a run that has ended or is gone is handed to its record, which is where a verdict lives",
+            screen.contains("runRecordIntent(this@InstallActivity, wanted)"),
         )
     }
 

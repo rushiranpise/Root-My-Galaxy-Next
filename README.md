@@ -1,23 +1,36 @@
-# Root My Galaxy
+# Root My Galaxy Next
 
 <img width="108" height="108" alt="sprout_icon_108" src="https://github.com/user-attachments/assets/2ba0e360-0876-489c-b256-f75df7589785" />
 
 
-Root My Galaxy is a one-click installer for explicitly
-supported Samsung model and kernel combinations. The application itself is kept separate
-from device offsets, native exploit payloads, and KernelSU build artifacts.
+Root My Galaxy Next is a one-click installer for explicitly supported Samsung model and
+kernel combinations, and an independent fork of
+[Root My Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy) by BuSung-dev. It keeps that
+app's device feed, payload contract and KernelSU-first approach, and adds to it: KernelSU-Next
+and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions, root on
+boot through a verified handoff, wireless ADB pairing as a shell transport, Shizuku started at
+boot, a logs tab, filterable run history, and the repair actions once the kernel is loaded.
+
+It installs as its own app (`dev.rushiranpise.rmgnext`), so it can sit beside the original:
+neither upgrades the other, and this one starts with no settings, no history and no superuser
+grant of its own.
 
 
-[Latest release](https://github.com/BuSung-dev/Root-My-Galaxy/releases)
+[Latest release](https://github.com/rushiranpise/Root-My-Galaxy-Next/releases)
 
-The device feed and native payloads are maintained in
-[Root-My-Galaxy-Payloads](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads).
+The device feed and native payloads used here are maintained in
+[Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads), a fork of
+[the original catalog](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads).
 
 ## Application
 
-<img width="200" src="https://github.com/user-attachments/assets/da6d0a0a-e5aa-41c3-9b38-7ec01c08c3bd" />
-<img width="200" src="https://github.com/user-attachments/assets/a9142c17-4e2f-4b18-8c03-fe17e531aa3a" />
-<img width="200" src="https://github.com/user-attachments/assets/7af17f0c-7827-47c8-ab23-a985a019e972" />
+<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
+<img width="200" alt="Settings, grouped into sections" src="docs/screenshots/settings.png" />
+<img width="200" alt="The app log" src="docs/screenshots/logs.png" />
+
+From left to right: Home with the live status card, the payload sheet, Settings, and the app log. All
+four are this fork's own build, capturing the KernelSU and KernelSU-Next payload flavours it publishes
+beside the upstream ones.
 
 The app selects a payload whose model list and three-part kernel version match
 the phone. For example, `6.6.98-android15-8-...` matches `6.6.98`. Advanced
@@ -125,9 +138,9 @@ lists the GitHub `owner/repository` and branch of every catalog the app may use,
 per entry to enable or disable it and a delete action to drop it. The sheet is the right shape
 for this form: it rises with the keyboard, so the repository and branch fields and their Add
 button stay visible on a short screen, where an alert dialog's buttons end up behind the IME. The built-in feed
-([Root-My-Galaxy-Payloads](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads)) is the
+([Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads)) is the
 default entry and can be restored with one button, so pointing the list at a testing branch
-for payloads that are not upstream yet does not cost you the official catalog.
+for payloads that are not in it yet does not cost you that catalog.
 
 Adding a source reads it before it is saved: the repository is resolved to a commit, its
 `support/targets-v3.json` is downloaded and parsed, and only then does it join the list, so a
@@ -1115,7 +1128,11 @@ checkout without the keystore, and the shared key matters everywhere else, becau
 key is generated per machine: a debug APK built on a CI runner could not be installed over the
 previous one, or over the signed release APK, without an uninstall.
 
-Upstream's app is signed differently, so switching from it needs one uninstall.
+This fork is its own app, and that is what those lines stop applying at: it carries its own
+package id (`dev.rushiranpise.rmgnext`) and its own signature, so it installs *beside* Root My
+Galaxy rather than over it. The original keeps working if you leave it installed, neither build
+can upgrade the other, and a phone that has already allowed the original's superuser request has
+allowed nothing for this one.
 
 ## Releases
 

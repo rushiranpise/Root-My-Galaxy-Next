@@ -1210,8 +1210,6 @@ private fun RootApp(
                         openEntryId = openedRunEntry,
                         onEntryOpened = onOpenedRunEntryHandled,
                         onReloadHistory = installViewModel::reloadHistory,
-                        onRunPayloadAgain = { selectionId -> openInstaller(selectionId) },
-                        onRestartAndRetry = { installViewModel.armRetryAfterReboot() },
                     )
                     AppPage.Logs -> LogsPage(padding)
                     AppPage.Settings -> SettingsPage(
@@ -1549,10 +1547,15 @@ private fun OverviewPage(
                 // a whole build label, and a Row hands its unweighted children the width they ask for - so
                 // the button was pushed past the right edge and clipped by the list. It was there on a
                 // tablet and gone on a phone, which is the shape of a bug this header had no room to show.
+                //
+                // Medium rather than large since the fork's own name: "Root My Galaxy Next" is a third
+                // longer than the name this header was laid out for, and at 32sp it ended in an ellipsis on
+                // a phone - the app's own name, unreadable on the screen that shows it. 28sp is the largest
+                // step that fits all of it beside the power button.
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.headlineLarge,
+                        style = MaterialTheme.typography.headlineMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -2362,6 +2365,22 @@ private fun InfoRow(
 private const val HISTORY_LIVE_TICK_MILLIS = 1000L
 
 /**
+ * How long the page waits between looking for a run it was asked to open but cannot find yet.
+ *
+ * Short, because the entry is already on disk when the notification that named it was posted - what the
+ * wait is for is this process's copy of the history being older than that run, not the entry arriving.
+ */
+private const val RUN_LOOKUP_TICK_MILLIS = 400L
+
+/**
+ * How many times it looks before deciding the device does not have that run.
+ *
+ * Bounded for the same reason the live tick is: a request that can never be answered must not leave the page
+ * reloading a file forever, and eight looks over three seconds is longer than a file read needs.
+ */
+private const val RUN_LOOKUP_ATTEMPTS = 8
+
+/**
  * The result of the entry this page is showing, from the whole history rather than the filtered list.
  *
  * Read from the full list because it is asked about a run in flight: a filter that hides the entry would
@@ -2385,10 +2404,6 @@ private fun HistoryPage(
     onEntryOpened: () -> Unit,
     /** Re-read the history from disk, for a run another process is still writing. */
     onReloadHistory: () -> Unit,
-    /** Start a recorded run's payload again, from a failed record that offers it. */
-    onRunPayloadAgain: (String) -> Unit,
-    /** Arm the one-shot retry for whatever the app last attempted, and ask for the restart. */
-    onRestartAndRetry: suspend () -> Boolean,
 ) {
     val view = LocalView.current
     val context = LocalContext.current
@@ -2467,24 +2482,52 @@ private fun HistoryPage(
         resultFilter = HistoryFilter.All
         selectionIds = emptySet()
     }
-    // Opened only once the entry is in the list: it arrives with an intent, and the list is read from disk
-    // a moment later, so a page that opened the id it was handed would open nothing at all. The caller is
-    // told when it has been opened, so a return to this page does not reopen it.
+    // Opened once the entry is in the list: it arrives with an intent, and this page's copy of the history
+    // was read when the app started - which can be before the run the intent names began, since a boot run
+    // writes its entry from another process. So a miss is looked for again rather than believed, and the
+    // look is what turns "the tap did nothing" into the run it asked for.
+    //
+    // Bounded, because an entry that never turns up is one this device does not have - a record deleted
+    // since. That case says so and drops the request, which is the part that matters: the page used to do
+    // nothing at all, leaving whatever run was already on screen looking like the one that was asked for.
+    // The caller is told either way, so a return to this page does not reopen it.
+    var looksForRun by remember(openEntryId) { mutableStateOf(0) }
     LaunchedEffect(openEntryId, history) {
         val wanted = openEntryId ?: return@LaunchedEffect
         if (history.any { it.id == wanted }) {
+            // A filter left over from earlier must not stand in the way of the run something asked to see:
+            // the request names one run, and a list that hides it would open nothing at all.
+            if (filtered.none { it.id == wanted }) resultFilter = HistoryFilter.All
             selectedHistoryId = wanted
             onEntryOpened()
+            return@LaunchedEffect
         }
+        if (looksForRun >= RUN_LOOKUP_ATTEMPTS) {
+            onEntryOpened()
+            scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.history_run_not_here)) }
+            return@LaunchedEffect
+        }
+        looksForRun++
+        delay(RUN_LOOKUP_TICK_MILLIS)
+        onReloadHistory()
     }
     // A run another process is on - the boot gate's, above all - writes its entry as it goes, so the record
     // is live and re-reading it is what makes this screen show that run rather than a snapshot of it.
-    // Stopped as soon as the entry stops being a run in flight.
+    //
+    // Two things say a run is still going and either is enough. The stored verdict is the usual one. The
+    // shared record is the other, and it is not redundant: an app that opens while a boot run is in flight
+    // closes every unfinished entry it thinks was interrupted, so a record can read failed while the process
+    // that owns it is still writing it - and a screen that stopped following on the verdict alone would stop
+    // on a run that is happening. The follow ends when neither says so, and the reload that shows the run's
+    // own next line is what puts the verdict back.
     LaunchedEffect(selectedHistoryId, selectedEntryResult(history, selectedHistoryId)) {
-        if (selectedEntryResult(history, selectedHistoryId) != InstallRunResult.Running) {
-            return@LaunchedEffect
-        }
         while (true) {
+            val claim = RunInFlight.holder(context)?.entryId
+            if (selectedEntryResult(history, selectedHistoryId) != InstallRunResult.Running &&
+                claim != selectedHistoryId
+            ) {
+                return@LaunchedEffect
+            }
             delay(HISTORY_LIVE_TICK_MILLIS)
             onReloadHistory()
         }
@@ -2545,8 +2588,6 @@ private fun HistoryPage(
                 padding = padding,
                 entry = entry,
                 onBack = { selectedHistoryId = null },
-                onRunPayloadAgain = onRunPayloadAgain,
-                onRestartAndRetry = onRestartAndRetry,
             )
         }
     }
@@ -2931,19 +2972,9 @@ private fun HistoryDetail(
     padding: PaddingValues,
     entry: InstallHistoryEntry,
     onBack: () -> Unit,
-    /** Starts a run of the record's own payload choice, the way the payload sheet starts one. */
-    onRunPayloadAgain: (String) -> Unit,
-    /** Arms the one-shot retry and asks for the restart, and says whether the restart was taken. */
-    onRestartAndRetry: suspend () -> Boolean,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
-    // What the app last attempted, read here rather than passed in because it is the one input that is not
-    // the record: a record written when the phone tried something else since still has answers, and which
-    // ones it has depends on what is on the device now. Cheap by design - the boot gate asks the same
-    // question in front of the one attempt its boot gets.
-    val attempted = remember(entry.id, entry.result) { AttemptedPayloadStore.describe(context) }
-    val retryPlan = remember(entry, attempted) { recordRetryPlan(entry, attempted) }
     val exportLogLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -2993,15 +3024,6 @@ private fun HistoryDetail(
             }
         }
         item { HistoryResultCard(entry) }
-        if (retryPlan.answers.isNotEmpty() || retryPlan.gaps.isNotEmpty()) {
-            item {
-                HistoryRetryCard(
-                    plan = retryPlan,
-                    onRestartAndRetry = onRestartAndRetry,
-                    onRunPayloadAgain = onRunPayloadAgain,
-                )
-            }
-        }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -3019,160 +3041,6 @@ private fun HistoryDetail(
                 )
             }
         }
-    }
-}
-
-/**
- * A failed record's answers, in the same three the run screen asks with.
- *
- * The shape of the problem is the one the tap on a run notification had: the screen a run's answers live on
- * is the run screen, and a run read later from the history has no screen there - it has a log and a verdict,
- * which is where a failure stops being actionable. So the answers travel with the record, off the same rows
- * the run screen draws, and the two that cannot be re-resolved are said out loud rather than left as an
- * absence.
- */
-@Composable
-private fun HistoryRetryCard(
-    plan: RecordRetryPlan,
-    onRestartAndRetry: suspend () -> Boolean,
-    onRunPayloadAgain: (String) -> Unit,
-) {
-    val view = LocalView.current
-    val scope = rememberCoroutineScope()
-    var arming by remember { mutableStateOf(false) }
-    // Seconds left of the wait, or null when none is running. Held here, not in a store: it is a countdown
-    // on a screen, and leaving the screen cancels it with nothing left behind - the same as the run screen's.
-    var waitRemaining by remember { mutableStateOf<Int?>(null) }
-    // The restart that could not be asked for. The retry is armed either way, so the only thing to say is
-    // the part the app could not do.
-    var restartRefused by remember { mutableStateOf(false) }
-    val selectionId = plan.selectionId
-    LaunchedEffect(waitRemaining != null) {
-        val selection = selectionId ?: return@LaunchedEffect
-        if (waitRemaining == null) return@LaunchedEffect
-        val startedAt = SystemClock.elapsedRealtime()
-        while (true) {
-            val left = InBootRetry.remainingSeconds(SystemClock.elapsedRealtime() - startedAt)
-            waitRemaining = left
-            if (left <= 0) break
-            delay(1_000)
-        }
-        waitRemaining = null
-        onRunPayloadAgain(selection)
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.retry_choice_title),
-                style = MaterialTheme.typography.titleLarge,
-            )
-            val waiting = waitRemaining
-            if (waiting != null && selectionId != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.retry_waiting_body, waiting),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = {
-                        clickHaptic(view)
-                        waitRemaining = null
-                    }) {
-                        Text(stringResource(R.string.retry_waiting_cancel))
-                    }
-                    Button(onClick = {
-                        clickHaptic(view)
-                        waitRemaining = null
-                        onRunPayloadAgain(selectionId)
-                    }) {
-                        Text(stringResource(R.string.retry_waiting_start))
-                    }
-                }
-            } else {
-                for (answer in plan.answers) {
-                    when (answer) {
-                        RecordRetryAnswer.RestartAndRetry -> RetryOption(
-                            label = stringResource(R.string.retry_after_reboot),
-                            detail = stringResource(R.string.retry_option_reboot_detail),
-                            enabled = !arming,
-                            emphasis = RetryOptionEmphasis.Primary,
-                            onClick = {
-                                clickHaptic(view)
-                                arming = true
-                                scope.launch {
-                                    val restarted = onRestartAndRetry()
-                                    arming = false
-                                    restartRefused = !restarted
-                                }
-                            },
-                        )
-
-                        RecordRetryAnswer.WaitThenRetry -> RetryOption(
-                            label = stringResource(R.string.retry_wait),
-                            detail = stringResource(R.string.retry_option_wait_detail),
-                            enabled = !arming,
-                            onClick = {
-                                clickHaptic(view)
-                                waitRemaining = InBootRetry.remainingSeconds(0)
-                            },
-                        )
-
-                        RecordRetryAnswer.TryNow -> RetryOption(
-                            label = stringResource(R.string.retry_now),
-                            detail = stringResource(R.string.retry_option_now_detail),
-                            enabled = !arming && selectionId != null,
-                            emphasis = RetryOptionEmphasis.Quiet,
-                            onClick = {
-                                clickHaptic(view)
-                                selectionId?.let(onRunPayloadAgain)
-                            },
-                        )
-                    }
-                }
-            }
-            for (gap in plan.gaps) {
-                Text(
-                    text = stringResource(
-                        when (gap) {
-                            RecordRetryGap.LastAttemptWasAnotherPayload ->
-                                R.string.record_retry_other_payload
-                            RecordRetryGap.PayloadNotRecorded -> R.string.record_retry_no_payload
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-    if (restartRefused) {
-        AlertDialog(
-            onDismissRequest = { restartRefused = false },
-            icon = { Icon(Icons.Rounded.RestartAlt, contentDescription = null) },
-            title = { Text(stringResource(R.string.retry_armed_title)) },
-            text = { Text(stringResource(R.string.retry_armed_body)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    restartRefused = false
-                }) {
-                    Text(stringResource(R.string.action_done))
-                }
-            },
-        )
     }
 }
 

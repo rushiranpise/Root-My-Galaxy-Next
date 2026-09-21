@@ -17,6 +17,12 @@
     what these add is everything the sheet offers that the system's menu does not.
 -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+        `android:targetPackage` is the build's applicationId, which in this fork is deliberately not the
+        Java package the action strings above name: only the former decides which app the launcher opens,
+        and the two installs can both be present. RestartShortcutTest reads this attribute against
+        BuildConfig.APPLICATION_ID, so a rename here cannot go unnoticed.
+    -->
     <shortcut
         android:shortcutId="restart_options"
         android:enabled="true"
@@ -25,7 +31,7 @@
         android:shortcutLongLabel="@string/reboot_sheet_title">
         <intent
             android:action="dev.busung.s25uroot.action.RESTART_OPTIONS"
-            android:targetPackage="dev.busung.s25uroot"
+            android:targetPackage="dev.rushiranpise.rmgnext"
             android:targetClass="dev.busung.s25uroot.MainActivity" />
     </shortcut>
 
@@ -46,7 +52,7 @@
         android:shortcutLongLabel="@string/shortcut_soft_restart_long">
         <intent
             android:action="dev.busung.s25uroot.action.SOFT_RESTART"
-            android:targetPackage="dev.busung.s25uroot"
+            android:targetPackage="dev.rushiranpise.rmgnext"
             android:targetClass="dev.busung.s25uroot.MainActivity" />
     </shortcut>
 </shortcuts>

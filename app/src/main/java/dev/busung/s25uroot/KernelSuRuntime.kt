@@ -135,6 +135,33 @@ internal data class ControlReadings(
 }
 
 /**
+ * The same readings, with the module list supplied by a route the first attempt could not use.
+ *
+ * The list is the one proof a device with nothing granted yet can produce - the app's own read of
+ * `/proc/modules` is denied by policy and the shell route needs Shizuku - so a run that holds bootstrap root
+ * and nothing else has to be able to fill this reading in itself, or a healthy load is refused with no way
+ * to have seen it.
+ *
+ * A null [loaded] changes nothing: it means the second route could not look either, which is what the
+ * readings already say. A list already read is never overridden, because a reading that answered is a
+ * reading, whoever else looks afterwards.
+ */
+internal fun ControlReadings.withModuleList(loaded: Boolean?): ControlReadings =
+    if (loaded == null || moduleLoaded != null) this else copy(moduleLoaded = loaded)
+
+/**
+ * Whether a reading that could have confirmed the load actually answered, rather than every one of them
+ * being silent or unable to look.
+ *
+ * The module list is the reading this is about, and it has three answers rather than two: the kernel has
+ * the module, it does not, and the list could not be read. "Could not be read" is the common one on a
+ * first install, where nothing has been granted and there may be no shell - and it needs different words
+ * from a load that was looked for and not found, because only the second one is a reason to try again.
+ */
+internal fun ControlReadings.lookedAtTheKernel(): Boolean =
+    moduleLoaded != null || helperOutput.isNotBlank()
+
+/**
  * The live probes behind [controlProofs], for the app to call on the device.
  *
  * Everything here is best-effort and reports absence rather than throwing: a probe failing is a

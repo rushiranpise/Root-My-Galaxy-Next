@@ -50,6 +50,18 @@ data class InstallHistoryEntry(
     /** Where a failed run stopped, so the detail screen can say more than "Failed". */
     val failureStage: RunStage? = null,
     val failureReason: String? = null,
+    /**
+     * Where a run in flight has got to, written as it moves and cleared when it ends.
+     *
+     * The log is what a reader of the record gets; this is the part a *bar* needs, and it is here for one
+     * case: a run in another process - the boot gate's - cannot be shown by any screen in the UI process,
+     * whose run screen draws its progress from the view model. Publishing the phase is what lets that screen
+     * follow a run it does not own and draw the same bar, instead of sending the reader to a log.
+     *
+     * Null for a run that has ended, and for every record written before this existed: a record with no phase
+     * is one nothing can draw a bar for, which is not the same as a run at its first step.
+     */
+    val phase: InstallPhase? = null,
 )
 
 /**
@@ -113,6 +125,15 @@ class InstallHistoryStore(private val context: Context) {
         usedShizuku = AppPreferences.shizukuMode(context),
     ).also(::save)
 
+    /**
+     * One entry, by its id.
+     *
+     * For the screen that follows a run: it is handed the id a notification named and needs the record, and
+     * reading the whole directory once a second to pick one file out of it would be a scan per tick.
+     */
+    fun entry(id: String): InstallHistoryEntry? =
+        File(directory, "$id.json").takeIf(File::isFile)?.let(::decodeOrQuarantine)
+
     fun save(entry: InstallHistoryEntry) {
         val target = File(directory, "${entry.id}.json")
         val atomicFile = AtomicFile(target)
@@ -145,6 +166,7 @@ class InstallHistoryStore(private val context: Context) {
         .put("usedShizuku", entry.usedShizuku)
         .put("failureStage", entry.failureStage?.name ?: JSONObject.NULL)
         .put("failureReason", entry.failureReason ?: JSONObject.NULL)
+        .put("phase", entry.phase?.name ?: JSONObject.NULL)
 
     private fun decodeOrQuarantine(file: File): InstallHistoryEntry? = try {
         decode(AtomicFile(file).openRead().use { it.readBytes() })
@@ -175,6 +197,10 @@ class InstallHistoryStore(private val context: Context) {
             failureStage = value.optionalString("failureStage")
                 ?.let { name -> RunStage.entries.firstOrNull { it.name == name } },
             failureReason = value.optionalString("failureReason"),
+            // Read the same way, and forgiving for the same reason: a phase this build does not know is a
+            // record written by another one, and a bar that cannot be drawn is not a record that cannot be read.
+            phase = value.optionalString("phase")
+                ?.let { name -> InstallPhase.entries.firstOrNull { it.name == name } },
         )
     }
 

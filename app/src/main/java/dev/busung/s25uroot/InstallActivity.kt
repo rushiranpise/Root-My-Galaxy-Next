@@ -126,16 +126,40 @@ class InstallActivity : ComponentActivity() {
                 themeMode = AppPreferences.themeMode(this),
             ) {
                 val installState by installViewModel.state.collectAsStateWithLifecycle()
-                BackHandler(enabled = installState.busy) {}
-                // A notification names the run it is about, and this screen is only the right one for a run
-                // *this process* has. Anything else - the boot gate's run, a run whose process is gone - is
-                // not here, and a fresh install screen would offer to start a second run while the
-                // notification was describing the first. The run's record is what has something to show.
+                // A run this process is not in, followed from the record it is writing. Non-null only while
+                // something is still writing that entry - see the loop below, which is the only thing that
+                // sets it.
+                var followed by remember { mutableStateOf<FollowedRun?>(null) }
+                // Whether this screen was opened for someone else's run at all, which is the case it must not
+                // answer with an install screen: a fresh one would offer to start a second run while the
+                // notification was describing the first. Held so the frames before the record has been read
+                // are a wait rather than that screen.
+                val handedOverRun = openedRunId != null && openedRunId != installViewModel.activeRunId
+                // Back is only held for a run in this process, where leaving would take the screen away with
+                // the run still on it. Leaving a followed run costs nothing: the run is elsewhere, and this
+                // screen is a reader of it.
+                BackHandler(enabled = installState.busy && !handedOverRun) {}
+                // A notification names the run it is about, and this screen can do one of three things with it:
+                // show it, because this process has it; **follow** it, because another process is writing it
+                // right now and the record says where it has got to; or step aside for the record, because a
+                // run that has ended has a verdict and a log there and this screen has neither.
                 LaunchedEffect(openedRunId, installViewModel.activeRunId) {
-                    if (openedRunId != null && openedRunId != installViewModel.activeRunId) {
-                        startActivity(runRecordIntent(this@InstallActivity, openedRunId))
-                        finish()
+                    if (!handedOverRun) return@LaunchedEffect
+                    val wanted = openedRunId ?: return@LaunchedEffect
+                    // Re-read while it is live. The run screen's own state cannot be reached from here, so the
+                    // entry is what this screen draws: the same bar, the same steps, and the log as it arrives.
+                    while (true) {
+                        val run = followedRun(
+                            entry = InstallHistoryStore(this@InstallActivity).entry(wanted),
+                            holder = RunInFlight.holder(this@InstallActivity),
+                        )
+                        if (run == null) break
+                        followed = run
+                        delay(FOLLOW_TICK_MILLIS)
                     }
+                    // Finished, gone, or never live: the record is where an outcome belongs.
+                    startActivity(runRecordIntent(this@InstallActivity, wanted))
+                    finish()
                 }
                 LaunchedEffect(startInstall, selectionId, answer) {
                     when {
@@ -152,15 +176,44 @@ class InstallActivity : ComponentActivity() {
                     onRunWithoutShizuku = { installViewModel.runHeldRunWithoutShizuku(selectionId) },
                     onDismiss = installViewModel::dismissTransportPrompt,
                 )
-                InstallScreen(
-                    installState = installState,
-                    onRetry = { installViewModel.install(selectionId) },
-                    onSkipBootSettle = { installViewModel.skipBootSettle() },
-                    onStop = { installViewModel.stopRun() },
-                    onRebootAndRetry = { installViewModel.armRetryAfterReboot() },
-                    onClose = ::finish,
-                    onOpenSetting = ::openSettingsCard,
-                )
+                val running = followed
+                if (handedOverRun && running == null) {
+                    // The wait before the first read lands, and the last frame before the record takes over.
+                    // A spinner rather than the install screen, which would be offering a run of its own
+                    // beside the one the notification was about.
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        LoadingIndicator(modifier = Modifier.size(32.dp))
+                    }
+                } else {
+                    InstallScreen(
+                        installState = running?.state() ?: installState,
+                        followed = running != null,
+                        onRetry = { installViewModel.install(selectionId) },
+                        onSkipBootSettle = { installViewModel.skipBootSettle() },
+                        onStop = {
+                            val target = running
+                            if (target == null) {
+                                installViewModel.stopRun()
+                            } else {
+                                // Named for the process the run is in, read again here rather than reused from
+                                // the tick: between the two the run may have ended, and a stop written for a
+                                // process that is gone is one nothing will ever read.
+                                val live = RunInFlight.holder(this@InstallActivity)
+                                if (live?.entryId == target.entry.id) {
+                                    RunStopSignal.request(
+                                        context = this@InstallActivity,
+                                        bootToken = live.bootToken,
+                                        pid = live.pid,
+                                    )
+                                    AppLog.warn(AppLogTags.RUN, "Stop requested from the followed run")
+                                }
+                            }
+                        },
+                        onRebootAndRetry = { installViewModel.armRetryAfterReboot() },
+                        onClose = ::finish,
+                        onOpenSetting = ::openSettingsCard,
+                    )
+                }
             }
         }
     }
@@ -234,6 +287,14 @@ internal val installerSteps = listOf(
 @Composable
 private fun InstallScreen(
     installState: InstallUiState,
+    /**
+     * A run another process is writing, drawn from its record rather than from this screen's view model.
+     *
+     * Two things change and both are about reach: the boot-settle wait cannot be cut short from here (the
+     * flag that cuts it lives in the run's own process), and nothing on this screen may offer to start or
+     * answer a run. Everything drawn from the record - the bar, the steps, the log - is the same.
+     */
+    followed: Boolean = false,
     onRetry: () -> Unit,
     onSkipBootSettle: () -> Unit,
     onStop: () -> Unit,
@@ -313,8 +374,10 @@ private fun InstallScreen(
                 if (runControlsOffered(installState.phase, installState.busy)) {
                     RunActionBar {
                         // The wait can be cut short while the app is holding the run: the wait is a floor and
-                        // not a rule, and the user is the one who knows whether this boot has settled.
-                        if (installState.phase == InstallPhase.Settling) {
+                        // not a rule, and the user is the one who knows whether this boot has settled. Not
+                        // for a followed run: that flag is in the process running it, and a button that
+                        // cannot reach it is worse than no button.
+                        if (installState.phase == InstallPhase.Settling && !followed) {
                             FilledTonalButton(
                                 onClick = {
                                     clickHaptic(view)
@@ -424,10 +487,12 @@ private fun InstallScreen(
                     style = MaterialTheme.typography.headlineLarge,
                 )
                 Text(
-                    text = if (installState.busy) {
-                        stringResource(R.string.install_keep_open)
-                    } else {
-                        installState.message
+                    text = when {
+                        // A followed run is not held open by this screen - it is held by the process
+                        // running it - so the line under the title is the run's own last word instead.
+                        followed -> installState.message
+                        installState.busy -> stringResource(R.string.install_keep_open)
+                        else -> installState.message
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

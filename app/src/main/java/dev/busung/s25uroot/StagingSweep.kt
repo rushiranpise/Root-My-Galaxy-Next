@@ -80,6 +80,13 @@ internal sealed interface SweepOutcome {
         val left: List<String>,
         /** What `rm` said about the paths it would not remove, empty when it said nothing. */
         val complaint: String,
+        /**
+         * Names this sweep deliberately never asked about, because the other install writes them too.
+         *
+         * Empty whenever that install is not present, which is the usual case: the sweep then asks
+         * about every catalogued path, this list included.
+         */
+        val leftToTheOtherInstall: List<String> = emptyList(),
     ) : SweepOutcome {
 
         /**
@@ -114,21 +121,45 @@ internal sealed interface SweepOutcome {
     fun logLine(context: Context): String? = when (this) {
         NoShell -> context.getString(R.string.staging_sweep_no_shell)
         SkippedRun -> context.getString(R.string.staging_sweep_skipped)
-        is Done -> when (verdict) {
-            SweepVerdict.Refused -> context.getString(
-                R.string.staging_sweep_refused,
-                found.size,
-                complaint,
-            )
-            SweepVerdict.LeftBehind -> context.getString(
-                R.string.staging_sweep_left,
-                removed,
-                left.joinToString(", "),
-            )
-            SweepVerdict.Removed -> context.getString(R.string.staging_sweep_clean, removed)
-            SweepVerdict.NothingToDo -> null
+        is Done -> {
+            val swept = when (verdict) {
+                SweepVerdict.Refused -> context.getString(
+                    R.string.staging_sweep_refused,
+                    found.size,
+                    complaint,
+                )
+                SweepVerdict.LeftBehind -> context.getString(
+                    R.string.staging_sweep_left,
+                    removed,
+                    left.joinToString(", "),
+                )
+                SweepVerdict.Removed -> context.getString(R.string.staging_sweep_clean, removed)
+                SweepVerdict.NothingToDo -> null
+            }
+            // Appended rather than given a line of its own: it is a qualifier on what the sweep did,
+            // and a second line would read as a second event. It is also the only sentence here that
+            // explains a name a detector can still find in the directory.
+            val otherInstall = otherInstallNote(context, leftToTheOtherInstall)
+            when {
+                otherInstall.isEmpty() -> swept
+                swept == null -> otherInstall
+                else -> "$swept $otherInstall"
+            }
         }
     }
+
+    /**
+     * What this sweep left for the other install, or empty when there is no other install.
+     *
+     * Only the names, not what is on the device: the sweep never asked about them, so anything more
+     * would be a claim it did not make.
+     */
+    private fun otherInstallNote(context: Context, names: List<String>): String =
+        if (names.isEmpty()) {
+            ""
+        } else {
+            context.getString(R.string.staging_sweep_other_install, names.joinToString(", "))
+        }
 
     /**
      * The line for the app log when the directory was emptied on purpose, which is not a sweep.
@@ -150,13 +181,22 @@ internal enum class SweepVerdict { NothingToDo, Removed, LeftBehind, Refused }
 internal object StagingSweep {
 
     /**
-     * What a sweep removes: everything the app stages, with no exemption.
+     * What a sweep removes: everything the app stages, with one exemption and one condition.
      *
      * Not a second list. A sweep that named its own paths would be a sweep that can quietly stop
      * covering one, and the catalogue is already the list of what this app writes there - so the set is
      * the catalogue itself, and a path added to one is swept by the other the moment it is catalogued.
+     *
+     * The exemption is [StagedResidue.sharedWithTheOtherInstall], and it is asked for only while the
+     * other install is actually present. Those six names are the payload's rather than either app's, so
+     * both write them, and a sweep cannot tell whose it is looking at: deleting one while the other app
+     * is mid-run is deleting the payload that run is about to load. On a device without that install -
+     * which is every device this fork is expected to be on - the question does not arise and the
+     * exemption costs nothing, so the daemon copy is still cleaned up after every run.
      */
-    val removable: List<StagedPath> = StagedResidue.catalog
+    fun removable(otherInstallPresent: Boolean): List<StagedPath> =
+        if (!otherInstallPresent) StagedResidue.catalog
+        else StagedResidue.catalog.filterNot { it.name in StagedResidue.sharedWithTheOtherInstall }
 
     /**
      * The command: say what is there, delete, say what `rm` said about it, say what is still there.
@@ -212,7 +252,21 @@ internal object StagingSweep {
     }
 
     /** The sweep itself, through the first shell that answers. */
-    fun sweep(context: Context): SweepOutcome = remove(removable.map { it.path })
+    fun sweep(context: Context): SweepOutcome {
+        val otherInstall = SiblingInstall.isPresent(context)
+        return when (val outcome = remove(removable(otherInstall).map { it.path })) {
+            // Carried on the outcome rather than logged here: this object returns lines for its callers
+            // to log, and a note about what was left alone belongs on the same line as what was removed.
+            is SweepOutcome.Done -> outcome.copy(
+                leftToTheOtherInstall = if (otherInstall) {
+                    StagedResidue.sharedWithTheOtherInstall.sorted()
+                } else {
+                    emptyList()
+                },
+            )
+            else -> outcome
+        }
+    }
 
     /**
      * Removes these paths, one at a time from the caller's point of view and in one round trip here.

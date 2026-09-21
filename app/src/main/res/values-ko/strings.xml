@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Root My Galaxy</string>
+    <string name="app_name">Root My Galaxy Next</string>
     <string name="nav_overview">홈</string><string name="nav_history">실행 기록</string><string name="nav_settings">설정</string>
     <string name="install_confirm_title">KernelSU를 설치할까요?</string><string name="install_confirm_body">지원 프로필을 확인한 뒤 exploit과 KernelSU payload를 GitHub에서 받아 실행합니다.</string>
     <string name="action_confirm">확인</string><string name="action_cancel">취소</string><string name="action_close">닫기</string><string name="action_retry">다시 시도</string><string name="action_done">완료</string><string name="action_back">뒤로</string>

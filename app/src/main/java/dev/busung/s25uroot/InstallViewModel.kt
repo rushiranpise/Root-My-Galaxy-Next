@@ -1557,11 +1557,26 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // An exit code says the late-load command finished, not that anything is reachable now, so
         // the run states which independent reading confirmed the control channel before it claims
         // success - and refuses to claim it when none of them did.
-        val readings = KernelSuRuntime.readings(app, lateLoad.output)
+        val firstLook = KernelSuRuntime.readings(app, lateLoad.output)
+        // Then the route those readings cannot take on their own. Three of the four need a door a first
+        // install has not opened, and the fourth - the kernel's own module list - is read either by the
+        // app, which policy denies, or through a shell, which a run can be without. This run is holding
+        // bootstrap root, so it asks again the way the module handling above does, and only when nothing
+        // has answered yet: a reading that already spoke is not second-guessed.
+        val readings = firstLook.withModuleList(
+            if (firstLook.moduleLoaded == null && firstLook.proofs.isEmpty()) moduleListAsRoot() else null,
+        )
         // Said every time, not only on a refusal: the readings are how the next person to read the
         // log tells an unusable load from a check that could not see a healthy one.
         appendLog(app.getString(R.string.log_ksu_control_readings, readings.summary()))
-        require(readings.proofs.isNotEmpty()) { app.getString(R.string.error_ksu_not_ready) }
+        require(readings.proofs.isNotEmpty()) {
+            // Which of the two refusals this is, because they send a reader to different places: one is
+            // a load that is not there, the other is a check that could not be made at all.
+            app.getString(
+                if (readings.lookedAtTheKernel()) R.string.error_ksu_not_ready
+                else R.string.error_ksu_unconfirmed,
+            )
+        }
         appendLog(
             app.getString(
                 R.string.log_ksu_control_verified,
@@ -1750,6 +1765,29 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
+     * The kernel's module list, read with the root this run is still holding.
+     *
+     * The reading [KernelSuRuntime.moduleLoaded] cannot make on its own here: its two routes are the app's
+     * own read of `/proc/modules`, which policy denies, and a shell through Shizuku, which a run of this app
+     * can be without - and on a first install it usually is. That leaves the bootstrap root the exploit just
+     * obtained, which is not a lesser answer: the module list is a fact about the kernel and this is the same
+     * transport the module handling above uses to act on that kernel.
+     *
+     * Null when nothing answered, including the case the handoff is designed to have: a Samsung kernel may
+     * refuse new connections to it once KernelSU is loaded and healthy. That is not a reason for the run to
+     * die here - the refusal that follows is a refusal to claim a load, not a proof of one.
+     */
+    private suspend fun moduleListAsRoot(): Boolean? {
+        val result = runCatching { runMaintenance(MODULE_LIST_COMMAND) }.getOrNull() ?: return null
+        return when (result.code) {
+            0 -> true
+            // grep's own "nothing matched", which is an answer rather than a failure.
+            1 -> false
+            else -> null
+        }
+    }
+
+    /**
      * Runs the bootstrap helper for a short management command. Unlike the
      * exploit run there is no log file to poll, so output is drained inline
      * and a hard deadline guards against a helper that never exits — without
@@ -1865,6 +1903,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private fun setPhase(phase: InstallPhase, message: String) {
         mutableState.value = mutableState.value.copy(phase = phase, message = message)
+        // Written down as it moves, not only in memory: the phase is what a bar is drawn from, and the bar
+        // has to be drawable by a screen in the app's own process for a run that is happening in another
+        // one. The entry is saved per log line already, so this adds no write of its own.
+        updateHistory { entry -> entry.copy(phase = phase) }
         appendLog("[*] $message")
         // The run, in the shade, for the length of a run that is usually spent with the phone in a pocket.
         // Not for an unattended run: that one has the boot gate's own notification, and two of them saying
@@ -1957,6 +1999,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 completedAtMillis = System.currentTimeMillis(),
                 result = result,
                 log = mutableState.value.log,
+                // Cleared, because it means "where a run in flight has got to": a finished record that still
+                // carried a phase would be one a screen could draw a live bar for, which is the state this
+                // field exists to make visible and must not outlive.
+                phase = null,
             )
         }
         activeHistoryEntry = null
@@ -1990,19 +2036,30 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
         // `mv` into an existing directory nests the source inside it, so the two scripts below
         // check for the backup first and refuse rather than bury a module tree somewhere else.
-        /** Where a wireless run stages its helper, payload and log, all under the shell's own directory. */
-        private const val ADB_HELPER_PATH = "/data/local/tmp/rmg-ksud-helper"
-        private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmg-payload"
-        private const val ADB_LOG_PATH = "/data/local/tmp/rmg-exploit.log"
+        /**
+         * Where a wireless run stages its helper, payload and log, all under the shell's own directory.
+         *
+         * The `rmgnext-` prefix is the fork's own generation of names. Both installs share one
+         * `/data/local/tmp`, and the names this app is free to choose are chosen apart from the ones the
+         * app it came from writes - [StagedResidue] is the whole picture, and [StagingSweep] is what
+         * reads it.
+         */
+        private const val ADB_HELPER_PATH = "/data/local/tmp/rmgnext-ksud-helper"
+        private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmgnext-payload"
+        private const val ADB_LOG_PATH = "/data/local/tmp/rmgnext-exploit.log"
 
         /**
          * Where the KernelSU daemon goes, whichever transport put it there.
          *
          * One path and not one per transport: the name is the payload's, not the app's - its helper
          * looks for the daemon at this exact path when it loads KernelSU itself - so a run that
-         * staged it anywhere else would leave the payload with nothing to load.
+         * staged it anywhere else would leave the payload with nothing to load. That is also why it is
+         * the one name here that does not carry the fork's prefix, and why a sweep only asks about it
+         * while there is no other install on the device that writes it too.
          */
         private const val KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
+
+        /** The copy the payload's late-load reads, and the second of the two names it owns. */
         private const val KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
         private const val ADB_KSUD_PATH = KSUD_PATH
 
@@ -2037,11 +2094,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_CACHE_OFFSET = "offset"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
-        private const val SHIZUKU_LOG_PATH = "/data/local/tmp/ksu-exploit.log"
-        private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/ksu-helper"
-        private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/ksu-payload"
+        private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
+        private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
+        private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
         private const val SHIZUKU_KSUD_PATH = KSUD_PATH
         private const val SHIZUKU_KSUD_STAGE_PATH = KSUD_STAGE_PATH
+
+        /** The kernel's loaded modules, by name; grep's exit code is the answer. */
+        private const val MODULE_LIST_COMMAND = "/system/bin/grep -w kernelsu /proc/modules"
         private val LOG_POLL_INTERVAL = 250.milliseconds
         private val HELPER_POLL_INTERVAL = 250.milliseconds
         private val SHIZUKU_LOG_POLL_INTERVAL = 1.seconds

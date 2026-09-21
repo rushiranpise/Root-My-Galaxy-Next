@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Root My Galaxy</string>
+    <string name="app_name">Root My Galaxy Next</string>
     <string name="nav_overview">Home</string>
     <string name="nav_history">History</string>
     <string name="nav_logs">Logs</string>
@@ -85,6 +85,7 @@
     <string name="staging_sweep_refused">Staging: tried to remove %1$d staged file(s) and the shell refused some: %2$s</string>
     <string name="staging_sweep_skipped">Staging: not swept</string>
     <string name="staging_sweep_no_shell">Staging: not swept, no shell answered - what earlier runs left is still in /data/local/tmp</string>
+    <string name="staging_sweep_other_install">Staging: left alone for the other Root My Galaxy install, which uses the same names: %1$s</string>
     <string name="residue_role_daemon">KernelSU daemon</string>
     <string name="residue_role_helper">root helper</string>
     <string name="residue_role_payload">exploit payload</string>
@@ -137,8 +138,6 @@
     <string name="log_payload_may_still_run">[!] The payload could not be confirmed stopped and may still be running. Restart the phone before another attempt.</string>
     <string name="install_payload_may_still_run">The payload could not be confirmed as stopped, so it may still be running. Restart the phone before trying again. Running a second payload while the first is still active can lock up the phone.</string>
     <string name="retry_single_payload_hint">Retrying is not available because the last payload may still be running. Starting another one while it is active can lock up the phone.</string>
-    <string name="record_retry_other_payload">Restarting is not offered: the payload this app tried last is a different one, and the restart would run that instead. Run this payload again below.</string>
-    <string name="record_retry_no_payload">This run does not say which payload it used, so there is nothing to run again from here.</string>
     <string name="retry_armed_title">Retry scheduled</string>
     <string name="retry_armed_body">The app could not restart the phone because neither root nor Shizuku is available. Restart the phone yourself. The installation will start automatically after boot.</string>
     <string name="install_load_modules">Restart userspace to load modules</string>
@@ -300,6 +299,7 @@
     <string name="history_failed">Failed</string>
     <string name="history_stopped">Stopped</string>
     <string name="history_detail_title">Run details</string>
+    <string name="history_run_not_here">That run is not in the history any more.</string>
     <string name="history_started">Started: %1$s</string>
     <string name="history_completed">Completed: %1$s</string>
     <string name="history_log_empty">No log output.</string>
@@ -317,8 +317,8 @@
     <string name="action_copy_log">Copy log</string>
     <string name="log_copied">Log copied to clipboard</string>
     <string name="about">About</string>
-    <string name="about_title">About Root My Galaxy</string>
-    <string name="about_description">Info Root My Galaxy</string>
+    <string name="about_title">About Root My Galaxy Next</string>
+    <string name="about_description">Info Root My Galaxy Next</string>
     <string name="about_body">Root supported Samsung Galaxy phones using a kernel exploit.</string>
 
     <string name="install_title">Install</string>
@@ -416,7 +416,8 @@
     <string name="log_ksu_staged_late_only">[*] No shell transport was available to stage KernelSU before the exploit. The payload has no daemon to load, so KernelSU will be staged afterward.</string>
     <string name="log_ksu_control_verified">[+] KernelSU control channel verified (%1$s)</string>
     <string name="log_ksu_control_readings">[*] Control channel readings: %1$s</string>
-    <string name="error_ksu_not_ready">KernelSU loaded, but no control channel responded; root is not usable yet.</string>
+    <string name="error_ksu_not_ready">The KernelSU load finished, but nothing can reach it: the kernel lists no kernelsu module and no control channel answered. Root is not usable yet.</string>
+    <string name="error_ksu_unconfirmed">The KernelSU load finished, but nothing here could check it: reading the kernel module list needs a shell, and every other check needs root this device has not granted. Open the KernelSU manager to see whether it loaded.</string>
     <string name="error_helper_unavailable">The bootstrap helper is not executable</string>
     <string name="error_exploit_stalled">The exploit log has not changed for %1$d seconds</string>
     <string name="error_exploit_timeout">The exploit exceeded the %1$d-minute limit</string>
@@ -480,7 +481,7 @@
     <string name="repo_response_too_large">The response was too large</string>
     <string name="repo_api_limited">GitHub rate limit reached; try again in a few minutes</string>
     <string name="open_github">Open GitHub</string>
-    <string name="github_card_title">Explore Root My Galaxy</string>
+    <string name="github_card_title">Explore Root My Galaxy Next</string>
     <string name="github_card_description">View the source code and usage instructions.</string>
     <string name="action_continue">Continue anyway</string>
     <string name="action_next">Next</string>
@@ -676,7 +677,7 @@
     <string name="reboot_confirm_body">The phone will restart into %1$s and will not return to this screen on its own.
 
 Hold Power and Volume Down together for 7 seconds to restart it from there.</string>
-    <string name="recovery_shell_unavailable">KernelSU is running, but this app does not have a root shell yet. Grant Root My Galaxy superuser access in KernelSU or start Shizuku, then try again.</string>
+    <string name="recovery_shell_unavailable">KernelSU is running, but this app does not have a root shell yet. Grant Root My Galaxy Next superuser access in KernelSU or start Shizuku, then try again.</string>
     <string name="recovery_shizuku_needs_root">Shizuku is running, but this action requires root. A Shizuku shell is not root. Load KernelSU first, or run the installation again.</string>
     <string name="recovery_scheduled">Scheduled. The Android runtime will restart shortly.</string>
     <string name="recovery_reboot_scheduled">Scheduled. The phone will restart without root.</string>

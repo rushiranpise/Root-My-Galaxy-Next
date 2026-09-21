@@ -98,7 +98,13 @@ class WirelessAdbSession private constructor(
 
     companion object {
         /** Where the verified late-load leaves the helper this session runs commands through. */
-        const val DEFAULT_HELPER_PATH = "/data/local/tmp/ksu-helper"
+        /**
+         * The helper a wireless run stages, by the path that run pushed it to.
+         *
+         * Kept in step with the constant of the same meaning in `InstallViewModel`, which is the only
+         * thing that writes it: this is where a shell finds it, not where it is put.
+         */
+        const val DEFAULT_HELPER_PATH = "/data/local/tmp/rmgnext-ksud-helper"
 
         /**
          * Enables wireless debugging if it is off, finds the port, and authenticates.

@@ -96,6 +96,70 @@ class KernelSuRuntimeTest {
     }
 
     @Test
+    fun `a module list read by the run itself is a proof`() {
+        // The first install's only route: the app's own read is denied and Shizuku may not be running, so
+        // the run asks with the bootstrap root it is holding. Nothing about the answer changes for having
+        // come from there - the kernel either lists the module or it does not.
+        val readings = ControlReadings(
+            nativeProbe = false,
+            appSuFailure = SuProbe.Failure.ABSENT,
+            shizukuElevated = false,
+            helperOutput = "",
+            moduleLoaded = null,
+        ).withModuleList(loaded = true)
+
+        assertTrue(readings.proofs.contains(ControlProof.ModuleLoaded))
+        assertTrue("a kernel that has the module is a load that happened", readings.lookedAtTheKernel())
+    }
+
+    @Test
+    fun `a list that stays unreadable is not overridden into a reading`() {
+        val readings = ControlReadings(
+            nativeProbe = false,
+            appSuFailure = SuProbe.Failure.ABSENT,
+            shizukuElevated = false,
+            helperOutput = "",
+            moduleLoaded = null,
+        ).withModuleList(loaded = null)
+
+        assertTrue(readings.proofs.isEmpty())
+        assertTrue(
+            "nothing could look, which is the refusal that must not be worded as a failed load",
+            !readings.lookedAtTheKernel(),
+        )
+    }
+
+    @Test
+    fun `a reading that already answered is never replaced by a second look`() {
+        val read = ControlReadings(
+            nativeProbe = false,
+            appSuFailure = SuProbe.Failure.ABSENT,
+            shizukuElevated = false,
+            helperOutput = "",
+            moduleLoaded = false,
+        )
+
+        assertEquals(false, read.withModuleList(loaded = true).moduleLoaded)
+    }
+
+    @Test
+    fun `the kernel was looked at only when a reading that could have said yes answered`() {
+        val silent = ControlReadings(
+            nativeProbe = false,
+            appSuFailure = SuProbe.Failure.ABSENT,
+            shizukuElevated = false,
+            helperOutput = "",
+            moduleLoaded = null,
+        )
+        val counted = silent.withModuleList(loaded = false)
+        val helperSpoke = silent.copy(helperOutput = "late-load: driver fd unavailable")
+
+        assertTrue("the list was read and does not carry the module", counted.lookedAtTheKernel())
+        assertTrue("the helper said something, even though it was not a report", helperSpoke.lookedAtTheKernel())
+        assertTrue("nothing answered here", !silent.lookedAtTheKernel())
+    }
+
+    @Test
     fun `every proof carries a label for the log line`() {
         val labels = ControlProof.values().map { it.label }
 

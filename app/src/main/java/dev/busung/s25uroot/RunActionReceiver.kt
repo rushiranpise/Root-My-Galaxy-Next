@@ -3,6 +3,7 @@ package dev.busung.s25uroot
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Process
 
 /**
  * The two things the run's notification can do.
@@ -18,9 +19,16 @@ class RunActionReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_STOP -> {
                 // Written before anything is said, so the run stops even if the line below cannot be
-                // delivered - and named for this process, which is the one whose run posted this
-                // notification.
-                RunStopSignal.request(context)
+                // delivered - and named for the process the run is in, which is *not* this one whenever
+                // the boot gate posted the notification: a broadcast lands in the app's own process while
+                // that run is in `:autoroot_gate`, so naming this pid would leave the request waiting on a
+                // run that is somewhere else, and the Stop button would do nothing at all.
+                val holder = RunInFlight.holder(context)
+                RunStopSignal.request(
+                    context = context,
+                    bootToken = holder?.bootToken,
+                    pid = stopTarget(holder, Process.myPid()),
+                )
                 AppLog.warn(AppLogTags.RUN, "Stop requested from the run notification")
                 RunNotification.note(
                     context = context,
@@ -66,6 +74,14 @@ class RunActionReceiver : BroadcastReceiver() {
          * destination it already had.
          */
         internal fun activeRunId(context: Context): String? = RunInFlight.holder(context)?.entryId
+
+        /**
+         * The process a stop should be written for, from the record that says where the run is.
+         *
+         * Pure, because the mistake it prevents is invisible: a stop naming the wrong process is written,
+         * read by nobody, and looks exactly like a Stop button that was never pressed.
+         */
+        internal fun stopTarget(holder: RunHolder?, ownPid: Int): Int = holder?.pid ?: ownPid
 
         internal fun activeRunLog(context: Context): String {
             val entries = runCatching { InstallHistoryStore(context).load() }.getOrDefault(emptyList())

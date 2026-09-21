@@ -318,28 +318,57 @@ internal object StagedResidue {
     const val DIRECTORY = "/data/local/tmp"
 
     /**
-     * Every path this app stages.
+     * What this build writes, in the names it is free to choose.
      *
-     * Both transports are listed because both are reachable on one device: a run goes out through
-     * Shizuku or through a paired adb, and whichever one it used leaves its own names behind. The
-     * repair actions are here for the same reason, including the files their scripts only touch - a
-     * marker that is never removed is still a file a detector can list.
+     * The prefix is not decoration. `/data/local/tmp` is one directory for the whole device, and the app
+     * this fork came from installs beside this one and writes the same directory - neither can tell the
+     * other's staged file from its own. So every path this app is allowed to name is named apart from
+     * every path that one names, which is what keeps a sweep in either install from deleting a file the
+     * other is about to execute.
      *
-     * A hand-kept list, and that is the one thing about this object that can rot: a list that misses a
-     * path reports a clean device for a file that is sitting right there. What keeps it whole is a test
-     * that reads the app's own sources, collects every `/data/local/tmp/...` literal the staging code
-     * writes, and fails when one of them is not in here - the same trick [ManifestPermissionTest] uses
-     * for the permissions, and for the same reason.
-     *
-     * That scan can only cover the names this app writes itself, which is why one entry below is here
-     * for a different reason: `temp_su.sock` is the daemon's, created by the staged binary rather than
-     * by anything in this source tree. It is still this app's residue - it appears on a device because a
-     * run of this app put the daemon there - and it is the one path no scan of this code could discover.
+     * The first three entries are the exception, and they are not this app's to rename: the payload's own
+     * loader reads the daemon at `ksud-s25u-kdp` and the stage copy at `.ksud-stage`, and the su daemon
+     * the payload leaves running creates `temp_su.sock`. Those three names travel with the payload, so
+     * they are the same for both installs - which is the whole reason [sharedWithTheOtherInstall]
+     * exists.
      */
-    val catalog: List<StagedPath> = listOf(
+    private val staged: List<StagedPath> = listOf(
         StagedPath("/data/local/tmp/ksud-s25u-kdp", ResidueRole.Daemon),
         StagedPath("/data/local/tmp/.ksud-stage", ResidueRole.Daemon),
         StagedPath("/data/local/tmp/temp_su.sock", ResidueRole.Socket),
+        StagedPath("/data/local/tmp/rmgnext-helper", ResidueRole.Helper),
+        StagedPath("/data/local/tmp/rmgnext-shizuku-payload", ResidueRole.Payload),
+        StagedPath("/data/local/tmp/rmgnext-shizuku-exploit.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/rmgnext-ksud-helper", ResidueRole.Helper),
+        StagedPath("/data/local/tmp/rmgnext-payload", ResidueRole.Payload),
+        StagedPath("/data/local/tmp/rmgnext-exploit.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/rmgnext-restart-zygote.sh", ResidueRole.Script),
+        StagedPath("/data/local/tmp/rmgnext-restart-zygote.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/.rmgnext-restart-zygote-accepted", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/rmgnext-soft-reboot-keeper.sh", ResidueRole.Script),
+        StagedPath("/data/local/tmp/rmgnext-soft-reboot.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/rmgnext-soft-reboot-ksud.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/.rmgnext-soft-reboot-owner", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/.rmgnext-soft-reboot-accepted", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/rmgnext-reboot.sh", ResidueRole.Script),
+        StagedPath("/data/local/tmp/rmgnext-reboot.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/.rmgnext-reboot-accepted", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/rmgnext-reload-modules.sh", ResidueRole.Script),
+        StagedPath("/data/local/tmp/rmgnext-reload-modules.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/rmgnext-reload-modules-ksud.log", ResidueRole.Log),
+        StagedPath("/data/local/tmp/.rmgnext-reload-modules-owner", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/.rmgnext-reload-modules-accepted", ResidueRole.Marker),
+    )
+
+    /**
+     * The names the builds before this one wrote, under upstream's prefixes.
+     *
+     * Read, and no longer written. Dropping them from the catalogue would have been the tidy-looking
+     * change with the worse answer: a device that ran one of those builds has a `ksu-helper` or an
+     * `rmg-payload` in the directory right now, and a check that stops naming it reports a clean device
+     * with a detector's favourite names sitting in it.
+     */
+    private val legacy: List<StagedPath> = listOf(
         StagedPath("/data/local/tmp/ksu-helper", ResidueRole.Helper),
         StagedPath("/data/local/tmp/ksu-payload", ResidueRole.Payload),
         StagedPath("/data/local/tmp/ksu-exploit.log", ResidueRole.Log),
@@ -362,6 +391,51 @@ internal object StagedResidue {
         StagedPath("/data/local/tmp/rmg-reload-modules-ksud.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/.rmg-reload-modules-owner", ResidueRole.Marker),
         StagedPath("/data/local/tmp/.rmg-reload-modules-accepted", ResidueRole.Marker),
+    )
+
+    /**
+     * Everything this app is or has been responsible for in the directory, in two halves.
+     *
+     * [staged] is what this build writes and [legacy] is what earlier builds wrote, held apart so that
+     * the first can be changed without the second being written again. Everything that wants a
+     * catalogue reads this one: the check on the Settings screen, and the sweep that empties the
+     * directory.
+     *
+     * Both transports are listed because both are reachable on one device: a run goes out through
+     * Shizuku or through a paired adb, and whichever one it used leaves its own names behind. The
+     * repair actions are here for the same reason, including the files their scripts only touch - a
+     * marker that is never removed is still a file a detector can list.
+     *
+     * A hand-kept list, and that is the one thing about this object that can rot: a list that misses a
+     * path reports a clean device for a file that is sitting right there. What keeps it whole is a test
+     * that reads the app's own sources, collects every `/data/local/tmp/...` literal the staging code
+     * writes, and fails when one of them is not in here - the same trick [ManifestPermissionTest] uses
+     * for the permissions, and for the same reason.
+     *
+     * That scan can only cover the names this app writes itself, which is why one entry is here for a
+     * different reason: `temp_su.sock` is the daemon's, created by the staged binary rather than by
+     * anything in this source tree. It is still this app's residue - it appears on a device because a
+     * run of this app put the daemon there - and it is the one path no scan of this code could discover.
+     */
+    val catalog: List<StagedPath> = staged + legacy
+
+    /**
+     * The names both installs write, and can therefore write at the same time.
+     *
+     * Five of them are upstream's own staged paths - the daemon, its stage copy, and the helper, payload
+     * and log its two transports use - and every one of them is a name this fork no longer chooses, so
+     * the same names are on a device from either app. The sixth is the su socket, which neither app
+     * writes: the payload's daemon does, and it is the same payload on both.
+     *
+     * Only [StagingSweep] reads this, and only to leave these alone while the other install is present.
+     */
+    val sharedWithTheOtherInstall: Set<String> = setOf(
+        "ksud-s25u-kdp",
+        ".ksud-stage",
+        "temp_su.sock",
+        "ksu-helper",
+        "ksu-payload",
+        "ksu-exploit.log",
     )
 
     /**
