@@ -24,9 +24,14 @@ The device feed and native payloads used here are maintained in
 
 ## Application
 
-<img width="200" src="https://github.com/user-attachments/assets/da6d0a0a-e5aa-41c3-9b38-7ec01c08c3bd" />
-<img width="200" src="https://github.com/user-attachments/assets/a9142c17-4e2f-4b18-8c03-fe17e531aa3a" />
-<img width="200" src="https://github.com/user-attachments/assets/7af17f0c-7827-47c8-ab23-a985a019e972" />
+<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" />
+<img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
+<img width="200" alt="Settings, grouped into sections" src="docs/screenshots/settings.png" />
+<img width="200" alt="The app log" src="docs/screenshots/logs.png" />
+
+From left to right: Home with the live status card, the payload sheet, Settings, and the app log. All
+four are this fork's own build, capturing the KernelSU and KernelSU-Next payload flavours it publishes
+beside the upstream ones.
 
 The app selects a payload whose model list and three-part kernel version match
 the phone. For example, `6.6.98-android15-8-...` matches `6.6.98`. Advanced
