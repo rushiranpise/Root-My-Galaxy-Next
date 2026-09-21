@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val BOOT = "0f2a4c6e-1b2d-4f6a-8c0e-2d4f6a8c0e2d"
-private const val REPORT = "/data/user/0/dev.busung.s25uroot/files/framework-restart-report"
+private const val REPORT = "/data/user/0/dev.rushiranpise.rmgnext/files/framework-restart-report"
 
 class ZygoteRestartReportTest {
 

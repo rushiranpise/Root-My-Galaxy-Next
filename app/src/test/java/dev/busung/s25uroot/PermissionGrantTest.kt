@@ -17,9 +17,13 @@ class PermissionGrantTest {
 
     @Test
     fun `the grant is the command the shell user is allowed to run`() {
+        // The app's own id, read from the build rather than typed: this is the command a person is
+        // handed when no transport can grant the permission for them, and the package in it has to be
+        // the one that is installed.
+        val applicationId = BuildConfig.APPLICATION_ID
         assertEquals(
-            "pm grant 'dev.busung.s25uroot' android.permission.WRITE_SECURE_SETTINGS",
-            PermissionGrant.grantCommand("dev.busung.s25uroot"),
+            "pm grant '$applicationId' android.permission.WRITE_SECURE_SETTINGS",
+            PermissionGrant.grantCommand(applicationId),
         )
     }
 

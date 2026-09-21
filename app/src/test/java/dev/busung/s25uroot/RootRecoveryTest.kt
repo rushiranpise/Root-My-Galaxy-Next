@@ -7,7 +7,9 @@ import org.junit.Test
 
 private const val BOOT = "0f2a4c6e-1b2d-4f6a-8c0e-2d4f6a8c0e2d"
 private const val ACCEPTED = "/data/local/tmp/.rmgnext-restart-zygote-accepted"
-private const val REPORT = "/data/user/0/dev.busung.s25uroot/files/framework-restart-report"
+// Where the app's own data directory puts the report, spelled out rather than read from a Context:
+// what these tests check is that the script writes and reads back the path it is handed.
+private const val REPORT = "/data/user/0/dev.rushiranpise.rmgnext/files/framework-restart-report"
 
 
 class RootRecoveryTest {
