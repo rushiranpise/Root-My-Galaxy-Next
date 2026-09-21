@@ -1549,9 +1549,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val lateLoad = runHelper("--late-load")
-        require(lateLoad.code == 0) {
-            app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output)
-        }
+        // The payload's line is logged before anything is judged from it: on a non-zero exit it is
+        // usually the payload's own diagnosis ("driver fd unavailable", "control check failed
+        // ret=… flags=…"), and a refusal that swallows it sends the reader after a cause the run
+        // already wrote down.
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
         activeStage = RunStage.Verify
         // An exit code says the late-load command finished, not that anything is reachable now, so
@@ -1569,20 +1570,39 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // Said every time, not only on a refusal: the readings are how the next person to read the
         // log tells an unusable load from a check that could not see a healthy one.
         appendLog(app.getString(R.string.log_ksu_control_readings, readings.summary()))
-        require(readings.proofs.isNotEmpty()) {
-            // Which of the two refusals this is, because they send a reader to different places: one is
-            // a load that is not there, the other is a check that could not be made at all.
-            app.getString(
-                if (readings.lookedAtTheKernel()) R.string.error_ksu_not_ready
-                else R.string.error_ksu_unconfirmed,
+        // The readings outrank the payload's code rather than the other way round. That code reports
+        // what the payload's own probe could reach - a driver fd opened through the `reboot` magic,
+        // then a version and two flag bits - so a module that loaded while that route is refused
+        // comes back non-zero, and judging the run on the code alone recorded a landed load as a
+        // failed one: no receipt for the boot, and no manager handed over.
+        when (loadVerdict(lateLoad.code, readings)) {
+            LoadVerdict.Confirmed -> appendLog(
+                app.getString(
+                    R.string.log_ksu_control_verified,
+                    readings.proofs.joinToString { it.label },
+                ),
             )
+
+            // The load landed and its own probe could not say so. Kept as a load, and said out loud,
+            // because the receipt below is what makes the manager worth opening and the next run
+            // refuse a second load for a boot that already has one.
+            LoadVerdict.ConfirmedDespitePayload -> appendLog(
+                app.getString(
+                    R.string.log_ksu_control_verified_despite,
+                    lateLoad.code,
+                    readings.proofs.joinToString { it.label },
+                ),
+            )
+
+            // The refusals, in the order they send a reader: the payload's own account first, then a
+            // kernel that was looked at and lists no module, then a check that could not be made at all.
+            LoadVerdict.RefusedByPayload -> error(
+                app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output),
+            )
+
+            LoadVerdict.NotLoaded -> error(app.getString(R.string.error_ksu_not_ready))
+            LoadVerdict.Unconfirmed -> error(app.getString(R.string.error_ksu_unconfirmed))
         }
-        appendLog(
-            app.getString(
-                R.string.log_ksu_control_verified,
-                readings.proofs.joinToString { it.label },
-            ),
-        )
         // Recorded for the boot, which is as long as a late-loaded module exists: it is what makes a
         // later run of the other flavour refuse with a restart instead of failing inside the loader.
         AppPreferences.setLoadedFlavor(app, payloads.profile.flavor, AutoRootSupport.currentBootToken())

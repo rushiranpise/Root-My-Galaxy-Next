@@ -162,6 +162,57 @@ internal fun ControlReadings.lookedAtTheKernel(): Boolean =
     moduleLoaded != null || helperOutput.isNotBlank()
 
 /**
+ * What a finished late-load is judged to be.
+ *
+ * The payload's exit code is an account of *its own* probe, not of the kernel. `su_daemon` opens
+ * KernelSU's driver fd through the `reboot` magic and then requires a version and two flags, so a
+ * load that landed while that route is refused - or while the flags test disagrees - comes back
+ * non-zero with the module sitting in the kernel. Judging the run by that code alone is how a
+ * successful load became a failed run: nothing was left behind for the next one, and with nothing
+ * recorded as loaded there was no manager to hand over either.
+ *
+ * So the code is compared with the readings rather than instead of them, and a reading outranks it.
+ * The payload failing to confirm itself is a fact about the payload's route to the kernel; the
+ * kernel listing the module is a fact about the kernel.
+ */
+internal enum class LoadVerdict {
+    /** The payload's probe passed and a reading backs it. */
+    Confirmed,
+
+    /** The payload's probe did not pass, and the kernel says the module is there anyway. */
+    ConfirmedDespitePayload,
+
+    /** The payload refused, and nothing here could see a loaded module either. */
+    RefusedByPayload,
+
+    /** The payload finished, and the kernel has no kernelsu when something did look. */
+    NotLoaded,
+
+    /** The payload finished and nothing could look at the kernel at all. */
+    Unconfirmed,
+}
+
+/**
+ * The verdict from the two things the run has: the payload's code and the readings.
+ *
+ * Pure, so every combination can be tested without a rooted device - which is the only way this one
+ * gets tested at all, since the case it exists for needs a kernel that refuses the driver fd while
+ * running the module the fd is for.
+ */
+internal fun loadVerdict(payloadCode: Int, readings: ControlReadings): LoadVerdict = when {
+    readings.proofs.isNotEmpty() ->
+        if (payloadCode == 0) LoadVerdict.Confirmed else LoadVerdict.ConfirmedDespitePayload
+
+    // Nothing could see a loaded module, so the payload's own account is the best one left - and a
+    // refusal has to carry it, because its line names what its probe found rather than what a
+    // reading could not make.
+    payloadCode != 0 -> LoadVerdict.RefusedByPayload
+
+    readings.lookedAtTheKernel() -> LoadVerdict.NotLoaded
+    else -> LoadVerdict.Unconfirmed
+}
+
+/**
  * The live probes behind [controlProofs], for the app to call on the device.
  *
  * Everything here is best-effort and reports absence rather than throwing: a probe failing is a

@@ -415,6 +415,7 @@
     <string name="retry_armed_cancel">Cancel</string>
     <string name="log_ksu_staged_late_only">[*] No shell transport was available to stage KernelSU before the exploit. The payload has no daemon to load, so KernelSU will be staged afterward.</string>
     <string name="log_ksu_control_verified">[+] KernelSU control channel verified (%1$s)</string>
+    <string name="log_ksu_control_verified_despite">[+] KernelSU is loaded, but the payload\'s own check failed. The load counts because %1$s.</string>
     <string name="log_ksu_control_readings">[*] Control channel readings: %1$s</string>
     <string name="error_ksu_not_ready">The KernelSU load finished, but nothing can reach it: the kernel lists no kernelsu module and no control channel answered. Root is not usable yet.</string>
     <string name="error_ksu_unconfirmed">The KernelSU load finished, but nothing here could check it: reading the kernel module list needs a shell, and every other check needs root this device has not granted. Open the KernelSU manager to see whether it loaded.</string>
