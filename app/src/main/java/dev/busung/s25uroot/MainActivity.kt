@@ -1547,10 +1547,15 @@ private fun OverviewPage(
                 // a whole build label, and a Row hands its unweighted children the width they ask for - so
                 // the button was pushed past the right edge and clipped by the list. It was there on a
                 // tablet and gone on a phone, which is the shape of a bug this header had no room to show.
+                //
+                // Medium rather than large since the fork's own name: "Root My Galaxy Next" is a third
+                // longer than the name this header was laid out for, and at 32sp it ended in an ellipsis on
+                // a phone - the app's own name, unreadable on the screen that shows it. 28sp is the largest
+                // step that fits all of it beside the power button.
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.headlineLarge,
+                        style = MaterialTheme.typography.headlineMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
