@@ -16,7 +16,7 @@ neither upgrades the other, and this one starts with no settings, no history and
 grant of its own.
 
 
-[Latest release](https://github.com/rushiranpise/Root-My-Galaxy/releases)
+[Latest release](https://github.com/rushiranpise/Root-My-Galaxy-Next/releases)
 
 The device feed and native payloads used here are maintained in
 [Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads), a fork of

@@ -18,14 +18,21 @@ data class UpdateInfo(
     val releaseUrl: String,
 )
 
-const val ROOT_MY_GALAXY_URL = "https://github.com/rushiranpise/Root-My-Galaxy"
+const val ROOT_MY_GALAXY_URL = "https://github.com/rushiranpise/Root-My-Galaxy-Next"
 
 object AppUpdater {
 
-    // This fork's own repository, and the one thing here that has to be right: the update check
-    // downloads whatever APK this answers with, and the other install's is signed with a key this app
-    // does not hold, so an update offered from there could never be installed.
-    private const val GITHUB_API = "https://api.github.com/repos/rushiranpise/Root-My-Galaxy"
+    // This fork's own repository, and the two things here that have to be right.
+    //
+    // It is this fork's rather than the one it came from, because the update check downloads whatever
+    // APK the API answers with and the other install is signed with a key this app does not hold - an
+    // update offered from there could never be installed.
+    //
+    // And it is the repository's current name rather than a redirect to it. GitHub answers a renamed
+    // repository with a redirect that still works today, which is exactly why the name matters: this URL
+    // decides which APK the app downloads and prompts someone to install, and a name nobody is holding is
+    // a name somebody else can. The full name is what the GitHub API reports for the repository's id.
+    private const val GITHUB_API = "https://api.github.com/repos/rushiranpise/Root-My-Galaxy-Next"
     private const val RELEASES_PAGE = "$ROOT_MY_GALAXY_URL/releases/latest"
 
     suspend fun fetchLatestRelease(): UpdateInfo? = withContext(Dispatchers.IO) {
