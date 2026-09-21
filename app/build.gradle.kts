@@ -70,7 +70,15 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.busung.s25uroot"
+        // This fork installs as its own app, beside the one it came from rather than over it: the two
+        // are signed with different keys, so a shared id could never upgrade the other install, and a
+        // unique one is what lets both be present while a fork finds its feet.
+        //
+        // The namespace above deliberately stays upstream's. It decides the Kotlin package, every
+        // action string, both provider authorities and the R class, and moving it would touch the
+        // whole tree to change nothing anyone can see - the id below is the install's identity, and it
+        // is the only one Android checks.
+        applicationId = "dev.rushiranpise.rmgnext"
         minSdk = 33
         targetSdk = 36
         versionCode = appVersionCode

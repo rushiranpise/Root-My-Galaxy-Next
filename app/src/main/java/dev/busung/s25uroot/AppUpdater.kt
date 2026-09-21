@@ -18,11 +18,14 @@ data class UpdateInfo(
     val releaseUrl: String,
 )
 
-const val ROOT_MY_GALAXY_URL = "https://github.com/BuSung-dev/Root-My-Galaxy"
+const val ROOT_MY_GALAXY_URL = "https://github.com/rushiranpise/Root-My-Galaxy"
 
 object AppUpdater {
 
-    private const val GITHUB_API = "https://api.github.com/repos/BuSung-dev/Root-My-Galaxy"
+    // This fork's own repository, and the one thing here that has to be right: the update check
+    // downloads whatever APK this answers with, and the other install's is signed with a key this app
+    // does not hold, so an update offered from there could never be installed.
+    private const val GITHUB_API = "https://api.github.com/repos/rushiranpise/Root-My-Galaxy"
     private const val RELEASES_PAGE = "$ROOT_MY_GALAXY_URL/releases/latest"
 
     suspend fun fetchLatestRelease(): UpdateInfo? = withContext(Dispatchers.IO) {
@@ -30,7 +33,7 @@ object AppUpdater {
             val connection = URL("$GITHUB_API/releases/latest").openConnection() as HttpURLConnection
             try {
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("User-Agent", "RootMyGalaxy/${BuildConfig.VERSION_NAME}")
+                connection.setRequestProperty("User-Agent", "RootMyGalaxyNext/${BuildConfig.VERSION_NAME}")
                 connection.setRequestProperty("Accept", "application/vnd.github+json")
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 10_000
@@ -114,7 +117,7 @@ object AppUpdater {
             val connection = URL(url).openConnection() as HttpURLConnection
             try {
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("User-Agent", "RootMyGalaxy/${BuildConfig.VERSION_NAME}")
+                connection.setRequestProperty("User-Agent", "RootMyGalaxyNext/${BuildConfig.VERSION_NAME}")
                 connection.connectTimeout = 15_000
                 connection.readTimeout = 30_000
                 if (connection.responseCode != HttpURLConnection.HTTP_OK) return@withContext null

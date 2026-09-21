@@ -126,9 +126,15 @@ object AdbPairing {
 
     private const val ADB_WIFI_ENABLED_SETTING = "adb_wifi_enabled"
 
-    /** The command that grants this app the setting, shown when nothing else can turn it on. */
-    const val GRANT_COMMAND =
-        "pm grant dev.busung.s25uroot android.permission.WRITE_SECURE_SETTINGS"
+    /**
+     * The command that grants this app the setting, shown when nothing else can turn it on.
+     *
+     * Built from the build's own application id rather than typed out, because this string is read by
+     * a person and then pasted into a cable session: a stale literal would grant the setting to a
+     * package that is not this one, and the screen that printed it would be the last to know.
+     */
+    val GRANT_COMMAND: String =
+        "pm grant ${BuildConfig.APPLICATION_ID} android.permission.WRITE_SECURE_SETTINGS"
 
     private const val ENABLE_SETTING_COMMAND = "settings put global $ADB_WIFI_ENABLED_SETTING 1"
     private const val DISABLE_SETTING_COMMAND = "settings put global $ADB_WIFI_ENABLED_SETTING 0"

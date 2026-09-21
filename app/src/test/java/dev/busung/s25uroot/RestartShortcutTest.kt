@@ -57,14 +57,25 @@ class RestartShortcutTest {
 
     @Test
     fun `every shortcut opens the app's own window`() {
-        val applicationId = "dev.busung.s25uroot"
+        // Two different names, and this is the file where they are easiest to confuse. The launcher
+        // matches `targetPackage` against the *install* id, which is the build's applicationId; the
+        // class it then loads lives in the Java package, which this fork deliberately leaves upstream's.
+        // Reading them from the build and from this test's own package - rather than typing either -
+        // is what makes the pair fail here instead of on someone's launcher.
+        val applicationId = BuildConfig.APPLICATION_ID
+        val javaPackage = javaClass.packageName
 
         shortcuts().forEach { shortcut ->
-            assertEquals(applicationId, shortcut.attribute("android:targetPackage"))
+            assertEquals(
+                "the shortcut points at a package that is not this install, so its long press opens the " +
+                    "other app or nothing at all",
+                applicationId,
+                shortcut.attribute("android:targetPackage"),
+            )
             assertEquals(
                 "the shortcut targets something other than the launcher activity, so it opens a screen that " +
                     "does not know about restart",
-                "$applicationId.MainActivity",
+                "$javaPackage.MainActivity",
                 shortcut.attribute("android:targetClass"),
             )
         }

@@ -37,7 +37,15 @@ data class PayloadSource(
         get() = if (isPinned) "$branch at ${pinnedCommit.take(7)}" else branch
 
     companion object {
-        const val DEFAULT_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
+        /**
+         * This fork's payload catalog.
+         *
+         * Its own rather than the upstream one, because a fresh install has to be able to see the
+         * flavours and builds this fork publishes - the upstream catalog never will. It is only the
+         * default: a source list already saved on the device is what a run reads, and this changes
+         * only what a device with no list yet starts from.
+         */
+        const val DEFAULT_REPOSITORY = "rushiranpise/Root-My-Galaxy-Payloads"
         const val DEFAULT_BRANCH = "main"
 
         val COMMIT_PATTERN = Regex("^[0-9a-f]{40}$")
