@@ -51,6 +51,37 @@ internal const val MANIFEST_PATH = "support/targets-v3.json"
 internal fun revisionManifestUrl(repository: String, commit: String): String =
     "https://raw.githubusercontent.com/$repository/$commit/$MANIFEST_PATH"
 
+/** The mutable branch URL a repository's files are served from, as a manifest writes them. */
+internal fun mutableRawPrefix(repository: String, branch: String): String =
+    "https://raw.githubusercontent.com/$repository/$branch/"
+
+/**
+ * The prefixes a manifest may name for its own artifacts, tried in order.
+ *
+ * This list is the whole of the rule. A catalog declares where its artifacts live, and the only
+ * declarations honoured are these three repositories, so a manifest cannot send a download anywhere
+ * else. Each entry is a fact about how catalogs are written rather than a preference: a source names
+ * itself, this fork's feed names itself, and the upstream catalog this fork's feed was forked from still
+ * names *itself* in every entry it was copied with. The third is why the source alone is not enough -
+ * without it the reader refuses this fork's own catalog on its first artifact, which is exactly what it
+ * did.
+ */
+internal fun allowedMutableRawPrefixes(source: PayloadSource): List<String> = listOf(
+    mutableRawPrefix(source.repository, source.branch),
+    mutableRawPrefix(PayloadSource.DEFAULT.repository, PayloadSource.DEFAULT.branch),
+    mutableRawPrefix(PayloadSource.LEGACY_REPOSITORY, PayloadSource.LEGACY_BRANCH),
+)
+
+/**
+ * The URL an artifact is read from: the path the manifest named, at the commit the manifest was read at,
+ * in the repository the manifest was read *from* rather than the one it was written by. Null when the
+ * manifest named somewhere this app will not fetch from, which the caller reports as such.
+ */
+internal fun pinnedArtifactUrl(source: PayloadSource, url: String, commit: String): String? {
+    val prefix = allowedMutableRawPrefixes(source).firstOrNull(url::startsWith) ?: return null
+    return mutableRawPrefix(source.repository, commit) + url.removePrefix(prefix)
+}
+
 /** A revision a source can be pinned to, as a picker lists it. */
 data class SourceRevision(
     val commit: String,
@@ -514,25 +545,9 @@ class PayloadRepository(private val context: Context) {
     private fun rawUrl(source: PayloadSource, commit: String, path: String) =
         "${rawRepository(source)}/$commit/$path"
 
-    private fun mutableRawPrefix(source: PayloadSource) =
-        "${rawRepository(source)}/${source.branch}/"
-
-    // Manifests written for the built-in feed reference its mutable branch URLs, so accept
-    // that prefix too and re-pin it to the source the manifest was actually read from.
-    private fun builtInMutableRawPrefix() =
-        "https://raw.githubusercontent.com/${PayloadSource.DEFAULT.repository}/" +
-            "${PayloadSource.DEFAULT.branch}/"
-
-    private fun pinArtifactUrl(source: PayloadSource, url: String, commit: String): String {
-        val prefix = mutableRawPrefix(source)
-        val builtInPrefix = builtInMutableRawPrefix()
-        val relative = when {
-            url.startsWith(prefix) -> url.removePrefix(prefix)
-            url.startsWith(builtInPrefix) -> url.removePrefix(builtInPrefix)
-            else -> error(context.getString(R.string.repo_url_invalid))
-        }
-        return "${rawRepository(source)}/$commit/$relative"
-    }
+    private fun pinArtifactUrl(source: PayloadSource, url: String, commit: String): String =
+        pinnedArtifactUrl(source, url, commit)
+            ?: error(context.getString(R.string.repo_url_invalid))
 
     private fun downloadBytes(url: String, maximum: Int, accept: String? = null): ByteArray {
         val connection = open(url, accept)

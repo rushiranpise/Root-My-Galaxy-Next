@@ -48,6 +48,19 @@ data class PayloadSource(
         const val DEFAULT_REPOSITORY = "rushiranpise/Root-My-Galaxy-Payloads"
         const val DEFAULT_BRANCH = "main"
 
+        /**
+         * The catalog this fork's payloads were copied from, artifacts and all.
+         *
+         * Named here because a manifest records where its own artifacts live, and a fork's manifest is
+         * the original one with a different owner: every entry it was copied with still names this
+         * repository. A reader that only accepted the source's own prefix therefore refused the whole
+         * catalog on its first artifact, which is what this fork's own feed did until this existed.
+         * Reading one keeps the path and re-points it at the source that was actually read, so nothing
+         * is ever fetched from here.
+         */
+        const val LEGACY_REPOSITORY = "BuSung-dev/Root-My-Galaxy-Payloads"
+        const val LEGACY_BRANCH = "main"
+
         val COMMIT_PATTERN = Regex("^[0-9a-f]{40}$")
 
         val DEFAULT = PayloadSource(
