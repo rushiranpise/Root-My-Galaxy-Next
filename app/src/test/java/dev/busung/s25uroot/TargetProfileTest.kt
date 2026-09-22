@@ -124,9 +124,15 @@ class TargetProfileTest {
     fun freshP0SessionRunsOnceWithoutCacheOrShortTimeoutOverrides() {
         val freshProfile = profile.copy(requiresFreshP0Session = true)
 
+        // The payload's own window travels in the environment as well, so a fresh session's map is the
+        // attempt plus what this app decided the payload should wait - no offset, no timeout override.
         assertEquals(
-            mapOf("EXPLOIT_ATTEMPTS" to "1"),
-            InstallViewModel.exploitEnvironment(freshProfile.requiresFreshP0Session, "0x1a0000"),
+            mapOf("EXPLOIT_ATTEMPTS" to "1", "P0_MIN_BOOT_UPTIME_SEC" to "120"),
+            InstallViewModel.exploitEnvironment(
+                freshProfile.requiresFreshP0Session,
+                "0x1a0000",
+                payloadQuietWindowSec = BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS,
+            ),
         )
     }
 

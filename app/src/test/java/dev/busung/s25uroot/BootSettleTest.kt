@@ -25,6 +25,39 @@ class BootSettleTest {
     }
 
     @Test
+    fun `the payload's window is derived from the settle, not set beside it`() {
+        // Two gates over one boot are fine when one is derived from the other. The payload's ceiling
+        // is a floor the app may lower: a shorter settle has to reach it, or the payload finishes the
+        // wait the app was told to skip, and a longer one is already satisfied by the app's own wait.
+        assertEquals(60, BootSettle.payloadQuietWindowSeconds(60, overridden = false))
+        assertEquals(120, BootSettle.payloadQuietWindowSeconds(120, overridden = false))
+        assertEquals(120, BootSettle.payloadQuietWindowSeconds(600, overridden = false))
+        assertEquals(0, BootSettle.payloadQuietWindowSeconds(0, overridden = false))
+    }
+
+    @Test
+    fun `an override shortens the payload's wait as well, and not to nothing`() {
+        // The case that was broken: overriding the app's gate left the payload sleeping out its own
+        // window with nothing counting on screen and nothing in the log saying why. It still wants a
+        // moment, because the window protects the same racy stage whoever counts it.
+        val overridden =
+            BootSettle.payloadQuietWindowSeconds(BootSettle.DEFAULT_SECONDS, overridden = true)
+        assertEquals(BootSettle.PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS, overridden)
+        assertTrue(overridden > 0)
+        assertTrue(overridden < BootSettle.DEFAULT_SECONDS)
+        assertTrue(overridden <= BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
+    }
+
+    @Test
+    fun `the payload's ceiling is a value the setting can ask for`() {
+        // The ceiling is the payload's own compiled window, and the payload refuses anything larger
+        // (`P0_MIN_BOOT_UPTIME_SEC`, bounded by that default). Something above the ceiling would be a
+        // plan row that named a number the run never handed over.
+        assertEquals(120, BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
+        assertTrue(BootSettle.allowedSeconds.contains(BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS))
+    }
+
+    @Test
     fun `a stored value is rounded to one of the offered ones`() {
         assertEquals(180, BootSettle.normalize(180))
         assertEquals(120, BootSettle.normalize(119))
