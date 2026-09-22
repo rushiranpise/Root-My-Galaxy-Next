@@ -114,6 +114,101 @@ internal fun managerVersionState(managerVersion: String?, kernelVersion: String?
 }
 
 /**
+ * Which of two releases is newer, or 0 when they are the same release.
+ *
+ * Component by component and as numbers, because comparing these as text gets the one case that
+ * matters wrong: `3.10.0` sorts before `3.9.0` as a string, and a payload declaring the newer KernelSU
+ * would then read as older than the boot. A component that one of them does not have counts as zero,
+ * so `3.4` and `3.4.0` are the same release rather than two.
+ */
+internal fun compareReleases(left: String, right: String): Int {
+    val one = left.split(".")
+    val two = right.split(".")
+    for (index in 0 until maxOf(one.size, two.size)) {
+        val a = one.getOrNull(index)?.toIntOrNull() ?: 0
+        val b = two.getOrNull(index)?.toIntOrNull() ?: 0
+        if (a != b) return a.compareTo(b)
+    }
+    return 0
+}
+
+/**
+ * How the KernelSU a payload declares stands beside the KernelSU this boot is running.
+ *
+ * [Ahead] and [Behind] are not the same problem wearing two names, which is why they are two states: a
+ * payload that declares a newer release than the boot installs a manager that will match as soon as a
+ * run loads it, while a payload that declares an older one asks the phone to walk backwards from a
+ * KernelSU it already has. Only the second one is the app offering a release the phone has moved past.
+ */
+internal enum class PayloadKernelState {
+    /** Nothing declared, or nothing read from the boot: there is no pair to compare. */
+    Unknown,
+
+    /** The payload declares the release this boot is running. */
+    Same,
+
+    /** The payload declares a newer release than this boot runs: it arrives with the next run. */
+    Ahead,
+
+    /** This boot runs a newer release than the payload declares. */
+    Behind,
+}
+
+/**
+ * The payload's declared KernelSU against this boot's, in the release form both are compared in.
+ *
+ * A reading rather than a message, so the row, the dialog and the tests all describe the same pair of
+ * numbers - and so a screen cannot print a flag whose two versions it worked out separately.
+ */
+internal data class PayloadKernelReading(
+    /** The release the payload declares, or null when it declares none. */
+    val declared: String?,
+
+    /** The release this boot is running, or null when nothing could be read. */
+    val running: String?,
+
+    val state: PayloadKernelState,
+) {
+    /** Whether this is worth saying out loud, which is the two states that disagree. */
+    val flagged: Boolean
+        get() = state == PayloadKernelState.Ahead || state == PayloadKernelState.Behind
+}
+
+/**
+ * The KernelSU a payload declares, read against the one this boot is running.
+ *
+ * The boot's own version is the one the app cannot offer instead: the payload decides what the *next*
+ * run loads, so its release is the right number to install - except where the phone is already ahead of
+ * it, and this is the check that says so. Where either side is missing or carries no release the answer
+ * is [PayloadKernelState.Unknown]: a version pair invented on a reading that did not happen would be a
+ * warning about nothing, which is exactly what the manager rows refuse to print.
+ */
+internal fun payloadKernelReading(declared: String?, running: String?): PayloadKernelReading {
+    val payload = releaseOf(declared)
+    val boot = releaseOf(running)
+    val state = when {
+        payload == null || boot == null -> PayloadKernelState.Unknown
+        else -> when {
+            compareReleases(payload, boot) > 0 -> PayloadKernelState.Ahead
+            compareReleases(payload, boot) < 0 -> PayloadKernelState.Behind
+            else -> PayloadKernelState.Same
+        }
+    }
+    return PayloadKernelReading(declared = payload, running = boot, state = state)
+}
+
+/**
+ * The version to offer once the payload is behind this boot, or null when it is not.
+ *
+ * Mirroring [managerMismatchTarget]: a state with a fix names it, and every other state names nothing,
+ * so a control cannot appear on a row whose problem it does not solve. The fix here is the running
+ * KernelSU rather than the payload's, because the payload's is the release the phone has moved past -
+ * and naming it as the manager version is what stops the offer from pointing back at it.
+ */
+internal fun payloadBehindTarget(reading: PayloadKernelReading): String? =
+    reading.running?.takeIf { reading.state == PayloadKernelState.Behind }
+
+/**
  * The pair a versions card prints: the two readings, and whether they line up.
  *
  * Both values are in the *release* form, which is the form [managerVersionState] compares - and that is

@@ -3790,6 +3790,21 @@ private fun SettingsPage(
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    // The row's flag, repeated where the choice is actually made: this is the one screen
+                    // that can still install a release the phone has moved past, so it says so here
+                    // rather than only on the row that opened it.
+                    payloadDriftNotice(
+                        payloadKernelReading(
+                            declared = AppPreferences.payloadKernelSuVersion(context, kernelsuFlavor),
+                            running = runningVersion,
+                        ),
+                    )?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     // The reading the picker exists for, next to the picker: it is the one version
                     // that is certainly right, and naming it is what turns "which do I install" into
                     // one tap. Offered only when it is not the version already offered, because that
@@ -4670,6 +4685,14 @@ private fun SettingsPage(
                 val versionPair = remember(managerVersion, runningKernelSu) {
                     versionPairDisplay(managerVersion, runningKernelSu?.daemon)
                 }
+                // The KernelSU the resolved payload declares, against the one this boot is running.
+                // The offer below takes its number from the payload, which is right for the *next* run
+                // - so where the phone has already moved past it, the row has to say so rather than
+                // present a release that mismatches the boot the moment it is installed.
+                val payloadKernel = payloadKernelReading(
+                    declared = AppPreferences.payloadKernelSuVersion(context, kernelsuFlavor),
+                    running = runningKernelSu?.daemon,
+                )
                 SettingsCard(
                     icon = Icons.Rounded.VerifiedUser,
                     title = stringResource(R.string.settings_manager),
@@ -4781,6 +4804,21 @@ private fun SettingsPage(
                         },
                     ),
                     value = offeredManagerVersion,
+                    // Where the two disagree the offer is still the payload's version - that is what the
+                    // next run will load - but it is not presented as unremarkable, and a phone that has
+                    // moved past the payload gets the one tap that stops the offer pointing back at it.
+                    notice = payloadDriftNotice(payloadKernel),
+                    noticeIcon = if (payloadKernel.state == PayloadKernelState.Behind) {
+                        Icons.Rounded.History
+                    } else {
+                        Icons.Rounded.RestartAlt
+                    },
+                    noticeAction = payloadBehindTarget(payloadKernel)?.let { running ->
+                        NoticeAction(
+                            label = stringResource(R.string.settings_manager_version_keep_boot, running),
+                            onClick = { onManagerVersionChanged(running) },
+                        )
+                    },
                     position = SettingsCardPosition.Middle,
                     onClick = {
                         clickHaptic(view)
@@ -7510,6 +7548,32 @@ private val SHIZUKU_START_LOG_MAX_HEIGHT = 220.dp
 
 /** An action offered beside a card's notice: what it says it does, and what it does. */
 internal data class NoticeAction(val label: String, val onClick: () -> Unit)
+
+/**
+ * The flag for a payload's KernelSU standing beside the boot's, or null when they agree or nothing is
+ * known.
+ *
+ * One wording for both places it appears, so the row and the dialog cannot describe the same pair of
+ * numbers differently - and so the two states keep their different sentences rather than collapsing
+ * into a generic warning: a payload ahead of the boot lands on the next run, while one behind it is the
+ * app offering a release this phone has already passed.
+ */
+@Composable
+private fun payloadDriftNotice(reading: PayloadKernelReading): String? = when (reading.state) {
+    PayloadKernelState.Ahead -> stringResource(
+        R.string.settings_manager_version_drift_ahead,
+        reading.running.orEmpty(),
+        reading.declared.orEmpty(),
+    )
+
+    PayloadKernelState.Behind -> stringResource(
+        R.string.settings_manager_version_drift_behind,
+        reading.running.orEmpty(),
+        reading.declared.orEmpty(),
+    )
+
+    else -> null
+}
 
 /**
  * One row of the settings list: an icon, a title, a description, and an optional trailing value.

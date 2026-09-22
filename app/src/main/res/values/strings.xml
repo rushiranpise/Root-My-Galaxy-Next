@@ -730,6 +730,9 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="settings_manager_version">Manager version control</string>
     <string name="settings_manager_version_summary">Choose the manager version to install</string>
     <string name="settings_manager_version_summary_payload">Matches the KernelSU your payload loads</string>
+    <string name="settings_manager_version_drift_ahead">This boot runs %1$s; the payload loads %2$s, which lands after the next run</string>
+    <string name="settings_manager_version_drift_behind">This boot runs %1$s already, newer than the %2$s this payload loads</string>
+    <string name="settings_manager_version_keep_boot">Keep %1$s</string>
     <string name="target_loads_kernelsu">Loads %1$s %2$s</string>
     <string name="target_loads_kernelsu_unknown">Loads %1$s (version not declared)</string>
     <string name="settings_versions">Running</string>
