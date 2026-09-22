@@ -314,7 +314,25 @@ class PayloadRepository(private val context: Context) {
         val manifest = SupportManifest.parse(
             downloadBytes(revisionManifestUrl(source.repository, commit), MAX_MANIFEST_BYTES),
         )
+        noteIgnored(manifest)
         return manifest.coverageFor(snapshot, commit)
+    }
+
+    /**
+     * Says what a manifest left out, in the app's own log.
+     *
+     * A feed can declare a flavour this build does not know - the app that reads it may simply be older
+     * - and those entries are dropped so the rest of the catalog still loads. Dropped silently is the
+     * one way that is worse than either: the payload is there in the file and nowhere in the app.
+     */
+    private fun noteIgnored(manifest: SupportManifest) {
+        for (ignored in manifest.ignored) {
+            AppLog.warn(
+                AppLogTags.CATALOG,
+                "Ignoring ${ignored.payloadId}: it declares flavour " +
+                    "\"${ignored.declaredFlavor}\", and this build knows ${KernelSuFlavor.ids}",
+            )
+        }
     }
 
     /** The manifest and the revision it was read at. Both callers need the revision. */
@@ -326,7 +344,9 @@ class PayloadRepository(private val context: Context) {
             rawUrl(source, commit, MANIFEST_PATH),
             MAX_MANIFEST_BYTES,
         )
-        return FetchedManifest(commit, SupportManifest.parse(manifestBytes))
+        val manifest = SupportManifest.parse(manifestBytes)
+        noteIgnored(manifest)
+        return FetchedManifest(commit, manifest)
     }
 
     private fun loadSource(source: PayloadSource): List<TargetProfile> {

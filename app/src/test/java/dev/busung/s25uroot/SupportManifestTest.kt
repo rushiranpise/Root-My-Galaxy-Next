@@ -131,6 +131,75 @@ class SupportManifestTest {
         assertNull(parsed.targets[1].kernelSuVersion)
     }
 
+    @Test
+    fun dropsAnEntryWhoseFlavourThisBuildDoesNotKnow() {
+        // The rest of the feed has to survive it. Refusing the whole manifest is what this used to do,
+        // and it makes every install older than a new flavour lose every payload it had - while the
+        // entry must still not be read as the default, because a device offered the other project's
+        // kernel because a name looked close is the outcome nothing can explain afterwards.
+        val parsed = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[
+              {
+                "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
+                "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0 (test)",
+                "models":["SM-S938U1"],
+                "kernelVersions":["6.6.98"],
+                "flavor":"resukisu",
+                "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+                "kernelsu":{"url":"https://example.invalid/ksud-rsksu","size":8192}
+              },
+              {
+                "payloadId":"pa3q-S938USQSCCZF9-ksu330",
+                "displayName":"Galaxy S25 Ultra | KernelSU 3.3.0 (test)",
+                "models":["SM-S938U1"],
+                "kernelVersions":["6.6.98"],
+                "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+                "kernelsu":{"url":"https://example.invalid/ksud","size":8192}
+              }
+            ]}
+            """.trimIndent().toByteArray(),
+        )
+
+        assertEquals(1, parsed.targets.size)
+        val kept = parsed.targets.single()
+        assertEquals("pa3q-S938USQSCCZF9-ksu330", kept.profileId)
+        assertEquals(KernelSuFlavor.Default, kept.flavor)
+        // Dropped silently would be the one outcome worse than either: the payload is in the file and
+        // nowhere in the app. The caller logs what this list names.
+        assertEquals(
+            listOf(UnreadablePayload(payloadId = "pa3q-S938USQSCCZF9-rsksu420", declaredFlavor = "resukisu")),
+            parsed.ignored,
+        )
+    }
+
+    @Test
+    fun keepsTheFlavourAnEntryItKnowsDeclares() {
+        // An entry that declares none is the default rather than dropped: every feed written before
+        // flavours existed reads as KernelSU.
+        val parsed = SupportManifest.parse(manifest)
+
+        assertEquals(2, parsed.targets.size)
+        assertEquals(KernelSuFlavor.Default, parsed.targets[0].flavor)
+        assertEquals(KernelSuFlavor.Default, parsed.targets[1].flavor)
+        assertTrue(parsed.ignored.isEmpty())
+
+        val declared = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-ksun340",
+              "displayName":"Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"kernelsu-next",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud-next","size":8192}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals(KernelSuFlavor.KernelSuNext, declared.targets.single().flavor)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun refusesASchemaItCannotRead() {
         // A feed that moves to a schema this build does not know must fail loudly at parse time

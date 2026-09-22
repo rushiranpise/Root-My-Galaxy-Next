@@ -165,9 +165,24 @@ fun TargetProfile.kernelMatch(snapshot: DeviceSnapshot): KernelMatch = when {
     else -> KernelMatch.None
 }
 
+/**
+ * An entry the parser left out, kept so the caller can say so.
+ *
+ * The parser does not log it itself: `parse` is a pure function over bytes, called from unit tests
+ * with no Android runtime under it, and a warning that can only be produced on a device is a warning
+ * no test can hold anyone to.
+ */
+data class UnreadablePayload(
+    val payloadId: String,
+    /** The flavour the entry declared, exactly as written - it is the part being complained about. */
+    val declaredFlavor: String,
+)
+
 data class SupportManifest(
     val schemaVersion: Int,
     val targets: List<TargetProfile>,
+    /** Entries this build could not serve. Empty for a feed written for this build. */
+    val ignored: List<UnreadablePayload> = emptyList(),
 ) {
     companion object {
         fun parse(bytes: ByteArray): SupportManifest {
@@ -175,9 +190,24 @@ data class SupportManifest(
             val schemaVersion = root.getInt("schemaVersion")
             require(schemaVersion == 3) { "Unsupported support manifest schema" }
             val payloadsJson = root.getJSONArray("payloads")
+            val ignored = mutableListOf<UnreadablePayload>()
             val payloads = buildList {
                 for (index in 0 until payloadsJson.length()) {
                     val payload = payloadsJson.getJSONObject(index)
+                    val flavor = payload.flavorOrNull()
+                    if (flavor == null) {
+                        // One entry the app cannot serve, and not the whole feed with it. Refusing used
+                        // to mean the manifest failed to parse, so the day a feed gained a flavour was
+                        // the day every install older than it lost every payload; this way only the
+                        // entries this build cannot select are left out. It is still not read as the
+                        // default, which was the point of refusing - a device must never be offered
+                        // the other project's kernel because a name was close.
+                        ignored += UnreadablePayload(
+                            payloadId = payload.optString("payloadId"),
+                            declaredFlavor = payload.optString("flavor").trim(),
+                        )
+                        continue
+                    }
                     val exploit = payload.getJSONObject("exploit")
                     val kernelSu = payload.getJSONObject("kernelsu")
                     add(
@@ -191,12 +221,12 @@ data class SupportManifest(
                             exploit = exploit.artifact(),
                             kernelSu = kernelSu.artifact(),
                             kernelSuVersion = kernelSu.declaredVersion(),
-                            flavor = payload.flavor(),
+                            flavor = flavor,
                         ),
                     )
                 }
             }
-            return SupportManifest(schemaVersion, payloads)
+            return SupportManifest(schemaVersion, payloads, ignored)
         }
 
         private fun JSONArray.strings(): Set<String> = buildSet {
@@ -204,17 +234,18 @@ data class SupportManifest(
         }
 
         /**
-         * The flavour an entry declares, or the default when it declares none.
+         * The flavour an entry declares, the default when it declares none, and null when it names one
+         * this build does not know.
          *
-         * An id this build does not know is refused rather than read as the default. A manifest that
-         * says `"flavor": "kernel-su"` was written for something, and installing the other project's
-         * module because the name looked close is the one outcome that cannot be explained afterwards.
+         * An unknown id is never read as the default: a manifest that says `"flavor": "kernel-su"`
+         * was written for something, and installing the other project's module because the name looked
+         * close is the one outcome that cannot be explained afterwards. What the caller does with null
+         * is drop that entry and say so - see [parse].
          */
-        private fun JSONObject.flavor(): KernelSuFlavor {
+        private fun JSONObject.flavorOrNull(): KernelSuFlavor? {
             val declared = optString("flavor").trim()
             if (declared.isEmpty()) return KernelSuFlavor.Default
             return KernelSuFlavor.fromId(declared)
-                ?: error("Unknown payload flavour \"$declared\"; expected one of ${KernelSuFlavor.ids}")
         }
 
         /** Reads one artifact. Both artifacts of a payload take the same optional fields. */

@@ -42,15 +42,18 @@ class KernelSuFlavorTest {
     }
 
     @Test
-    fun `an unknown flavour id is refused rather than read as the default`() {
-        val thrown = runCatching {
-            SupportManifest.parse(
-                manifest("""{ "payloadId": "p", "displayName": "d", "flavor": "kernel-su", """),
-            )
-        }.exceptionOrNull()
+    fun `an unknown flavour id is left out rather than read as the default`() {
+        // Two things at once, and both matter. The entry is not served - reading `kernel-su` as the
+        // default would install another project's kernel on a phone that asked for one this build
+        // cannot offer - and it is not fatal either, because a feed that gained a flavour must not
+        // take every payload an older install had down with it. What is left out is reported, so a
+        // payload that is in the file and nowhere in the app can be found.
+        val parsed = SupportManifest.parse(
+            manifest("""{ "payloadId": "p", "displayName": "d", "flavor": "kernel-su", """),
+        )
 
-        assertTrue(thrown?.message.orEmpty().contains("kernel-su"))
-        assertTrue(thrown?.message.orEmpty().contains("kernelsu-next"))
+        assertTrue(parsed.targets.isEmpty())
+        assertEquals(listOf(UnreadablePayload(payloadId = "p", declaredFlavor = "kernel-su")), parsed.ignored)
     }
 
     @Test
