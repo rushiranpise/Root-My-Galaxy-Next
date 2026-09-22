@@ -101,12 +101,26 @@ class OfflinePayloadStoreTest {
     }
 
     @Test
+    fun `the KernelSU version the cached daemon is built from survives the cache`() {
+        // An offline run loads this exact daemon, so the manager that matches it is a fact about the
+        // cache rather than about whatever the feed says today - and a dropped version would send the
+        // offer back to the flavour's own release, which may be another line entirely.
+        val parsed = CachedPayload.parse(
+            cached().copy(flavor = KernelSuFlavor.KernelSuNext, kernelSuVersion = "3.4.0").toJson(),
+        )
+
+        assertEquals("3.4.0", parsed.kernelSuVersion)
+        assertEquals("3.4.0", parsed.profile().kernelSuVersion)
+    }
+
+    @Test
     fun `a cache written before flavours and sources existed still reads as KernelSU with no source`() {
         // This is the migration case, and it has to be readable rather than refused: the payload is
         // still a payload, and the entry it rebuilds is the one an older build would have run.
         val legacy = cached().toJson().let { json ->
             JSONObject(json).apply {
                 remove("flavor")
+                remove("kernelSuVersion")
                 remove("sourceId")
                 remove("sourceLabel")
                 remove("sourceCommit")
@@ -116,6 +130,7 @@ class OfflinePayloadStoreTest {
         val parsed = CachedPayload.parse(legacy)
 
         assertEquals(KernelSuFlavor.Default, parsed.flavor)
+        assertNull(parsed.kernelSuVersion)
         assertEquals("", parsed.sourceLabel)
         assertEquals("", parsed.sourceCommit)
     }

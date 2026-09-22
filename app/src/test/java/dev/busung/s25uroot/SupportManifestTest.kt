@@ -2,6 +2,7 @@ package dev.busung.s25uroot
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -97,6 +98,37 @@ class SupportManifestTest {
         )
 
         assertEquals("e2s-S926BXXUEDZDR", parsed.targets.resolveFor(snapshot)?.profileId)
+    }
+
+    @Test
+    fun readsTheKernelSuVersionAnEntryDeclares() {
+        // A feed may write the tag it was built from or the version, and the two have to arrive here as
+        // the same value: this is compared against a manager's own `versionName` and against the
+        // flavour's fallback, both of which are dotted numbers.
+        val tagged = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-ksun340",
+              "displayName":"Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"kernelsu-next",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud","size":8192,"version":"v3.4.0"}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals("3.4.0", tagged.targets.single().kernelSuVersion)
+    }
+
+    @Test
+    fun anEntryThatDeclaresNoVersionReadsAsNothing() {
+        // Rather than as a version: the manager offer falls back to the flavour's own release there, and
+        // a value invented here would be a version no release can be looked up for.
+        val parsed = SupportManifest.parse(manifest)
+
+        assertNull(parsed.targets[0].kernelSuVersion)
+        assertNull(parsed.targets[1].kernelSuVersion)
     }
 
     @Test(expected = IllegalArgumentException::class)

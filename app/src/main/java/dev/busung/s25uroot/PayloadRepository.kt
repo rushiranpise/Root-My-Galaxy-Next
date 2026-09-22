@@ -234,8 +234,13 @@ class PayloadRepository(private val context: Context) {
      */
     fun resolveTarget(snapshot: DeviceSnapshot): TargetProfile {
         val catalog = loadTargets()
-        return catalog.resolveFor(snapshot, AppPreferences.kernelsuFlavor(context))
+        val resolved = catalog.resolveFor(snapshot, AppPreferences.kernelsuFlavor(context))
             ?: error(noProfileReason(snapshot, catalog))
+        // This is the payload the run about to start will load, so its KernelSU version is the one the
+        // manager rows offer from here on - recorded where the decision is made rather than re-derived
+        // by each screen that needs it.
+        rememberResolvedPayload(context, resolved)
+        return resolved
     }
 
     /**

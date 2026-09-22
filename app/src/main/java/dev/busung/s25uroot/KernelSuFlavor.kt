@@ -26,16 +26,19 @@ enum class KernelSuFlavor(
     /** Where its releases live, which is what a manager upgrade resolves against. */
     val repository: String,
     /**
-     * The manager version offered when nothing overrides it.
+     * The version this flavour falls back to, and the only one whose APK file name the app knows.
      *
-     * Each flavour names the release this project's payloads for it are built from, because the daemon a
-     * run stages and the manager that talks to it come from the same release - and offering one from an
-     * older line is how the app came to hand people a manager its own kernel was never built against.
+     * It is no longer the whole answer. What the app offers is the KernelSU the payload it resolved for
+     * this device declares, and this is what is left when nothing says: no payload resolved yet, or an
+     * entry that does not declare a version. That is why it must name a release the project really
+     * builds from rather than the newest that exists - it is the manager for the daemon this project's
+     * payloads stage when the feed is silent about which KernelSU that is.
+     *
      * The two are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's newest
      * there), while KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published.
      *
      * Nothing checks this against the version on the phone - a newer manager installs and is used exactly
-     * the same, and one picked by hand takes precedence - so it is only the one offered unprompted.
+     * the same, and one picked by hand takes precedence.
      */
     val defaultManagerVersion: String,
     /** The file name that version was published under, for when the store cannot be asked. */
@@ -63,7 +66,12 @@ enum class KernelSuFlavor(
     ),
     ;
 
-    /** The manager the app offers unprompted, without asking for its release. */
+    /**
+     * This flavour's own release, without asking for it.
+     *
+     * What the offer resolves to when it is this version, and what the download falls back to when it
+     * is - see [ManagerOffer.assetNameKnown].
+     */
     val defaultManagerRelease: ManagerRelease
         get() = ManagerRelease(
             flavor = this,

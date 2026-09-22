@@ -729,6 +729,7 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="settings_manager_summary_unreadable">Installed; version could not be read</string>
     <string name="settings_manager_version">Manager version control</string>
     <string name="settings_manager_version_summary">Choose the manager version to install</string>
+    <string name="settings_manager_version_summary_payload">Matches the KernelSU your payload loads</string>
     <string name="settings_versions">Running</string>
     <string name="settings_versions_summary">Installed on this device</string>
     <string name="settings_versions_summary_mismatch">Mismatch</string>
@@ -746,7 +747,7 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="settings_manager_versions_loading">Reading the published versions…</string>
     <string name="settings_manager_versions_failed">Could not read the versions: %1$s. Enter one manually below instead.</string>
     <string name="settings_manager_versions_default">Recommended</string>
-    <string name="settings_manager_version_hint">Example 3.3.0</string>
+    <string name="settings_manager_version_hint">Example 3.4.0</string>
     <string name="settings_manager_version_looking">Looking for %1$s %2$s…</string>
     <string name="settings_manager_version_missing">No APK found in %1$s %2$s</string>
     <string name="settings_manager_version_reset">Restore (%1$s)</string>

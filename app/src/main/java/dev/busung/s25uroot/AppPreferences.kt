@@ -39,6 +39,7 @@ object AppPreferences {
     private const val LOAD_KERNEL_SU = "load_kernel_su"
     private const val KERNEL_SU_FLAVOR = "kernel_su_flavor"
     private const val MANAGER_VERSION_PREFIX = "manager_version_"
+    private const val PAYLOAD_KERNEL_SU_VERSION_PREFIX = "payload_ksu_version_"
     private const val MANAGER_PACKAGE_PREFIX = "manager_package_"
     private const val LOADED_FLAVOR = "loaded_flavor"
     private const val LOADED_FLAVOR_BOOT = "loaded_flavor_boot"
@@ -251,9 +252,10 @@ object AppPreferences {
     /**
      * The manager version to offer for [flavor], when the user has named one.
      *
-     * Null means the flavour's own default, which is what keeps this from being a second place a
-     * version is written down: the app stores only the deliberate choice, so a default that changes
-     * in a later build changes for everyone who never made one.
+     * Null means the app's own offer, which is what keeps this from being a second place a version is
+     * written down: the app stores only the deliberate choice, so an offer that changes - because the
+     * payload changed, or because a later build knows a newer release - changes for everyone who never
+     * made one.
      */
     fun managerVersion(context: Context, flavor: KernelSuFlavor): String? =
         prefs(context).getString(MANAGER_VERSION_PREFIX + flavor.id, null)
@@ -263,6 +265,29 @@ object AppPreferences {
     fun setManagerVersion(context: Context, flavor: KernelSuFlavor, version: String?) {
         val editor = prefs(context).edit()
         val key = MANAGER_VERSION_PREFIX + flavor.id
+        if (version.isNullOrBlank()) editor.remove(key) else editor.putString(key, version.trim())
+        editor.apply()
+    }
+
+    /**
+     * The KernelSU version the payload the app last resolved for [flavor] declares.
+     *
+     * Written whenever a run resolves its payload, whenever a payload is picked by hand, and whenever
+     * one is cached - the three moments the app learns which payload this device will run. It is a
+     * record of a decision rather than of the catalog: nothing here re-reads the sources, so a phone
+     * with no network still offers the manager that matches the daemon it is holding.
+     *
+     * Null means no payload has declared one, which is every entry written before the feed carried the
+     * field. The manager offer falls back to the flavour's own release there rather than guessing.
+     */
+    fun payloadKernelSuVersion(context: Context, flavor: KernelSuFlavor): String? =
+        prefs(context).getString(PAYLOAD_KERNEL_SU_VERSION_PREFIX + flavor.id, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+
+    fun setPayloadKernelSuVersion(context: Context, flavor: KernelSuFlavor, version: String?) {
+        val editor = prefs(context).edit()
+        val key = PAYLOAD_KERNEL_SU_VERSION_PREFIX + flavor.id
         if (version.isNullOrBlank()) editor.remove(key) else editor.putString(key, version.trim())
         editor.apply()
     }

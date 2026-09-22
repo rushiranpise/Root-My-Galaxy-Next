@@ -173,15 +173,16 @@ internal object KernelSuManager {
     }
 
     /**
-     * The release the app offers for [flavor]: the version the user named, or the flavour's default.
+     * The release the app offers for [flavor], from [offeredManager]'s three facts.
      *
-     * No network for a default, because its asset name is known; a named version is resolved on the
-     * way to installing it, where a failed lookup is worth a message.
+     * No network when the asset name is known, which is the flavour's own release - so the usual offer
+     * costs nothing. Any other version is left pointing at its release page here and resolved for real
+     * on the way to installing it, where a failed lookup is worth a message to the person who asked.
      */
     fun offeredRelease(context: Context, flavor: KernelSuFlavor): ManagerRelease {
-        val named = AppPreferences.managerVersion(context, flavor) ?: return flavor.defaultManagerRelease
-        if (named == flavor.defaultManagerVersion) return flavor.defaultManagerRelease
-        return flavor.defaultManagerRelease.copy(version = named, url = releasePageUrl(flavor, named))
+        val offer = offeredManager(context, flavor)
+        if (offer.assetNameKnown) return flavor.defaultManagerRelease
+        return flavor.defaultManagerRelease.copy(version = offer.version, url = releasePageUrl(flavor, offer.version))
     }
 
     /**
@@ -202,7 +203,8 @@ internal object KernelSuManager {
                 return
             }
         }
-        openDownload(context, flavor, AppPreferences.managerVersion(context, flavor), onMessage)
+        // Nothing named, so this is the app's own offer rather than a version the caller has in hand.
+        openDownload(context, flavor, null, onMessage)
     }
 
     /**
@@ -222,14 +224,18 @@ internal object KernelSuManager {
     ) = openDownload(context, flavor, version, onMessage)
 
     /**
-     * The one download path, so a version named by hand, picked from a listing and read off the device
-     * all arrive at the same URL by the same rules.
+     * The one download path, so a version named by hand, picked from a listing, read off the device and
+     * offered by the payload all arrive at the same URL by the same rules.
      *
      * Two things it does not do, both of them deliberate. It does not install anything itself - the
      * release is opened for the phone's own installer, which is the only thing that may replace a
      * manager. And it does not guess an asset name: a version's file carries a build number its version
      * does not (`KernelSU_v3.3.0_32601-release.apk`), so anything but a flavour's own default is
      * resolved through the release it names.
+     *
+     * A blank [version] means "whatever this app offers", which is the payload's KernelSU when one has
+     * been resolved - so the version a run will load is also the version the manager row installs, and
+     * neither side has to be told the other's number.
      *
      * The resolve is started on [lookups] rather than awaited here, because every caller of this is a
      * tap and a tap handler runs on the main thread - where the socket that read wants to open is
@@ -242,24 +248,24 @@ internal object KernelSuManager {
         version: String?,
         onMessage: (String) -> Unit,
     ) {
-        val named = version?.trim().orEmpty().ifBlank { null }
-        if (named == null || named == flavor.defaultManagerVersion) {
+        val wanted = version?.trim().orEmpty().ifBlank { offeredManager(context, flavor).version }
+        if (wanted == flavor.defaultManagerVersion) {
             onMain { view(context, flavor.defaultManagerRelease.url) }
             return
         }
         onMain {
-            onMessage(context.getString(R.string.settings_manager_version_looking, flavor.label, named))
+            onMessage(context.getString(R.string.settings_manager_version_looking, flavor.label, wanted))
         }
         lookups.launch {
-            val resolved = resolve(context, flavor, named)
+            val resolved = resolve(context, flavor, wanted)
             onMain {
                 if (resolved == null) {
                     AppLog.warn(
                         AppLogTags.KERNEL_SU,
-                        "No ${flavor.label} $named release could be resolved; opening the releases page",
+                        "No ${flavor.label} $wanted release could be resolved; opening the releases page",
                     )
                     onMessage(
-                        context.getString(R.string.settings_manager_version_missing, flavor.label, named),
+                        context.getString(R.string.settings_manager_version_missing, flavor.label, wanted),
                     )
                     return@onMain
                 }

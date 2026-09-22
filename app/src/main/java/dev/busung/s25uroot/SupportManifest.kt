@@ -57,6 +57,21 @@ data class TargetProfile(
      * that does not declare one is KernelSU, which is every entry written before flavours existed.
      */
     val flavor: KernelSuFlavor = KernelSuFlavor.Default,
+    /**
+     * The KernelSU release this entry's daemon and module are built from, when the feed says.
+     *
+     * Declared rather than worked out from [payloadId], because the id is a name and this is a fact:
+     * `pa3q-S938USQSCCZF9-ksun340` spells its version into a string the app would have to parse and
+     * could get wrong, while the entry can simply say `"version": "3.4.0"` beside the artifact it
+     * describes. Null for every entry written before the field existed, and for a hand-written pair
+     * whose version nobody recorded - which the manager offer reads as "nothing declared" rather than
+     * as a version, and falls back to the flavour's own.
+     *
+     * It is the version of the *KernelSU*, not of the payload: the daemon staged by a run and the
+     * manager installed to drive it have to be the same release, and this is the side of that pair the
+     * feed knows.
+     */
+    val kernelSuVersion: String? = null,
     /** Source that provided this target, empty when it was not loaded through one. */
     val sourceId: String = "",
     val sourceLabel: String = "",
@@ -175,6 +190,7 @@ data class SupportManifest(
                             routePolicy = ExploitRoutePolicy.parse(payload.optJSONObject("routePolicy")),
                             exploit = exploit.artifact(),
                             kernelSu = kernelSu.artifact(),
+                            kernelSuVersion = kernelSu.declaredVersion(),
                             flavor = payload.flavor(),
                         ),
                     )
@@ -208,6 +224,20 @@ data class SupportManifest(
             verifySize = optBoolean("verifySize", true),
             sha256 = optString("sha256").trim().takeIf(String::isNotEmpty),
         )
+
+        /**
+         * The release a `kernelsu` block declares, in the form the rest of the app compares versions in.
+         *
+         * Read through [releaseOf] so a feed that writes the tag it was built from (`v3.4.0`) and one
+         * that writes the version (`3.4.0`) are the same value here - the app compares this against a
+         * manager's own `versionName` and against the flavour's built-in default, and those are dotted
+         * numbers. A value with no dotted number in it is kept as written: it is not a version to
+         * compare, but throwing away what the feed said would leave nothing to show either.
+         */
+        private fun JSONObject.declaredVersion(): String? {
+            val declared = optString("version").trim().takeIf(String::isNotEmpty) ?: return null
+            return releaseOf(declared) ?: declared
+        }
     }
 }
 

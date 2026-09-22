@@ -172,10 +172,16 @@ class KernelSuManagerTest {
             .substringAfter("private fun openDownload(")
             .substringBefore("private val lookups")
         val started = body.indexOf("lookups.launch")
-        val read = body.indexOf("resolve(context, flavor, named)")
+        // The call, not the variable it reads into: what matters is where the read is, and a rename
+        // here should not be able to disarm the guard that keeps it off the main thread.
+        val read = body.indexOf("resolve(context, flavor,")
         assertTrue(
             "openDownload never starts the lookup on lookups: the read would run on the tapping thread",
             started >= 0,
+        )
+        assertTrue(
+            "openDownload no longer reads a release at all",
+            read >= 0,
         )
         assertTrue(
             "openDownload reads the release before it leaves the calling thread",

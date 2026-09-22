@@ -1024,6 +1024,10 @@ private fun RootApp(
             onRetry = installViewModel::loadTargetCatalog,
             onNext = { profile ->
                 selectedProfile = profile
+                // A payload picked by hand is a decision about which KernelSU this phone will load, so
+                // the manager rows follow it from here - before the run that proves it works, because
+                // the manager is installed to drive the load that run performs.
+                rememberResolvedPayload(context, profile)
                 showTargetPicker = false
                 compatibilityWarning = when {
                     !profile.matchesDevice(device) -> CompatibilityWarning.Device
@@ -3749,6 +3753,11 @@ private fun SettingsPage(
     }
 
     if (showManagerVersionDialog) {
+        // What this app offers when nothing is named: the KernelSU the payload for this device loads,
+        // or the flavour's own release when no payload has declared one. Read here rather than passed
+        // in, so the dialog cannot offer a version the row that opened it disagrees with.
+        val offer = offeredManager(context, kernelsuFlavor)
+        val offeredVersion = offer.version
         // What the phone is running, read when the dialog opens rather than passed in: this is the
         // version a manager has to match, and the picker beside it is where that gets acted on.
         var runningVersion by remember { mutableStateOf<String?>(null) }
@@ -3765,8 +3774,8 @@ private fun SettingsPage(
                 KernelSuManager.availableVersions(kernelsuFlavor)
             }
         }
-        // What a download would take now: the name in the field, or the flavour's default when it is empty.
-        val selectedVersion = managerVersionDraft.trim().ifBlank { kernelsuFlavor.defaultManagerVersion }
+        // What a download would take now: the name in the field, or the offer above when it is empty.
+        val selectedVersion = managerVersionDraft.trim().ifBlank { offeredVersion }
         val published = available
         AlertDialog(
             onDismissRequest = { showManagerVersionDialog = false },
@@ -3777,16 +3786,16 @@ private fun SettingsPage(
                         text = stringResource(
                             R.string.settings_manager_dialog_help,
                             kernelsuFlavor.label,
-                            kernelsuFlavor.defaultManagerVersion,
+                            offeredVersion,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     // The reading the picker exists for, next to the picker: it is the one version
                     // that is certainly right, and naming it is what turns "which do I install" into
-                    // one tap. Offered only when it is not the version this app already installs by
-                    // default, because that one is already the default row below.
+                    // one tap. Offered only when it is not the version already offered, because that
+                    // one is the row the list below leads with.
                     runningVersion?.let { running ->
-                        if (running != kernelsuFlavor.defaultManagerVersion) {
+                        if (running != offeredVersion) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3841,11 +3850,11 @@ private fun SettingsPage(
                         )
 
                         else -> {
-                            // The flavour's own default leads, and is listed even when the listing no
-                            // longer carries it: it is the version this app installs when nothing is
-                            // named, so it has to be selectable whether or not the network answered.
+                            // The app's own offer leads, and is listed even when the listing no longer
+                            // carries it: it is the version this app installs when nothing is named, so
+                            // it has to be selectable whether or not the network answered.
                             val versions = (
-                                listOf(kernelsuFlavor.defaultManagerVersion) +
+                                listOf(offeredVersion) +
                                     published.getOrDefault(emptyList())
                                 ).distinct()
                             LazyColumn(
@@ -3856,15 +3865,14 @@ private fun SettingsPage(
                                 items(versions, key = { it }) { version ->
                                     ManagerVersionRow(
                                         version = version,
-                                        isDefault = version == kernelsuFlavor.defaultManagerVersion,
+                                        isDefault = version == offeredVersion,
                                         selected = version == selectedVersion,
                                         onPick = {
-                                            // Picking the default stores no name at all, which is what
-                                            // "the default" already means everywhere else - so a later
-                                            // change of default moves with it rather than pinning it.
-                                            managerVersionDraft = if (
-                                                version == kernelsuFlavor.defaultManagerVersion
-                                            ) {
+                                            // Picking the offered version stores no name at all, which is
+                                            // what "the offer" already means everywhere else - so a
+                                            // payload that changes its KernelSU moves this with it rather
+                                            // than pinning the number it happened to be at.
+                                            managerVersionDraft = if (version == offeredVersion) {
                                                 ""
                                             } else {
                                                 version
@@ -3898,7 +3906,7 @@ private fun SettingsPage(
                             Text(
                                 stringResource(
                                     R.string.settings_manager_version_reset,
-                                    kernelsuFlavor.defaultManagerVersion,
+                                    offeredVersion,
                                 ),
                             )
                         }
@@ -4639,8 +4647,11 @@ private fun SettingsPage(
                         showFlavorDialog = true
                     },
                 )
-                val offeredManagerVersion = AppPreferences.managerVersion(context, kernelsuFlavor)
-                    ?: kernelsuFlavor.defaultManagerVersion
+                // The version this app offers, which is the KernelSU the payload for this device loads
+                // when the user has named nothing - so a manager installed from this row is the one
+                // built against the daemon the next run stages.
+                val managerOffer = offeredManager(context, kernelsuFlavor)
+                val offeredManagerVersion = managerOffer.version
                 val installedManager = remember(kernelsuFlavor, offeredManagerVersion) {
                     KernelSuManager.installedFor(context, kernelsuFlavor)
                 }
@@ -4759,7 +4770,16 @@ private fun SettingsPage(
                 SettingsCard(
                     icon = Icons.Rounded.SystemUpdate,
                     title = stringResource(R.string.settings_manager_version),
-                    description = stringResource(R.string.settings_manager_version_summary),
+                    // Where the number comes from when the user did not type one: naming the payload
+                    // turns "3.4.0" from a number the app chose into the release the phone is about to
+                    // load, which is the only reason to prefer it over the version already installed.
+                    description = stringResource(
+                        when (managerOffer.origin) {
+                            ManagerOfferOrigin.Payload ->
+                                R.string.settings_manager_version_summary_payload
+                            else -> R.string.settings_manager_version_summary
+                        },
+                    ),
                     value = offeredManagerVersion,
                     position = SettingsCardPosition.Middle,
                     onClick = {

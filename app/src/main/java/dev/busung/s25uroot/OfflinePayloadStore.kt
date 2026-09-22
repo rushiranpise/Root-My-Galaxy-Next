@@ -67,6 +67,14 @@ internal data class CachedPayload(
      * payload built for the other - the exact mix-up the flavour exists to prevent.
      */
     val flavor: KernelSuFlavor = KernelSuFlavor.Default,
+    /**
+     * The KernelSU release the cached daemon is built from, when the feed declared one.
+     *
+     * Carried for the same reason [flavor] is: an offline run loads this exact daemon, so the version
+     * it is belongs to the cache rather than to whatever the feed says today. Null in a cache written
+     * from an entry that declared none.
+     */
+    val kernelSuVersion: String? = null,
     /** Where this payload came from, so an offline run can still name its source. */
     val sourceId: String = "",
     val sourceLabel: String = "",
@@ -86,6 +94,7 @@ internal data class CachedPayload(
         put("exploit", exploit.toJson())
         put("kernelSu", kernelSu.toJson())
         put("flavor", flavor.id)
+        kernelSuVersion?.let { put("kernelSuVersion", it) }
         put("sourceId", sourceId)
         put("sourceLabel", sourceLabel)
         put("sourceCommit", sourceCommit)
@@ -104,6 +113,7 @@ internal data class CachedPayload(
         exploit = exploit,
         kernelSu = kernelSu,
         flavor = flavor,
+        kernelSuVersion = kernelSuVersion,
         sourceId = sourceId,
         sourceLabel = sourceLabel,
         sourceCommit = sourceCommit,
@@ -126,6 +136,9 @@ internal data class CachedPayload(
                 // why each read falls back instead of requiring the key: the payload itself is still
                 // usable, and the entry it rebuilds is the same one an older build would have run.
                 flavor = KernelSuFlavor.fromId(json.optString("flavor")) ?: KernelSuFlavor.Default,
+                // Absent in a cache written before the feed declared versions, and in one written from
+                // an entry that declares none: both mean the offer falls back to the flavour's own.
+                kernelSuVersion = json.optString("kernelSuVersion").trim().takeIf(String::isNotEmpty),
                 sourceId = json.optString("sourceId"),
                 sourceLabel = json.optString("sourceLabel"),
                 sourceCommit = json.optString("sourceCommit"),
@@ -245,6 +258,11 @@ internal object KnownGoodPayloadStore {
         }
         Os.chmod(exploit.absolutePath, 0b100100100)
         Os.chmod(kernelSu.absolutePath, 0b100100100)
+        // The cache is what an offline run loads, so this is one of the moments the app decides which
+        // KernelSU this device will run - and the manager rows offer that release's manager from it.
+        // Recorded here rather than when the cache was published, because the run happening now is what
+        // the offer is about.
+        rememberResolvedPayload(context, cached.profile())
         return VerifiedPayloads(cached.profile(), exploit, kernelSu, PayloadOrigin.Cached)
     }
 
@@ -301,6 +319,7 @@ internal object KnownGoodPayloadStore {
             exploit = profile.exploit,
             kernelSu = profile.kernelSu,
             flavor = profile.flavor,
+            kernelSuVersion = profile.kernelSuVersion,
             sourceId = profile.sourceId,
             sourceLabel = profile.sourceLabel,
             sourceCommit = profile.sourceCommit,
