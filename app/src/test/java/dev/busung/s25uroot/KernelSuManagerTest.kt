@@ -33,6 +33,25 @@ class KernelSuManagerTest {
     @Test
     fun `a published package name is matched without case`() {
         assertFalse(identifyManager("  COM.RIFSXD.KSUNEXT  ", "whatever").spoofed)
+        assertEquals(
+            KernelSuFlavor.ReSukiSU,
+            identifyManager("com.resukisu.resukisu", "whatever").flavor,
+        )
+    }
+
+    @Test
+    fun `the third project is read from its label too`() {
+        // A repacked manager of this one keeps the same package, so the label is not the usual path -
+        // but it is the only signal left if a build does change the package, and reading it as KernelSU
+        // would put it in the wrong row.
+        val byLabel = identifyManager("qwerty.asdfgh.zxcvbn", "ReSukiSU")
+        assertEquals(KernelSuFlavor.ReSukiSU, byLabel.flavor)
+        assertTrue(byLabel.spoofed)
+
+        assertEquals(
+            KernelSuFlavor.ReSukiSU,
+            identifyManager("qwerty.asdfgh.zxcvbn", "re_suki_su").flavor,
+        )
     }
 
     @Test

@@ -2264,16 +2264,16 @@ private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
                     onOpenSettings()
                 },
             )
-            ManagerRow(
-                label = stringResource(R.string.readiness_manager_kernelsu),
-                installed = readiness.managers.kernelsu,
-                onClick = onOpenSettings,
-            )
-            ManagerRow(
-                label = stringResource(R.string.readiness_manager_next),
-                installed = readiness.managers.kernelsuNext,
-                onClick = onOpenSettings,
-            )
+            // One row per project, from the same list the flavour picker offers: the manager a run
+            // leaves the phone needing is the one for the flavour it loaded, and a project added to
+            // that list gets a row here without a second edit to remember.
+            for (flavor in KernelSuFlavor.entries) {
+                ManagerRow(
+                    label = stringResource(R.string.readiness_manager_row, flavor.label),
+                    installed = readiness.managers.installed(flavor),
+                    onClick = onOpenSettings,
+                )
+            }
         }
     }
 }

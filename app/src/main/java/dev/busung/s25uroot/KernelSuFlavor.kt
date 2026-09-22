@@ -7,10 +7,10 @@ import org.json.JSONObject
 /**
  * Which KernelSU the app installs and drives.
  *
- * KernelSU and KernelSU-Next are separate projects with separate kernels, separate managers and
- * separate daemons, and they cannot both be in the kernel at once: each hooks the same syscall paths,
- * so a boot carries one of them or neither. That is why this is stored for the app rather than passed
- * to one run, and why changing it has to wait for a restart.
+ * KernelSU, KernelSU-Next and ReSukiSU are separate projects with separate kernels, separate managers
+ * and separate daemons, and no two of them can be in the kernel at once: each hooks the same syscall
+ * paths, so a boot carries one of them or neither. That is why this is stored for the app rather than
+ * passed to one run, and why changing it has to wait for a restart.
  *
  * The ids are the feed's own. A payload entry declares `"flavor": "kernelsu-next"`, and this decides
  * whether a run may use that entry. An entry that says nothing is [Default], which is what keeps every
@@ -34,8 +34,9 @@ enum class KernelSuFlavor(
      * builds from rather than the newest that exists - it is the manager for the daemon this project's
      * payloads stage when the feed is silent about which KernelSU that is.
      *
-     * The two are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's newest
-     * there), while KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published.
+     * The three are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's
+     * newest there), KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published,
+     * and ReSukiSU's is the pre-release its own payload was built against.
      *
      * Nothing checks this against the version on the phone - a newer manager installs and is used exactly
      * the same, and one picked by hand takes precedence.
@@ -63,6 +64,22 @@ enum class KernelSuFlavor(
         defaultManagerVersion = "3.4.0",
         defaultManagerAsset = "KernelSU_Next_v3.4.0_33294-release.apk",
         summaryRes = R.string.flavor_kernelsu_next_summary,
+    ),
+    ReSukiSU(
+        id = "resukisu",
+        label = "ReSukiSU",
+        managerPackage = "com.resukisu.resukisu",
+        repository = "ReSukiSU/ReSukiSU",
+        // A pre-release, and named as one everywhere below: this project marks every release it has
+        // published as a pre-release, so the newest tag is `v4.2.0-rc2` and there is no `v4.2.0` for a
+        // lookup to resolve. The suffix is part of the release's name rather than a description of it -
+        // the tag, the asset and the version the pairs declare all carry it - so keeping it is what
+        // makes a version named here resolve to the same release the daemon was built from.
+        defaultManagerVersion = "4.2.0-rc2",
+        // The universal APK, unlike the other two flavours' single release file: this project publishes
+        // one per ABI and a manager has to install on whatever phone asks for it.
+        defaultManagerAsset = "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+        summaryRes = R.string.flavor_resukisu_summary,
     ),
     ;
 

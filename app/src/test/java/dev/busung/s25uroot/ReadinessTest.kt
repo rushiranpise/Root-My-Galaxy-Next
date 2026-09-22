@@ -71,6 +71,47 @@ class ReadinessTest {
     }
 
     @Test
+    fun `every project the app can install is reported under its own flavour`() {
+        // Driven from the flavour list rather than from three named fields, which is the point: the
+        // card draws one row per flavour the app knows, so a project added there has to be answerable
+        // here without anyone remembering to add it in a second place.
+        val presence = ManagerPresence.of(
+            KernelSuFlavor.entries.map { flavor ->
+                InstalledManager(
+                    packageName = "com.example.${flavor.id}",
+                    label = flavor.label,
+                    versionName = "1.0.0",
+                    flavor = flavor,
+                    spoofed = false,
+                )
+            },
+        )
+
+        for (flavor in KernelSuFlavor.entries) {
+            assertTrue(flavor.label, presence.installed(flavor))
+        }
+    }
+
+    @Test
+    fun `the third project's manager is not claimed by either of the other two`() {
+        val presence = ManagerPresence.of(
+            listOf(
+                InstalledManager(
+                    "com.resukisu.resukisu",
+                    "ReSukiSU",
+                    "4.2.0-rc2",
+                    KernelSuFlavor.ReSukiSU,
+                    false,
+                ),
+            ),
+        )
+
+        assertTrue(presence.installed(KernelSuFlavor.ReSukiSU))
+        assertFalse(presence.installed(KernelSuFlavor.KernelSu))
+        assertFalse(presence.installed(KernelSuFlavor.KernelSuNext))
+    }
+
+    @Test
     fun `a manager on the phone alone does not vouch for the other one`() {
         // These are separate apps and only one of them can be in the kernel, so having one says
         // nothing about the other - and the phone with a manager installed and nothing loaded is the

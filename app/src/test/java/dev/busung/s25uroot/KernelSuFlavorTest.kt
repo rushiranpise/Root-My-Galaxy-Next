@@ -59,9 +59,14 @@ class KernelSuFlavorTest {
     @Test
     fun `ids are matched without case or padding`() {
         assertEquals(KernelSuFlavor.KernelSuNext, KernelSuFlavor.fromId("  KernelSU-Next "))
+        assertEquals(KernelSuFlavor.ReSukiSU, KernelSuFlavor.fromId(" ReSukiSU "))
         assertNull(KernelSuFlavor.fromId(""))
         assertNull(KernelSuFlavor.fromId(null))
         assertNull(KernelSuFlavor.fromId("kernelsu-next-2"))
+        // The id shares a substring with KernelSU's, so a match has to be whole rather than partial:
+        // anything looser would file this project's kernel under the other one's setting.
+        assertNull(KernelSuFlavor.fromId("resu"))
+        assertNull(KernelSuFlavor.fromId("sukisu-ultra"))
     }
 
     @Test
@@ -78,6 +83,18 @@ class KernelSuFlavorTest {
             "https://github.com/tiann/KernelSU/releases/download/v3.3.0/" +
                 "KernelSU_v3.3.0_32601-release.apk",
             KernelSuFlavor.KernelSu.defaultManagerRelease.url,
+        )
+
+        // ReSukiSU's own, and the one that is not shaped like the other two: it publishes every release
+        // as a pre-release, so the version is a name with a suffix in it, and it ships one manager per
+        // ABI, so the file the app would hand over is the universal one.
+        assertEquals("com.resukisu.resukisu", KernelSuFlavor.ReSukiSU.managerPackage)
+        assertEquals("ReSukiSU/ReSukiSU", KernelSuFlavor.ReSukiSU.repository)
+        assertEquals("4.2.0-rc2", KernelSuFlavor.ReSukiSU.defaultManagerVersion)
+        assertEquals(
+            "https://github.com/ReSukiSU/ReSukiSU/releases/download/v4.2.0-rc2/" +
+                "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+            KernelSuFlavor.ReSukiSU.defaultManagerRelease.url,
         )
     }
 

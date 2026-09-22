@@ -141,13 +141,13 @@ class SupportManifestTest {
             """
             {"schemaVersion":3,"payloads":[
               {
-                "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
-                "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0 (test)",
+                "payloadId":"pa3q-S938USQSCCZF9-sukisu",
+                "displayName":"Galaxy S25 Ultra | SukiSU-Ultra (test)",
                 "models":["SM-S938U1"],
                 "kernelVersions":["6.6.98"],
-                "flavor":"resukisu",
+                "flavor":"sukisu-ultra",
                 "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
-                "kernelsu":{"url":"https://example.invalid/ksud-rsksu","size":8192}
+                "kernelsu":{"url":"https://example.invalid/ksud-sukisu","size":8192}
               },
               {
                 "payloadId":"pa3q-S938USQSCCZF9-ksu330",
@@ -168,7 +168,7 @@ class SupportManifestTest {
         // Dropped silently would be the one outcome worse than either: the payload is in the file and
         // nowhere in the app. The caller logs what this list names.
         assertEquals(
-            listOf(UnreadablePayload(payloadId = "pa3q-S938USQSCCZF9-rsksu420", declaredFlavor = "resukisu")),
+            listOf(UnreadablePayload(payloadId = "pa3q-S938USQSCCZF9-sukisu", declaredFlavor = "sukisu-ultra")),
             parsed.ignored,
         )
     }
@@ -198,6 +198,50 @@ class SupportManifestTest {
             """.trimIndent().toByteArray(),
         )
         assertEquals(KernelSuFlavor.KernelSuNext, declared.targets.single().flavor)
+
+        // The third project, and the one whose entry is easiest to get wrong: its id shares a
+        // substring with KernelSU's, so a parser that matched loosely would file it under the wrong
+        // kernel and a run would stage one project's daemon against the other's module.
+        val reSuki = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
+              "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"resukisu",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud-rsksu","size":8192}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals(KernelSuFlavor.ReSukiSU, reSuki.targets.single().flavor)
+    }
+
+    @Test
+    fun aPreReleaseTagKeepsItsSuffix() {
+        // ReSukiSU marks every release it publishes as a pre-release, so `v4.2.0-rc2` is the release's
+        // own name and there is no `v4.2.0` behind it. Reducing it to its dotted number - what a leading
+        // `v` used to be stripped together with - would leave the app offering a tag that does not exist
+        // and looking up a release that was never published.
+        val parsed = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
+              "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"resukisu",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{
+                "url":"https://example.invalid/ksud-rsksu","size":8192,"version":"v4.2.0-rc2"
+              }
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+
+        // The tag's `v` is still taken off, because a tag and the version it names are one value here.
+        assertEquals("4.2.0-rc2", parsed.targets.single().kernelSuVersion)
     }
 
     @Test(expected = IllegalArgumentException::class)

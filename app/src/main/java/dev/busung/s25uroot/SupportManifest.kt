@@ -257,17 +257,19 @@ data class SupportManifest(
         )
 
         /**
-         * The release a `kernelsu` block declares, in the form the rest of the app compares versions in.
+         * The release a `kernelsu` block declares, with the tag's own `v` taken off.
          *
-         * Read through [releaseOf] so a feed that writes the tag it was built from (`v3.4.0`) and one
-         * that writes the version (`3.4.0`) are the same value here - the app compares this against a
-         * manager's own `versionName` and against the flavour's built-in default, and those are dotted
-         * numbers. A value with no dotted number in it is kept as written: it is not a version to
-         * compare, but throwing away what the feed said would leave nothing to show either.
+         * It used to be read through [releaseOf], which reduced every value to its dotted number, and
+         * that turned out to be lossy for a project whose releases are pre-releases: ReSukiSU publishes
+         * `v4.2.0-rc2`, there is no `v4.2.0` to look up, and the daemon the feed serves is built from
+         * the `rc2` tag. The suffix is therefore part of the release's name and kept, while the leading
+         * `v` is dropped so a feed writing the tag (`v3.4.0`) and one writing the version (`3.4.0`) are
+         * still the same value here - this is compared against a manager's own `versionName` and against
+         * the flavour's built-in default, and both of those name the release the same way the tag does.
          */
         private fun JSONObject.declaredVersion(): String? {
             val declared = optString("version").trim().takeIf(String::isNotEmpty) ?: return null
-            return releaseOf(declared) ?: declared
+            return declared.removePrefix("v").removePrefix("V").trim().ifEmpty { declared }
         }
     }
 }

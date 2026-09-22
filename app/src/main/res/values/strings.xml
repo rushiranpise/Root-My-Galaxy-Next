@@ -462,6 +462,7 @@
     -->
     <string name="flavor_kernelsu_summary">Official KernelSU by Weishu.</string>
     <string name="flavor_kernelsu_next_summary">KernelSU-Next by Rifsxd.</string>
+    <string name="flavor_resukisu_summary">ReSukiSU (SukiSU-Ultra fork).</string>
     <string name="repo_no_profile">No payload in the catalog matches %1$s</string>
     <string name="repo_no_profile_closest">Closest: %1$s</string>
     <string name="repo_no_profile_other_kernel">%1$s covers %2$s</string>
@@ -703,8 +704,7 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="readiness">Status</string>
     <string name="readiness_kernelsu">KernelSU</string>
     <string name="readiness_shizuku">Shizuku</string>
-    <string name="readiness_manager_kernelsu">KernelSU manager</string>
-    <string name="readiness_manager_next">KernelSU-Next manager</string>
+    <string name="readiness_manager_row">%1$s manager</string>
     <string name="readiness_installed">Installed</string>
     <string name="readiness_not_installed">Not installed</string>
     <string name="readiness_ksu_active">Active</string>
