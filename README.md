@@ -24,8 +24,7 @@ The device feed and native payloads used here are maintained in
 
 ## Application
 
-<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" />
-<img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
+<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
 <img width="200" alt="Settings, grouped into sections" src="docs/screenshots/settings.png" />
 <img width="200" alt="The app log" src="docs/screenshots/logs.png" />
 
