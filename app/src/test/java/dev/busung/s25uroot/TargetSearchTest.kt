@@ -26,6 +26,7 @@ class TargetSearchTest {
         kernelVersions = setOf("6.6.102"),
         flavor = KernelSuFlavor.KernelSuNext,
         sourceLabel = "payloads-next",
+        kernelSuVersion = "3.4.0",
     )
     private val catalog = listOf(mine, otherDevice, otherKernel)
     private val device = snapshot(model = "SM-S9360", kernelRelease = "6.6.98-android15-8-build")
@@ -54,6 +55,22 @@ class TargetSearchTest {
         assertEquals(listOf(otherKernel.profileId), found("6.6.102"))
         assertEquals(listOf(otherKernel.profileId), found("payloads-next"))
         assertEquals(listOf(otherKernel.profileId), found("next"))
+    }
+
+    @Test
+    fun `search finds a target by the KernelSU it stages`() {
+        // "Which of these stages the release I have a manager for" is a question someone can arrive
+        // with, and the answer must not depend on whether the entry's name happens to spell it out -
+        // some do ("Galaxy S25 Ultra | KernelSU-Next 3.4.0") and the ones this field was added for do not.
+        assertEquals(listOf(otherKernel.profileId), found("3.4.0"))
+    }
+
+    @Test
+    fun `an entry that declares no KernelSU version is not found by one`() {
+        // The fallback the app applies for these is the flavour's own release, which is a decision this
+        // app makes and not a fact about the entry - so searching for it must not return them.
+        assertTrue(mine.kernelSuVersion == null)
+        assertTrue(found("3.3.0").isEmpty())
     }
 
     @Test

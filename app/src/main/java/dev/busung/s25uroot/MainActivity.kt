@@ -216,6 +216,7 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -1024,6 +1025,10 @@ private fun RootApp(
             onRetry = installViewModel::loadTargetCatalog,
             onNext = { profile ->
                 selectedProfile = profile
+                // A payload picked by hand is a decision about which KernelSU this phone will load, so
+                // the manager rows follow it from here - before the run that proves it works, because
+                // the manager is installed to drive the load that run performs.
+                rememberResolvedPayload(context, profile)
                 showTargetPicker = false
                 compatibilityWarning = when {
                     !profile.matchesDevice(device) -> CompatibilityWarning.Device
@@ -1145,6 +1150,21 @@ private fun RootApp(
     LaunchedEffect(selectedPage) { navBarHidden = false }
     val density = LocalDensity.current
 
+    // Declared by the shell rather than by a page, because two pages read the phone's state and both
+    // go stale on the same event: coming back to the foreground. A manager is installed by another
+    // app's installer, a Shizuku grant is made in another app, and each page that kept its own counter
+    // would be a second place to remember the same thing.
+    var resumeTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            // A tick rather than a read here, so the work still happens off the main thread.
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // The bar floats over the pages rather than being handed a strip of its own. A pill that reserved its
     // row left the bottom of every screen empty - the page stopped above it and the last card sat in the
     // middle of the screen with an empty band below - while the pill itself covered nothing that could not
@@ -1190,6 +1210,7 @@ private fun RootApp(
                             rebootNotice = null
                             showRebootSheet = true
                         },
+                        resumeTick = resumeTick,
                         onInstall = {
                             selectedProfile = null
                             if (advancedMode) {
@@ -1234,6 +1255,7 @@ private fun RootApp(
                         partitionReadOnly = partitionReadOnly,
                         payloadMode = payloadMode,
                         batteryUnrestricted = batteryUnrestricted,
+                        resumeTick = resumeTick,
                         onAccentColorChanged = onAccentColorChanged,
                         onThemeModeChanged = onThemeModeChanged,
                         onAdvancedModeChanged = onAdvancedModeChanged,
@@ -1456,6 +1478,14 @@ private fun OverviewPage(
     onInstall: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenReboot: () -> Unit,
+    /**
+     * Bumped by every return to the foreground, and owned by the shell rather than by this page.
+     *
+     * Two screens read the phone's state and both go stale the same way - the package list after a
+     * manager is installed, and a Shizuku grant made in another app - so the event is counted once, by
+     * the shell, instead of each page keeping a counter of the same thing.
+     */
+    resumeTick: Int,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1479,7 +1509,6 @@ private fun OverviewPage(
             ),
         )
     }
-    var resumeTick by remember { mutableStateOf(0) }
     // Reachable from here as well as from Settings: the version and the links are what a reader wants
     // after a run, which is the one thing this screen is about.
     var showAbout by remember { mutableStateOf(false) }
@@ -1511,17 +1540,6 @@ private fun OverviewPage(
             Shizuku.removeBinderReceivedListener(received)
             Shizuku.removeBinderDeadListener(dead)
         }
-    }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            // Coming back from the Shizuku app is when a grant may have changed, and that is the one
-            // change Shizuku sends no callback for. A tick rather than a read here, so the work still
-            // happens off the main thread.
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     PageList(
         padding = padding,
@@ -2260,16 +2278,16 @@ private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
                     onOpenSettings()
                 },
             )
-            ManagerRow(
-                label = stringResource(R.string.readiness_manager_kernelsu),
-                installed = readiness.managers.kernelsu,
-                onClick = onOpenSettings,
-            )
-            ManagerRow(
-                label = stringResource(R.string.readiness_manager_next),
-                installed = readiness.managers.kernelsuNext,
-                onClick = onOpenSettings,
-            )
+            // One row per project, from the same list the flavour picker offers: the manager a run
+            // leaves the phone needing is the one for the flavour it loaded, and a project added to
+            // that list gets a row here without a second edit to remember.
+            for (flavor in KernelSuFlavor.entries) {
+                ManagerRow(
+                    label = stringResource(R.string.readiness_manager_row, flavor.label),
+                    installed = readiness.managers.installed(flavor),
+                    onClick = onOpenSettings,
+                )
+            }
         }
     }
 }
@@ -3503,6 +3521,15 @@ private fun SettingsPage(
     partitionReadOnly: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
+    /**
+     * Bumped by every return to the foreground, because installing a manager leaves this screen.
+     *
+     * The manager rows are read from the package list, and the way a manager gets installed is a
+     * hand-off to another app's installer: the user comes back to a screen whose package walk was made
+     * before the package existed. Keying the read on this is what makes the row say "installed" when it
+     * is, instead of waiting for the app to be restarted or the flavour to be changed.
+     */
+    resumeTick: Int,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
@@ -3749,6 +3776,11 @@ private fun SettingsPage(
     }
 
     if (showManagerVersionDialog) {
+        // What this app offers when nothing is named: the KernelSU the payload for this device loads,
+        // or the flavour's own release when no payload has declared one. Read here rather than passed
+        // in, so the dialog cannot offer a version the row that opened it disagrees with.
+        val offer = offeredManager(context, kernelsuFlavor)
+        val offeredVersion = offer.version
         // What the phone is running, read when the dialog opens rather than passed in: this is the
         // version a manager has to match, and the picker beside it is where that gets acted on.
         var runningVersion by remember { mutableStateOf<String?>(null) }
@@ -3765,8 +3797,8 @@ private fun SettingsPage(
                 KernelSuManager.availableVersions(kernelsuFlavor)
             }
         }
-        // What a download would take now: the name in the field, or the flavour's default when it is empty.
-        val selectedVersion = managerVersionDraft.trim().ifBlank { kernelsuFlavor.defaultManagerVersion }
+        // What a download would take now: the name in the field, or the offer above when it is empty.
+        val selectedVersion = managerVersionDraft.trim().ifBlank { offeredVersion }
         val published = available
         AlertDialog(
             onDismissRequest = { showManagerVersionDialog = false },
@@ -3777,16 +3809,31 @@ private fun SettingsPage(
                         text = stringResource(
                             R.string.settings_manager_dialog_help,
                             kernelsuFlavor.label,
-                            kernelsuFlavor.defaultManagerVersion,
+                            offeredVersion,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    // The row's flag, repeated where the choice is actually made: this is the one screen
+                    // that can still install a release the phone has moved past, so it says so here
+                    // rather than only on the row that opened it.
+                    payloadDriftNotice(
+                        payloadKernelReading(
+                            declared = AppPreferences.payloadKernelSuVersion(context, kernelsuFlavor),
+                            running = runningVersion,
+                        ),
+                    )?.let { notice ->
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     // The reading the picker exists for, next to the picker: it is the one version
                     // that is certainly right, and naming it is what turns "which do I install" into
-                    // one tap. Offered only when it is not the version this app already installs by
-                    // default, because that one is already the default row below.
+                    // one tap. Offered only when it is not the version already offered, because that
+                    // one is the row the list below leads with.
                     runningVersion?.let { running ->
-                        if (running != kernelsuFlavor.defaultManagerVersion) {
+                        if (running != offeredVersion) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3841,11 +3888,11 @@ private fun SettingsPage(
                         )
 
                         else -> {
-                            // The flavour's own default leads, and is listed even when the listing no
-                            // longer carries it: it is the version this app installs when nothing is
-                            // named, so it has to be selectable whether or not the network answered.
+                            // The app's own offer leads, and is listed even when the listing no longer
+                            // carries it: it is the version this app installs when nothing is named, so
+                            // it has to be selectable whether or not the network answered.
                             val versions = (
-                                listOf(kernelsuFlavor.defaultManagerVersion) +
+                                listOf(offeredVersion) +
                                     published.getOrDefault(emptyList())
                                 ).distinct()
                             LazyColumn(
@@ -3856,15 +3903,14 @@ private fun SettingsPage(
                                 items(versions, key = { it }) { version ->
                                     ManagerVersionRow(
                                         version = version,
-                                        isDefault = version == kernelsuFlavor.defaultManagerVersion,
+                                        isDefault = version == offeredVersion,
                                         selected = version == selectedVersion,
                                         onPick = {
-                                            // Picking the default stores no name at all, which is what
-                                            // "the default" already means everywhere else - so a later
-                                            // change of default moves with it rather than pinning it.
-                                            managerVersionDraft = if (
-                                                version == kernelsuFlavor.defaultManagerVersion
-                                            ) {
+                                            // Picking the offered version stores no name at all, which is
+                                            // what "the offer" already means everywhere else - so a
+                                            // payload that changes its KernelSU moves this with it rather
+                                            // than pinning the number it happened to be at.
+                                            managerVersionDraft = if (version == offeredVersion) {
                                                 ""
                                             } else {
                                                 version
@@ -3898,7 +3944,7 @@ private fun SettingsPage(
                             Text(
                                 stringResource(
                                     R.string.settings_manager_version_reset,
-                                    kernelsuFlavor.defaultManagerVersion,
+                                    offeredVersion,
                                 ),
                             )
                         }
@@ -4639,9 +4685,14 @@ private fun SettingsPage(
                         showFlavorDialog = true
                     },
                 )
-                val offeredManagerVersion = AppPreferences.managerVersion(context, kernelsuFlavor)
-                    ?: kernelsuFlavor.defaultManagerVersion
-                val installedManager = remember(kernelsuFlavor, offeredManagerVersion) {
+                // The version this app offers, which is the KernelSU the payload for this device loads
+                // when the user has named nothing - so a manager installed from this row is the one
+                // built against the daemon the next run stages.
+                val managerOffer = offeredManager(context, kernelsuFlavor)
+                val offeredManagerVersion = managerOffer.version
+                // Re-read on the way back from anywhere, because the usual way a manager arrives is
+                // another app's installer - see [resumeTick].
+                val installedManager = remember(kernelsuFlavor, offeredManagerVersion, resumeTick) {
                     KernelSuManager.installedFor(context, kernelsuFlavor)
                 }
                 // Read here, where the rows that say what it means are, and off the main thread: the
@@ -4659,6 +4710,14 @@ private fun SettingsPage(
                 val versionPair = remember(managerVersion, runningKernelSu) {
                     versionPairDisplay(managerVersion, runningKernelSu?.daemon)
                 }
+                // The KernelSU the resolved payload declares, against the one this boot is running.
+                // The offer below takes its number from the payload, which is right for the *next* run
+                // - so where the phone has already moved past it, the row has to say so rather than
+                // present a release that mismatches the boot the moment it is installed.
+                val payloadKernel = payloadKernelReading(
+                    declared = AppPreferences.payloadKernelSuVersion(context, kernelsuFlavor),
+                    running = runningKernelSu?.daemon,
+                )
                 SettingsCard(
                     icon = Icons.Rounded.VerifiedUser,
                     title = stringResource(R.string.settings_manager),
@@ -4759,8 +4818,32 @@ private fun SettingsPage(
                 SettingsCard(
                     icon = Icons.Rounded.SystemUpdate,
                     title = stringResource(R.string.settings_manager_version),
-                    description = stringResource(R.string.settings_manager_version_summary),
+                    // Where the number comes from when the user did not type one: naming the payload
+                    // turns "3.4.0" from a number the app chose into the release the phone is about to
+                    // load, which is the only reason to prefer it over the version already installed.
+                    description = stringResource(
+                        when (managerOffer.origin) {
+                            ManagerOfferOrigin.Payload ->
+                                R.string.settings_manager_version_summary_payload
+                            else -> R.string.settings_manager_version_summary
+                        },
+                    ),
                     value = offeredManagerVersion,
+                    // Where the two disagree the offer is still the payload's version - that is what the
+                    // next run will load - but it is not presented as unremarkable, and a phone that has
+                    // moved past the payload gets the one tap that stops the offer pointing back at it.
+                    notice = payloadDriftNotice(payloadKernel),
+                    noticeIcon = if (payloadKernel.state == PayloadKernelState.Behind) {
+                        Icons.Rounded.History
+                    } else {
+                        Icons.Rounded.RestartAlt
+                    },
+                    noticeAction = payloadBehindTarget(payloadKernel)?.let { running ->
+                        NoticeAction(
+                            label = stringResource(R.string.settings_manager_version_keep_boot, running),
+                            onClick = { onManagerVersionChanged(running) },
+                        )
+                    },
                     position = SettingsCardPosition.Middle,
                     onClick = {
                         clickHaptic(view)
@@ -4768,6 +4851,21 @@ private fun SettingsPage(
                         showManagerVersionDialog = true
                     },
                 )
+                // Only for the module that can be told. The other two decide which APK is their
+                // manager with a signature table compiled into the kernel, so a row here would be a
+                // control that cannot do anything on them - and worse, one whose failure would read
+                // as a problem with the phone rather than with the request.
+                if (kernelsuFlavor.supportsDynamicManager) {
+                    DynamicManagerCard(
+                        installedManager = installedManager,
+                        kernelsuFlavor = kernelsuFlavor,
+                        context = context,
+                        view = view,
+                        scope = scope,
+                        resumeTick = resumeTick,
+                        position = SettingsCardPosition.Middle,
+                    )
+                }
                 // The load decision follows the flavour because the rest of the group depends on it:
                 // root on boot exists to put KernelSU back after a reboot, and a boot run with
                 // nothing to load is not a boot run at all.
@@ -5628,6 +5726,25 @@ private fun TargetSelectionSheet(
                                             KernelMatch.Version -> MaterialTheme.colorScheme.onSurfaceVariant
                                             KernelMatch.None -> MaterialTheme.colorScheme.error
                                         },
+                                    )
+                                    // What the run this candidate would start stages - the KernelSU
+                                    // whose manager is the one built against it. It is the fact the
+                                    // manager offer is derived from, so it belongs where the choice is
+                                    // made rather than in Settings after the fact, and a sibling that
+                                    // declares nothing says so instead of leaving the gap unexplained.
+                                    Text(
+                                        text = profile.kernelSuVersion?.let { version ->
+                                            stringResource(
+                                                R.string.target_loads_kernelsu,
+                                                profile.flavor.label,
+                                                version,
+                                            )
+                                        } ?: stringResource(
+                                            R.string.target_loads_kernelsu_unknown,
+                                            profile.flavor.label,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     if (profile.sourceLabel.isNotEmpty()) {
                                         Text(
@@ -7473,6 +7590,32 @@ private val SHIZUKU_START_LOG_MAX_HEIGHT = 220.dp
 internal data class NoticeAction(val label: String, val onClick: () -> Unit)
 
 /**
+ * The flag for a payload's KernelSU standing beside the boot's, or null when they agree or nothing is
+ * known.
+ *
+ * One wording for both places it appears, so the row and the dialog cannot describe the same pair of
+ * numbers differently - and so the two states keep their different sentences rather than collapsing
+ * into a generic warning: a payload ahead of the boot lands on the next run, while one behind it is the
+ * app offering a release this phone has already passed.
+ */
+@Composable
+private fun payloadDriftNotice(reading: PayloadKernelReading): String? = when (reading.state) {
+    PayloadKernelState.Ahead -> stringResource(
+        R.string.settings_manager_version_drift_ahead,
+        reading.running.orEmpty(),
+        reading.declared.orEmpty(),
+    )
+
+    PayloadKernelState.Behind -> stringResource(
+        R.string.settings_manager_version_drift_behind,
+        reading.running.orEmpty(),
+        reading.declared.orEmpty(),
+    )
+
+    else -> null
+}
+
+/**
  * One row of the settings list: an icon, a title, a description, and an optional trailing value.
  *
  * [busy] is for a row that starts something the app has to wait on. It keeps the row in place and
@@ -7675,6 +7818,125 @@ private fun SettingsSwitchCard(
  * only a colour would say nothing to a reader who cannot see the difference, and a mark that was a
  * sentence would be the notice this card exists to replace.
  */
+/**
+ * The card that gives a kernel the signing key of the manager it has not been built to accept.
+ *
+ * Shown only for a flavour whose module carries the runtime path, because the row's whole meaning is
+ * that a key can be handed to this kernel afterwards - and on a kernel where that is not true, the
+ * most useful thing the row could do is not exist.
+ *
+ * Three things are on it and each answers a different question: what the kernel holds now (the value
+ * band, and empty when it holds nothing), whether there is anything to register (the notice, when no
+ * manager is installed), and the tap, which re-reads the installed manager's own key, gives it to the
+ * kernel and then asks the kernel what it holds. The last step is the one that makes the tap honest:
+ * the write's exit code says an ioctl finished, not that the setting is the one intended.
+ */
+@Composable
+private fun DynamicManagerCard(
+    installedManager: InstalledManager?,
+    kernelsuFlavor: KernelSuFlavor,
+    context: Context,
+    view: View,
+    scope: CoroutineScope,
+    /** Bumped by every return to the foreground, so the reading follows a kernel that was changed. */
+    resumeTick: Int,
+    /**
+     * Where the card sits in the group, which belongs to the caller rather than to this.
+     *
+     * A helper in this file decides nothing about its own place in a list: the group it is drawn in is
+     * the caller's, and a position written here would be a second card claiming a shape outside the
+     * group that owns it.
+     */
+    position: SettingsCardPosition,
+) {
+    var reading by remember { mutableStateOf<DynamicManagerReading?>(null) }
+    var registering by remember { mutableStateOf(false) }
+    // Bumped by a finished attempt, so the reading is made again rather than kept: the row's whole
+    // job is to say what the kernel holds, and a registration changes exactly that.
+    var reads by remember { mutableStateOf(0) }
+    // The resume is in the key for the same reason: a run, or `ksud` itself, can change what the
+    // kernel holds while this screen is in the background.
+    LaunchedEffect(kernelsuFlavor, reads, resumeTick) {
+        reading = withContext(Dispatchers.IO) { DynamicManager.read(context) }
+    }
+    val held = reading
+    SettingsCard(
+        icon = Icons.Rounded.VerifiedUser,
+        title = stringResource(R.string.settings_manager_registration),
+        description = stringResource(R.string.settings_manager_registration_summary),
+        // The key in the band, and nothing when the kernel holds none: an empty band is the state,
+        // and filling it with the key the app would register would put a claim on the row that the
+        // kernel has not made.
+        value = held?.signature?.shortLabel().orEmpty(),
+        notice = when {
+            installedManager == null ->
+                stringResource(R.string.settings_manager_registration_no_manager)
+            held == null -> null
+            held.state == DynamicManagerState.Unreadable ->
+                stringResource(R.string.settings_manager_registration_unreadable)
+            held.state == DynamicManagerState.Unset ->
+                stringResource(R.string.settings_manager_registration_unset)
+            else -> null
+        },
+        noticeIcon = Icons.Rounded.Key,
+        position = position,
+        busy = registering,
+        // Dimmed rather than removed when there is no manager: the row still has to say that the
+        // kernel holds no key, and a card that vanished would take that reading with it.
+        enabled = installedManager != null,
+        onClick = {
+            clickHaptic(view)
+            registering = true
+            scope.launch {
+                val report = withContext(Dispatchers.IO) {
+                    DynamicManager.register(context, kernelsuFlavor)
+                }
+                registering = false
+                reads++
+                Toast.makeText(
+                    context,
+                    managerRegistrationMessage(context, report),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        },
+    )
+}
+
+/**
+ * What a finished attempt says, in the outcome's own words.
+ *
+ * A refusal carries the daemon's line rather than a sentence written here, because the daemon is the
+ * thing that knows: it distinguishes an APK with no v2 signature from a kernel that would not take
+ * the command, and a message of this app's would collapse those into one.
+ */
+private fun managerRegistrationMessage(context: Context, report: RegistrationReport): String =
+    when (report.outcome) {
+        RegistrationOutcome.Registered -> context.getString(
+            R.string.settings_manager_registration_done,
+            report.signature?.shortLabel().orEmpty(),
+        )
+
+        RegistrationOutcome.AlreadyRegistered -> context.getString(
+            R.string.settings_manager_registration_already,
+            report.signature?.shortLabel().orEmpty(),
+        )
+
+        RegistrationOutcome.NoManager ->
+            context.getString(R.string.settings_manager_registration_no_manager)
+
+        RegistrationOutcome.NoShell ->
+            context.getString(R.string.settings_manager_registration_no_shell)
+
+        RegistrationOutcome.Refused -> context.getString(
+            R.string.settings_manager_registration_refused,
+            report.detail.ifBlank { context.getString(R.string.settings_manager_registration_unreadable) },
+        )
+
+        RegistrationOutcome.NotHeld ->
+            context.getString(R.string.settings_manager_registration_not_held)
+    }
+
 internal data class SettingsReading(
     val label: String,
     val value: String,

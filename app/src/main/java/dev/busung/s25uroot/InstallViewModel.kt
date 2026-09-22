@@ -263,6 +263,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var bootSettleOverridden = false
 
     /**
+     * The settle this run was held to, so the payload's own window can be derived from the decision
+     * the run actually made. A second setting would be a second thing to keep in step.
+     */
+    private var bootSettleRequiredSeconds = BootSettle.DEFAULT_SECONDS
+
+    /**
      * Set when the user stops the run, so its cancellation is not read as a failure.
      *
      * A cancellation is delivered as an exception in the run's own coroutine, which is the same shape
@@ -1349,7 +1355,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 logFile.absolutePath,
             ).redirectErrorStream(true)
             processBuilder.environment().putAll(
-                exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy),
+                exploitEnvironment(
+                    requiresFreshP0Session,
+                    cachedP0Offset,
+                    routePolicy,
+                    payloadQuietWindowSeconds(),
+                ),
             )
             processBuilder.start()
         }
@@ -1549,9 +1560,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val lateLoad = runHelper("--late-load")
-        require(lateLoad.code == 0) {
-            app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output)
-        }
+        // The payload's line is logged before anything is judged from it: on a non-zero exit it is
+        // usually the payload's own diagnosis ("driver fd unavailable", "control check failed
+        // ret=… flags=…"), and a refusal that swallows it sends the reader after a cause the run
+        // already wrote down.
         if (lateLoad.output.isNotBlank()) appendLog(lateLoad.output)
         activeStage = RunStage.Verify
         // An exit code says the late-load command finished, not that anything is reachable now, so
@@ -1569,20 +1581,39 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // Said every time, not only on a refusal: the readings are how the next person to read the
         // log tells an unusable load from a check that could not see a healthy one.
         appendLog(app.getString(R.string.log_ksu_control_readings, readings.summary()))
-        require(readings.proofs.isNotEmpty()) {
-            // Which of the two refusals this is, because they send a reader to different places: one is
-            // a load that is not there, the other is a check that could not be made at all.
-            app.getString(
-                if (readings.lookedAtTheKernel()) R.string.error_ksu_not_ready
-                else R.string.error_ksu_unconfirmed,
+        // The readings outrank the payload's code rather than the other way round. That code reports
+        // what the payload's own probe could reach - a driver fd opened through the `reboot` magic,
+        // then a version and two flag bits - so a module that loaded while that route is refused
+        // comes back non-zero, and judging the run on the code alone recorded a landed load as a
+        // failed one: no receipt for the boot, and no manager handed over.
+        when (loadVerdict(lateLoad.code, readings)) {
+            LoadVerdict.Confirmed -> appendLog(
+                app.getString(
+                    R.string.log_ksu_control_verified,
+                    readings.proofs.joinToString { it.label },
+                ),
             )
+
+            // The load landed and its own probe could not say so. Kept as a load, and said out loud,
+            // because the receipt below is what makes the manager worth opening and the next run
+            // refuse a second load for a boot that already has one.
+            LoadVerdict.ConfirmedDespitePayload -> appendLog(
+                app.getString(
+                    R.string.log_ksu_control_verified_despite,
+                    lateLoad.code,
+                    readings.proofs.joinToString { it.label },
+                ),
+            )
+
+            // The refusals, in the order they send a reader: the payload's own account first, then a
+            // kernel that was looked at and lists no module, then a check that could not be made at all.
+            LoadVerdict.RefusedByPayload -> error(
+                app.getString(R.string.error_ksu_verify, lateLoad.code, lateLoad.output),
+            )
+
+            LoadVerdict.NotLoaded -> error(app.getString(R.string.error_ksu_not_ready))
+            LoadVerdict.Unconfirmed -> error(app.getString(R.string.error_ksu_unconfirmed))
         }
-        appendLog(
-            app.getString(
-                R.string.log_ksu_control_verified,
-                readings.proofs.joinToString { it.label },
-            ),
-        )
         // Recorded for the boot, which is as long as a late-loaded module exists: it is what makes a
         // later run of the other flavour refuse with a restart instead of failing inside the loader.
         AppPreferences.setLoadedFlavor(app, payloads.profile.flavor, AutoRootSupport.currentBootToken())
@@ -1651,7 +1682,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
-        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
+        exploitEnvironment(
+            requiresFreshP0Session,
+            cachedP0Offset,
+            routePolicy,
+            payloadQuietWindowSeconds(),
+        ).forEach { (name, value) ->
             append(name).append('=').append(shellQuote(value)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
@@ -1698,7 +1734,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
     ): Array<String> = buildList {
-        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
+        exploitEnvironment(
+            requiresFreshP0Session,
+            cachedP0Offset,
+            routePolicy,
+            payloadQuietWindowSeconds(),
+        ).forEach { (name, value) ->
             add("$name=$value")
         }
         add("CVE43499_ROOT_HELPER=$helperPath")
@@ -1843,6 +1884,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     )
 
     /**
+     * The payload's own post-boot window, from this run's settle decision.
+     *
+     * Read where the environment is built rather than where the run starts, so a mid-run override is
+     * part of the value: the user tapping "run anyway" while the countdown is on screen is exactly the
+     * case that used to skip this app's wait and then sit out the payload's.
+     */
+    private fun payloadQuietWindowSeconds(): Int =
+        BootSettle.payloadQuietWindowSeconds(bootSettleRequiredSeconds, bootSettleOverridden)
+
+    /**
      * Holds the run until the device has been up long enough, reporting the remaining time as it goes.
      *
      * The countdown is the phase message, so it is on the run screen's status card rather than only in
@@ -1852,6 +1903,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      */
     private suspend fun awaitBootSettle(requiredSeconds: Int) {
         val required = BootSettle.normalize(requiredSeconds)
+        bootSettleRequiredSeconds = required
         if (required <= 0) return
         val remaining = BootSettle.remainingMillis(required, BootSettle.elapsedMillis())
         if (remaining <= 0L) {
@@ -1865,6 +1917,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             if (bootSettleOverridden) {
                 appendLog(app.getString(R.string.log_boot_settle_skipped))
                 AppLog.warn(RUN_LOG_TAG, "Boot settle skipped on the user's word")
+                // Says what the skip does not skip: the payload keeps a moment of its own over the same
+                // boot, and without this the pause that follows reads as a run that hung. Its own log
+                // line names the gate it used either way, so the two together account for the wait.
+                AppLog.info(
+                    RUN_LOG_TAG,
+                    "Payload still waits ${BootSettle.label(payloadQuietWindowSeconds())} " +
+                        "for the boot's allocator",
+                )
                 return
             }
             // Minutes of waiting, and the one other place a stop reaches: the settle is the longest part
@@ -2140,7 +2200,15 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // will not apply - and so a value chosen in the settings shows up in both.
             bootSettleSeconds = BootSettle.normalize(bootSettleSeconds),
             routePolicy = routePolicy,
-            environment = exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy.policy),
+            // `overridden = false` because a plan is read before a run exists: the override is offered
+            // while the countdown is on screen, so the value here is the setting's own - and the run's
+            // log records what it actually handed over.
+            environment = exploitEnvironment(
+                requiresFreshP0Session,
+                cachedP0Offset,
+                routePolicy.policy,
+                BootSettle.payloadQuietWindowSeconds(bootSettleSeconds, overridden = false),
+            ),
             shizukuArguments = if (shizuku) {
                 mapOf(
                     "CVE43499_ROOT_HELPER" to SHIZUKU_HELPER_PATH,
@@ -2158,7 +2226,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             requiresFreshP0Session: Boolean,
             cachedP0Offset: String?,
             routePolicy: ExploitRoutePolicy = ExploitRoutePolicy.LEGACY,
+            // Required, with no default: a default here would have to guess the run's settle decision,
+            // and guessing it is how the app's gate and the payload's came to disagree about one boot.
+            payloadQuietWindowSec: Int,
         ): Map<String, String> = buildMap {
+            // First, because it is the wait rather than a knob: by the time the payload reads this the
+            // app has finished its own settle, and this is what the payload waits on top of it.
+            put(BootSettle.PAYLOAD_QUIET_WINDOW_ENV, payloadQuietWindowSec.toString())
             // A fresh-session profile hands its pacing to the payload, so the policy's attempt and
             // timeout budget does not apply to it. The route still does: which way the payload finds
             // the slide is a different question from how many tries it gets.

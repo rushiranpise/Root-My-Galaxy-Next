@@ -1,7 +1,9 @@
 package dev.busung.s25uroot
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -213,5 +215,104 @@ class KernelSuVersionTest {
         assertNull(managerMismatchTarget(ManagerVersionState.Matching, "3.3.0"))
         assertNull(managerMismatchTarget(ManagerVersionState.Unknown, "3.3.0"))
         assertNull(managerMismatchTarget(ManagerVersionState.Differing, null))
+    }
+
+    // --- the payload's KernelSU against this boot's -----------------------------------------------------
+
+    /**
+     * The comparison is numeric, which is the one thing about it worth pinning.
+     *
+     * KernelSU's releases are dotted numbers and `3.10.0` is a release that will exist; compared as
+     * text it sorts *before* `3.9.0`, and the app would then tell a user whose payload is newer than
+     * their boot that their boot is newer than the payload - the two states being opposite fixes.
+     */
+    @Test
+    fun `a newer release is newer than a later one`() {
+        assertEquals(PayloadKernelState.Ahead, payloadKernelReading("3.10.0", "3.9.0").state)
+        assertEquals(PayloadKernelState.Behind, payloadKernelReading("3.9.0", "3.10.0").state)
+        assertEquals(PayloadKernelState.Same, payloadKernelReading("3.10.0", "3.10.0").state)
+    }
+
+    /** A payload that declares the release this boot runs is the case with nothing to say. */
+    @Test
+    fun `a payload matching this boot is not flagged`() {
+        val reading = payloadKernelReading("3.3.0", "3.3.0")
+        assertEquals(PayloadKernelState.Same, reading.state)
+        assertFalse(reading.flagged)
+        assertEquals("3.3.0", reading.declared)
+        assertEquals("3.3.0", reading.running)
+    }
+
+    /**
+     * The payload being ahead and being behind are two sentences, not one warning.
+     *
+     * Ahead means the manager being offered will match as soon as a run loads it; behind means the app
+     * is offering a release the phone has already moved past, which is the one the offer must not make
+     * look unremarkable. Both are flagged; the state is what the screen words differently.
+     */
+    @Test
+    fun `both directions are flagged, and told apart`() {
+        val ahead = payloadKernelReading("3.4.0", "3.3.0")
+        assertEquals(PayloadKernelState.Ahead, ahead.state)
+        assertTrue(ahead.flagged)
+        assertEquals("3.4.0", ahead.declared)
+        assertEquals("3.3.0", ahead.running)
+
+        val behind = payloadKernelReading("3.3.0", "3.4.0")
+        assertEquals(PayloadKernelState.Behind, behind.state)
+        assertTrue(behind.flagged)
+    }
+
+    /**
+     * A reading that did not happen is not a warning about anything.
+     *
+     * The same rule the manager pair follows, and for the same reason: an entry that declares no
+     * version, a phone whose daemon could not be asked, and a package manager answer of `unknown` are
+     * all absences - and an absence compared as if it were a version is how the screen would warn about
+     * a mismatch nobody has.
+     */
+    @Test
+    fun `a payload or a boot that said nothing is not a disagreement`() {
+        listOf(
+            payloadKernelReading(null, "3.3.0"),
+            payloadKernelReading("3.3.0", null),
+            payloadKernelReading(null, null),
+            payloadKernelReading("unknown", "3.3.0"),
+            payloadKernelReading("3.3.0", ""),
+        ).forEach { reading ->
+            assertEquals(PayloadKernelState.Unknown, reading.state)
+            assertFalse(reading.flagged)
+        }
+    }
+
+    /** The forms a real daemon and a real tag carry must not read as two releases. */
+    @Test
+    fun `a suffix and a leading v are the same release`() {
+        assertEquals(PayloadKernelState.Same, payloadKernelReading("3.3.0-ksun", "3.3.0").state)
+        assertEquals(PayloadKernelState.Same, payloadKernelReading("v3.4.0", "3.4.0").state)
+        assertEquals(PayloadKernelState.Same, payloadKernelReading("3.4", "3.4.0").state)
+    }
+
+    /**
+     * The fix for a payload the phone has passed is the version the phone is running.
+     *
+     * Not the payload's - that is the number being complained about - and nothing at all in the two
+     * states that have no such problem, so the row cannot offer a control that does nothing.
+     */
+    @Test
+    fun `only a payload behind this boot names a version to keep`() {
+        assertEquals("3.4.0", payloadBehindTarget(payloadKernelReading("3.3.0", "3.4.0")))
+        assertNull(payloadBehindTarget(payloadKernelReading("3.4.0", "3.3.0")))
+        assertNull(payloadBehindTarget(payloadKernelReading("3.3.0", "3.3.0")))
+        assertNull(payloadBehindTarget(payloadKernelReading(null, "3.4.0")))
+    }
+
+    /** The ordering itself, where the two readings' own fields cannot show it. */
+    @Test
+    fun `releases compare component by component`() {
+        assertEquals(1, compareReleases("3.10.0", "3.9.0"))
+        assertEquals(-1, compareReleases("3.9.0", "3.10.0"))
+        assertEquals(0, compareReleases("3.4", "3.4.0"))
+        assertEquals(1, compareReleases("3.4.1", "3.4"))
     }
 }

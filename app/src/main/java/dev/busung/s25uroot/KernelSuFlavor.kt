@@ -7,10 +7,10 @@ import org.json.JSONObject
 /**
  * Which KernelSU the app installs and drives.
  *
- * KernelSU and KernelSU-Next are separate projects with separate kernels, separate managers and
- * separate daemons, and they cannot both be in the kernel at once: each hooks the same syscall paths,
- * so a boot carries one of them or neither. That is why this is stored for the app rather than passed
- * to one run, and why changing it has to wait for a restart.
+ * KernelSU, KernelSU-Next and ReSukiSU are separate projects with separate kernels, separate managers
+ * and separate daemons, and no two of them can be in the kernel at once: each hooks the same syscall
+ * paths, so a boot carries one of them or neither. That is why this is stored for the app rather than
+ * passed to one run, and why changing it has to wait for a restart.
  *
  * The ids are the feed's own. A payload entry declares `"flavor": "kernelsu-next"`, and this decides
  * whether a run may use that entry. An entry that says nothing is [Default], which is what keeps every
@@ -26,18 +26,36 @@ enum class KernelSuFlavor(
     /** Where its releases live, which is what a manager upgrade resolves against. */
     val repository: String,
     /**
-     * The manager version offered when nothing overrides it.
+     * The version this flavour falls back to, and the only one whose APK file name the app knows.
      *
-     * Both flavours offer 3.3.0, because that is the KernelSU this project's payloads are built from:
-     * the daemon a run stages and the manager that talks to it come from the same release, and offering
-     * one from an older line is how the app came to hand people a manager its own kernel was never
-     * built against. Nothing checks this against the version on the phone - a newer manager installs and
-     * is used exactly the same, and one picked by hand takes precedence - so it is only the one offered
-     * unprompted.
+     * It is no longer the whole answer. What the app offers is the KernelSU the payload it resolved for
+     * this device declares, and this is what is left when nothing says: no payload resolved yet, or an
+     * entry that does not declare a version. That is why it must name a release the project really
+     * builds from rather than the newest that exists - it is the manager for the daemon this project's
+     * payloads stage when the feed is silent about which KernelSU that is.
+     *
+     * The three are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's
+     * newest there), KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published,
+     * and ReSukiSU's is the pre-release its own payload was built against.
+     *
+     * Nothing checks this against the version on the phone - a newer manager installs and is used exactly
+     * the same, and one picked by hand takes precedence.
      */
     val defaultManagerVersion: String,
     /** The file name that version was published under, for when the store cannot be asked. */
     val defaultManagerAsset: String,
+    /**
+     * Whether this flavour's kernel can be told, at runtime, which APK is its manager.
+     *
+     * This is a property of the module rather than of the app's preference, so it is stated on the
+     * flavour: the kernel decides who its manager is by comparing an APK's signature against a table
+     * built into the module, and only ReSukiSU's carries the second path that lets a key be given to it
+     * afterwards. The other two can only be told by recompiling, which is not something an app can do.
+     *
+     * False is the safe default and not merely the common one: offering to register a manager with a
+     * kernel that has no such feature would put a control on the screen that cannot work.
+     */
+    val supportsDynamicManager: Boolean = false,
     /** What this flavour is, for the settings row that offers it. */
     @StringRes val summaryRes: Int,
 ) {
@@ -55,13 +73,35 @@ enum class KernelSuFlavor(
         label = "KernelSU-Next",
         managerPackage = "com.rifsxd.ksunext",
         repository = "KernelSU-Next/KernelSU-Next",
-        defaultManagerVersion = "3.3.0",
-        defaultManagerAsset = "KernelSU_Next_v3.3.0_33214-release.apk",
+        defaultManagerVersion = "3.4.0",
+        defaultManagerAsset = "KernelSU_Next_v3.4.0_33294-release.apk",
         summaryRes = R.string.flavor_kernelsu_next_summary,
+    ),
+    ReSukiSU(
+        id = "resukisu",
+        label = "ReSukiSU",
+        managerPackage = "com.resukisu.resukisu",
+        repository = "ReSukiSU/ReSukiSU",
+        // A pre-release, and named as one everywhere below: this project marks every release it has
+        // published as a pre-release, so the newest tag is `v4.2.0-rc2` and there is no `v4.2.0` for a
+        // lookup to resolve. The suffix is part of the release's name rather than a description of it -
+        // the tag, the asset and the version the pairs declare all carry it - so keeping it is what
+        // makes a version named here resolve to the same release the daemon was built from.
+        defaultManagerVersion = "4.2.0-rc2",
+        // The universal APK, unlike the other two flavours' single release file: this project publishes
+        // one per ABI and a manager has to install on whatever phone asks for it.
+        defaultManagerAsset = "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+        supportsDynamicManager = true,
+        summaryRes = R.string.flavor_resukisu_summary,
     ),
     ;
 
-    /** The manager the app offers unprompted, without asking for its release. */
+    /**
+     * This flavour's own release, without asking for it.
+     *
+     * What the offer resolves to when it is this version, and what the download falls back to when it
+     * is - see [ManagerOffer.assetNameKnown].
+     */
     val defaultManagerRelease: ManagerRelease
         get() = ManagerRelease(
             flavor = this,

@@ -2,6 +2,7 @@ package dev.busung.s25uroot
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -97,6 +98,150 @@ class SupportManifestTest {
         )
 
         assertEquals("e2s-S926BXXUEDZDR", parsed.targets.resolveFor(snapshot)?.profileId)
+    }
+
+    @Test
+    fun readsTheKernelSuVersionAnEntryDeclares() {
+        // A feed may write the tag it was built from or the version, and the two have to arrive here as
+        // the same value: this is compared against a manager's own `versionName` and against the
+        // flavour's fallback, both of which are dotted numbers.
+        val tagged = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-ksun340",
+              "displayName":"Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"kernelsu-next",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud","size":8192,"version":"v3.4.0"}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals("3.4.0", tagged.targets.single().kernelSuVersion)
+    }
+
+    @Test
+    fun anEntryThatDeclaresNoVersionReadsAsNothing() {
+        // Rather than as a version: the manager offer falls back to the flavour's own release there, and
+        // a value invented here would be a version no release can be looked up for.
+        val parsed = SupportManifest.parse(manifest)
+
+        assertNull(parsed.targets[0].kernelSuVersion)
+        assertNull(parsed.targets[1].kernelSuVersion)
+    }
+
+    @Test
+    fun dropsAnEntryWhoseFlavourThisBuildDoesNotKnow() {
+        // The rest of the feed has to survive it. Refusing the whole manifest is what this used to do,
+        // and it makes every install older than a new flavour lose every payload it had - while the
+        // entry must still not be read as the default, because a device offered the other project's
+        // kernel because a name looked close is the outcome nothing can explain afterwards.
+        val parsed = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[
+              {
+                "payloadId":"pa3q-S938USQSCCZF9-sukisu",
+                "displayName":"Galaxy S25 Ultra | SukiSU-Ultra (test)",
+                "models":["SM-S938U1"],
+                "kernelVersions":["6.6.98"],
+                "flavor":"sukisu-ultra",
+                "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+                "kernelsu":{"url":"https://example.invalid/ksud-sukisu","size":8192}
+              },
+              {
+                "payloadId":"pa3q-S938USQSCCZF9-ksu330",
+                "displayName":"Galaxy S25 Ultra | KernelSU 3.3.0 (test)",
+                "models":["SM-S938U1"],
+                "kernelVersions":["6.6.98"],
+                "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+                "kernelsu":{"url":"https://example.invalid/ksud","size":8192}
+              }
+            ]}
+            """.trimIndent().toByteArray(),
+        )
+
+        assertEquals(1, parsed.targets.size)
+        val kept = parsed.targets.single()
+        assertEquals("pa3q-S938USQSCCZF9-ksu330", kept.profileId)
+        assertEquals(KernelSuFlavor.Default, kept.flavor)
+        // Dropped silently would be the one outcome worse than either: the payload is in the file and
+        // nowhere in the app. The caller logs what this list names.
+        assertEquals(
+            listOf(UnreadablePayload(payloadId = "pa3q-S938USQSCCZF9-sukisu", declaredFlavor = "sukisu-ultra")),
+            parsed.ignored,
+        )
+    }
+
+    @Test
+    fun keepsTheFlavourAnEntryItKnowsDeclares() {
+        // An entry that declares none is the default rather than dropped: every feed written before
+        // flavours existed reads as KernelSU.
+        val parsed = SupportManifest.parse(manifest)
+
+        assertEquals(2, parsed.targets.size)
+        assertEquals(KernelSuFlavor.Default, parsed.targets[0].flavor)
+        assertEquals(KernelSuFlavor.Default, parsed.targets[1].flavor)
+        assertTrue(parsed.ignored.isEmpty())
+
+        val declared = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-ksun340",
+              "displayName":"Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"kernelsu-next",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud-next","size":8192}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals(KernelSuFlavor.KernelSuNext, declared.targets.single().flavor)
+
+        // The third project, and the one whose entry is easiest to get wrong: its id shares a
+        // substring with KernelSU's, so a parser that matched loosely would file it under the wrong
+        // kernel and a run would stage one project's daemon against the other's module.
+        val reSuki = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
+              "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"resukisu",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{"url":"https://example.invalid/ksud-rsksu","size":8192}
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+        assertEquals(KernelSuFlavor.ReSukiSU, reSuki.targets.single().flavor)
+    }
+
+    @Test
+    fun aPreReleaseTagKeepsItsSuffix() {
+        // ReSukiSU marks every release it publishes as a pre-release, so `v4.2.0-rc2` is the release's
+        // own name and there is no `v4.2.0` behind it. Reducing it to its dotted number - what a leading
+        // `v` used to be stripped together with - would leave the app offering a tag that does not exist
+        // and looking up a release that was never published.
+        val parsed = SupportManifest.parse(
+            """
+            {"schemaVersion":3,"payloads":[{
+              "payloadId":"pa3q-S938USQSCCZF9-rsksu420",
+              "displayName":"Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+              "models":["SM-S938U1"],
+              "kernelVersions":["6.6.98"],
+              "flavor":"resukisu",
+              "exploit":{"url":"https://example.invalid/exploit.so","size":4096},
+              "kernelsu":{
+                "url":"https://example.invalid/ksud-rsksu","size":8192,"version":"v4.2.0-rc2"
+              }
+            }]}
+            """.trimIndent().toByteArray(),
+        )
+
+        // The tag's `v` is still taken off, because a tag and the version it names are one value here.
+        assertEquals("4.2.0-rc2", parsed.targets.single().kernelSuVersion)
     }
 
     @Test(expected = IllegalArgumentException::class)

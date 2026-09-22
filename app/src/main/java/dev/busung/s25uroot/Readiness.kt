@@ -39,19 +39,20 @@ internal data class Readiness(
  * with nothing loaded - which is the state a fresh install leaves, and the one worth seeing before a run
  * finishes rather than after.
  *
- * Both flavours are reported rather than only the configured one. They are different apps that cannot
+ * Every flavour is reported rather than only the configured one. They are different apps that cannot
  * both be in the kernel, so which of them is actually on the phone is part of the picture, and a manager
- * installed for the other flavour is exactly what an attempt to open "the manager" then fails to find.
+ * installed for another flavour is exactly what an attempt to open "the manager" then fails to find.
+ *
+ * Held as the set of flavours found rather than one field each, so a flavour added to [KernelSuFlavor] is
+ * a row on the card and a line here without a second place to remember - the shape this was written in
+ * had a field per flavour, and the two of them had already drifted once.
  */
 internal data class ManagerPresence(
-    val kernelsu: Boolean = false,
-    val kernelsuNext: Boolean = false,
+    /** The flavours with a manager installed for them. A manager of no known flavour is in none. */
+    val flavors: Set<KernelSuFlavor> = emptySet(),
 ) {
 
-    fun installed(flavor: KernelSuFlavor): Boolean = when (flavor) {
-        KernelSuFlavor.KernelSu -> kernelsu
-        KernelSuFlavor.KernelSuNext -> kernelsuNext
-    }
+    fun installed(flavor: KernelSuFlavor): Boolean = flavor in flavors
 
     companion object {
 
@@ -59,12 +60,11 @@ internal data class ManagerPresence(
          * From the managers this app found, which is the scan that also knows about a spoofed package.
          *
          * A manager whose package has been renamed per build still identifies itself by what it
-         * carries, so asking by package name would report the phone as having none.
+         * carries, so asking by package name would report the phone as having none. A manager whose
+         * package and label say no project at all is dropped here rather than guessed into a row.
          */
-        fun of(managers: List<InstalledManager>): ManagerPresence = ManagerPresence(
-            kernelsu = managers.any { it.flavor == KernelSuFlavor.KernelSu },
-            kernelsuNext = managers.any { it.flavor == KernelSuFlavor.KernelSuNext },
-        )
+        fun of(managers: List<InstalledManager>): ManagerPresence =
+            ManagerPresence(managers.mapNotNullTo(mutableSetOf()) { it.flavor })
     }
 }
 

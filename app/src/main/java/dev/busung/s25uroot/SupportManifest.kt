@@ -57,6 +57,21 @@ data class TargetProfile(
      * that does not declare one is KernelSU, which is every entry written before flavours existed.
      */
     val flavor: KernelSuFlavor = KernelSuFlavor.Default,
+    /**
+     * The KernelSU release this entry's daemon and module are built from, when the feed says.
+     *
+     * Declared rather than worked out from [payloadId], because the id is a name and this is a fact:
+     * `pa3q-S938USQSCCZF9-ksun340` spells its version into a string the app would have to parse and
+     * could get wrong, while the entry can simply say `"version": "3.4.0"` beside the artifact it
+     * describes. Null for every entry written before the field existed, and for a hand-written pair
+     * whose version nobody recorded - which the manager offer reads as "nothing declared" rather than
+     * as a version, and falls back to the flavour's own.
+     *
+     * It is the version of the *KernelSU*, not of the payload: the daemon staged by a run and the
+     * manager installed to drive it have to be the same release, and this is the side of that pair the
+     * feed knows.
+     */
+    val kernelSuVersion: String? = null,
     /** Source that provided this target, empty when it was not loaded through one. */
     val sourceId: String = "",
     val sourceLabel: String = "",
@@ -150,9 +165,24 @@ fun TargetProfile.kernelMatch(snapshot: DeviceSnapshot): KernelMatch = when {
     else -> KernelMatch.None
 }
 
+/**
+ * An entry the parser left out, kept so the caller can say so.
+ *
+ * The parser does not log it itself: `parse` is a pure function over bytes, called from unit tests
+ * with no Android runtime under it, and a warning that can only be produced on a device is a warning
+ * no test can hold anyone to.
+ */
+data class UnreadablePayload(
+    val payloadId: String,
+    /** The flavour the entry declared, exactly as written - it is the part being complained about. */
+    val declaredFlavor: String,
+)
+
 data class SupportManifest(
     val schemaVersion: Int,
     val targets: List<TargetProfile>,
+    /** Entries this build could not serve. Empty for a feed written for this build. */
+    val ignored: List<UnreadablePayload> = emptyList(),
 ) {
     companion object {
         fun parse(bytes: ByteArray): SupportManifest {
@@ -160,9 +190,24 @@ data class SupportManifest(
             val schemaVersion = root.getInt("schemaVersion")
             require(schemaVersion == 3) { "Unsupported support manifest schema" }
             val payloadsJson = root.getJSONArray("payloads")
+            val ignored = mutableListOf<UnreadablePayload>()
             val payloads = buildList {
                 for (index in 0 until payloadsJson.length()) {
                     val payload = payloadsJson.getJSONObject(index)
+                    val flavor = payload.flavorOrNull()
+                    if (flavor == null) {
+                        // One entry the app cannot serve, and not the whole feed with it. Refusing used
+                        // to mean the manifest failed to parse, so the day a feed gained a flavour was
+                        // the day every install older than it lost every payload; this way only the
+                        // entries this build cannot select are left out. It is still not read as the
+                        // default, which was the point of refusing - a device must never be offered
+                        // the other project's kernel because a name was close.
+                        ignored += UnreadablePayload(
+                            payloadId = payload.optString("payloadId"),
+                            declaredFlavor = payload.optString("flavor").trim(),
+                        )
+                        continue
+                    }
                     val exploit = payload.getJSONObject("exploit")
                     val kernelSu = payload.getJSONObject("kernelsu")
                     add(
@@ -175,12 +220,13 @@ data class SupportManifest(
                             routePolicy = ExploitRoutePolicy.parse(payload.optJSONObject("routePolicy")),
                             exploit = exploit.artifact(),
                             kernelSu = kernelSu.artifact(),
-                            flavor = payload.flavor(),
+                            kernelSuVersion = kernelSu.declaredVersion(),
+                            flavor = flavor,
                         ),
                     )
                 }
             }
-            return SupportManifest(schemaVersion, payloads)
+            return SupportManifest(schemaVersion, payloads, ignored)
         }
 
         private fun JSONArray.strings(): Set<String> = buildSet {
@@ -188,17 +234,18 @@ data class SupportManifest(
         }
 
         /**
-         * The flavour an entry declares, or the default when it declares none.
+         * The flavour an entry declares, the default when it declares none, and null when it names one
+         * this build does not know.
          *
-         * An id this build does not know is refused rather than read as the default. A manifest that
-         * says `"flavor": "kernel-su"` was written for something, and installing the other project's
-         * module because the name looked close is the one outcome that cannot be explained afterwards.
+         * An unknown id is never read as the default: a manifest that says `"flavor": "kernel-su"`
+         * was written for something, and installing the other project's module because the name looked
+         * close is the one outcome that cannot be explained afterwards. What the caller does with null
+         * is drop that entry and say so - see [parse].
          */
-        private fun JSONObject.flavor(): KernelSuFlavor {
+        private fun JSONObject.flavorOrNull(): KernelSuFlavor? {
             val declared = optString("flavor").trim()
             if (declared.isEmpty()) return KernelSuFlavor.Default
             return KernelSuFlavor.fromId(declared)
-                ?: error("Unknown payload flavour \"$declared\"; expected one of ${KernelSuFlavor.ids}")
         }
 
         /** Reads one artifact. Both artifacts of a payload take the same optional fields. */
@@ -208,6 +255,22 @@ data class SupportManifest(
             verifySize = optBoolean("verifySize", true),
             sha256 = optString("sha256").trim().takeIf(String::isNotEmpty),
         )
+
+        /**
+         * The release a `kernelsu` block declares, with the tag's own `v` taken off.
+         *
+         * It used to be read through [releaseOf], which reduced every value to its dotted number, and
+         * that turned out to be lossy for a project whose releases are pre-releases: ReSukiSU publishes
+         * `v4.2.0-rc2`, there is no `v4.2.0` to look up, and the daemon the feed serves is built from
+         * the `rc2` tag. The suffix is therefore part of the release's name and kept, while the leading
+         * `v` is dropped so a feed writing the tag (`v3.4.0`) and one writing the version (`3.4.0`) are
+         * still the same value here - this is compared against a manager's own `versionName` and against
+         * the flavour's built-in default, and both of those name the release the same way the tag does.
+         */
+        private fun JSONObject.declaredVersion(): String? {
+            val declared = optString("version").trim().takeIf(String::isNotEmpty) ?: return null
+            return declared.removePrefix("v").removePrefix("V").trim().ifEmpty { declared }
+        }
     }
 }
 

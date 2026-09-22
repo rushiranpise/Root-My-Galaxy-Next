@@ -41,6 +41,12 @@
             daemon it carries instead.
         -->
         <package android:name="com.rifsxd.ksunext" />
+        <!--
+            ReSukiSU's manager, which publishes this one name and does not rewrite it per build. It is
+            still validated inside the kernel by its signature, so a repacked copy is a separate
+            concern from finding it - see KernelSuManager.
+        -->
+        <package android:name="com.resukisu.resukisu" />
         <package android:name="moe.shizuku.manager" />
     </queries>
 
