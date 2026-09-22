@@ -44,6 +44,18 @@ enum class KernelSuFlavor(
     val defaultManagerVersion: String,
     /** The file name that version was published under, for when the store cannot be asked. */
     val defaultManagerAsset: String,
+    /**
+     * Whether this flavour's kernel can be told, at runtime, which APK is its manager.
+     *
+     * This is a property of the module rather than of the app's preference, so it is stated on the
+     * flavour: the kernel decides who its manager is by comparing an APK's signature against a table
+     * built into the module, and only ReSukiSU's carries the second path that lets a key be given to it
+     * afterwards. The other two can only be told by recompiling, which is not something an app can do.
+     *
+     * False is the safe default and not merely the common one: offering to register a manager with a
+     * kernel that has no such feature would put a control on the screen that cannot work.
+     */
+    val supportsDynamicManager: Boolean = false,
     /** What this flavour is, for the settings row that offers it. */
     @StringRes val summaryRes: Int,
 ) {
@@ -79,6 +91,7 @@ enum class KernelSuFlavor(
         // The universal APK, unlike the other two flavours' single release file: this project publishes
         // one per ABI and a manager has to install on whatever phone asks for it.
         defaultManagerAsset = "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+        supportsDynamicManager = true,
         summaryRes = R.string.flavor_resukisu_summary,
     ),
     ;

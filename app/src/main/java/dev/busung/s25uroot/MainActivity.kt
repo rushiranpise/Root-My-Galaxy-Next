@@ -216,6 +216,7 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -1149,6 +1150,21 @@ private fun RootApp(
     LaunchedEffect(selectedPage) { navBarHidden = false }
     val density = LocalDensity.current
 
+    // Declared by the shell rather than by a page, because two pages read the phone's state and both
+    // go stale on the same event: coming back to the foreground. A manager is installed by another
+    // app's installer, a Shizuku grant is made in another app, and each page that kept its own counter
+    // would be a second place to remember the same thing.
+    var resumeTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            // A tick rather than a read here, so the work still happens off the main thread.
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // The bar floats over the pages rather than being handed a strip of its own. A pill that reserved its
     // row left the bottom of every screen empty - the page stopped above it and the last card sat in the
     // middle of the screen with an empty band below - while the pill itself covered nothing that could not
@@ -1194,6 +1210,7 @@ private fun RootApp(
                             rebootNotice = null
                             showRebootSheet = true
                         },
+                        resumeTick = resumeTick,
                         onInstall = {
                             selectedProfile = null
                             if (advancedMode) {
@@ -1238,6 +1255,7 @@ private fun RootApp(
                         partitionReadOnly = partitionReadOnly,
                         payloadMode = payloadMode,
                         batteryUnrestricted = batteryUnrestricted,
+                        resumeTick = resumeTick,
                         onAccentColorChanged = onAccentColorChanged,
                         onThemeModeChanged = onThemeModeChanged,
                         onAdvancedModeChanged = onAdvancedModeChanged,
@@ -1460,6 +1478,14 @@ private fun OverviewPage(
     onInstall: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenReboot: () -> Unit,
+    /**
+     * Bumped by every return to the foreground, and owned by the shell rather than by this page.
+     *
+     * Two screens read the phone's state and both go stale the same way - the package list after a
+     * manager is installed, and a Shizuku grant made in another app - so the event is counted once, by
+     * the shell, instead of each page keeping a counter of the same thing.
+     */
+    resumeTick: Int,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1483,7 +1509,6 @@ private fun OverviewPage(
             ),
         )
     }
-    var resumeTick by remember { mutableStateOf(0) }
     // Reachable from here as well as from Settings: the version and the links are what a reader wants
     // after a run, which is the one thing this screen is about.
     var showAbout by remember { mutableStateOf(false) }
@@ -1515,17 +1540,6 @@ private fun OverviewPage(
             Shizuku.removeBinderReceivedListener(received)
             Shizuku.removeBinderDeadListener(dead)
         }
-    }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            // Coming back from the Shizuku app is when a grant may have changed, and that is the one
-            // change Shizuku sends no callback for. A tick rather than a read here, so the work still
-            // happens off the main thread.
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     PageList(
         padding = padding,
@@ -3507,6 +3521,15 @@ private fun SettingsPage(
     partitionReadOnly: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
+    /**
+     * Bumped by every return to the foreground, because installing a manager leaves this screen.
+     *
+     * The manager rows are read from the package list, and the way a manager gets installed is a
+     * hand-off to another app's installer: the user comes back to a screen whose package walk was made
+     * before the package existed. Keying the read on this is what makes the row say "installed" when it
+     * is, instead of waiting for the app to be restarted or the flavour to be changed.
+     */
+    resumeTick: Int,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
     onAdvancedModeChanged: (Boolean) -> Unit,
@@ -4667,7 +4690,9 @@ private fun SettingsPage(
                 // built against the daemon the next run stages.
                 val managerOffer = offeredManager(context, kernelsuFlavor)
                 val offeredManagerVersion = managerOffer.version
-                val installedManager = remember(kernelsuFlavor, offeredManagerVersion) {
+                // Re-read on the way back from anywhere, because the usual way a manager arrives is
+                // another app's installer - see [resumeTick].
+                val installedManager = remember(kernelsuFlavor, offeredManagerVersion, resumeTick) {
                     KernelSuManager.installedFor(context, kernelsuFlavor)
                 }
                 // Read here, where the rows that say what it means are, and off the main thread: the
@@ -4826,6 +4851,21 @@ private fun SettingsPage(
                         showManagerVersionDialog = true
                     },
                 )
+                // Only for the module that can be told. The other two decide which APK is their
+                // manager with a signature table compiled into the kernel, so a row here would be a
+                // control that cannot do anything on them - and worse, one whose failure would read
+                // as a problem with the phone rather than with the request.
+                if (kernelsuFlavor.supportsDynamicManager) {
+                    DynamicManagerCard(
+                        installedManager = installedManager,
+                        kernelsuFlavor = kernelsuFlavor,
+                        context = context,
+                        view = view,
+                        scope = scope,
+                        resumeTick = resumeTick,
+                        position = SettingsCardPosition.Middle,
+                    )
+                }
                 // The load decision follows the flavour because the rest of the group depends on it:
                 // root on boot exists to put KernelSU back after a reboot, and a boot run with
                 // nothing to load is not a boot run at all.
@@ -7778,6 +7818,125 @@ private fun SettingsSwitchCard(
  * only a colour would say nothing to a reader who cannot see the difference, and a mark that was a
  * sentence would be the notice this card exists to replace.
  */
+/**
+ * The card that gives a kernel the signing key of the manager it has not been built to accept.
+ *
+ * Shown only for a flavour whose module carries the runtime path, because the row's whole meaning is
+ * that a key can be handed to this kernel afterwards - and on a kernel where that is not true, the
+ * most useful thing the row could do is not exist.
+ *
+ * Three things are on it and each answers a different question: what the kernel holds now (the value
+ * band, and empty when it holds nothing), whether there is anything to register (the notice, when no
+ * manager is installed), and the tap, which re-reads the installed manager's own key, gives it to the
+ * kernel and then asks the kernel what it holds. The last step is the one that makes the tap honest:
+ * the write's exit code says an ioctl finished, not that the setting is the one intended.
+ */
+@Composable
+private fun DynamicManagerCard(
+    installedManager: InstalledManager?,
+    kernelsuFlavor: KernelSuFlavor,
+    context: Context,
+    view: View,
+    scope: CoroutineScope,
+    /** Bumped by every return to the foreground, so the reading follows a kernel that was changed. */
+    resumeTick: Int,
+    /**
+     * Where the card sits in the group, which belongs to the caller rather than to this.
+     *
+     * A helper in this file decides nothing about its own place in a list: the group it is drawn in is
+     * the caller's, and a position written here would be a second card claiming a shape outside the
+     * group that owns it.
+     */
+    position: SettingsCardPosition,
+) {
+    var reading by remember { mutableStateOf<DynamicManagerReading?>(null) }
+    var registering by remember { mutableStateOf(false) }
+    // Bumped by a finished attempt, so the reading is made again rather than kept: the row's whole
+    // job is to say what the kernel holds, and a registration changes exactly that.
+    var reads by remember { mutableStateOf(0) }
+    // The resume is in the key for the same reason: a run, or `ksud` itself, can change what the
+    // kernel holds while this screen is in the background.
+    LaunchedEffect(kernelsuFlavor, reads, resumeTick) {
+        reading = withContext(Dispatchers.IO) { DynamicManager.read(context) }
+    }
+    val held = reading
+    SettingsCard(
+        icon = Icons.Rounded.VerifiedUser,
+        title = stringResource(R.string.settings_manager_registration),
+        description = stringResource(R.string.settings_manager_registration_summary),
+        // The key in the band, and nothing when the kernel holds none: an empty band is the state,
+        // and filling it with the key the app would register would put a claim on the row that the
+        // kernel has not made.
+        value = held?.signature?.shortLabel().orEmpty(),
+        notice = when {
+            installedManager == null ->
+                stringResource(R.string.settings_manager_registration_no_manager)
+            held == null -> null
+            held.state == DynamicManagerState.Unreadable ->
+                stringResource(R.string.settings_manager_registration_unreadable)
+            held.state == DynamicManagerState.Unset ->
+                stringResource(R.string.settings_manager_registration_unset)
+            else -> null
+        },
+        noticeIcon = Icons.Rounded.Key,
+        position = position,
+        busy = registering,
+        // Dimmed rather than removed when there is no manager: the row still has to say that the
+        // kernel holds no key, and a card that vanished would take that reading with it.
+        enabled = installedManager != null,
+        onClick = {
+            clickHaptic(view)
+            registering = true
+            scope.launch {
+                val report = withContext(Dispatchers.IO) {
+                    DynamicManager.register(context, kernelsuFlavor)
+                }
+                registering = false
+                reads++
+                Toast.makeText(
+                    context,
+                    managerRegistrationMessage(context, report),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        },
+    )
+}
+
+/**
+ * What a finished attempt says, in the outcome's own words.
+ *
+ * A refusal carries the daemon's line rather than a sentence written here, because the daemon is the
+ * thing that knows: it distinguishes an APK with no v2 signature from a kernel that would not take
+ * the command, and a message of this app's would collapse those into one.
+ */
+private fun managerRegistrationMessage(context: Context, report: RegistrationReport): String =
+    when (report.outcome) {
+        RegistrationOutcome.Registered -> context.getString(
+            R.string.settings_manager_registration_done,
+            report.signature?.shortLabel().orEmpty(),
+        )
+
+        RegistrationOutcome.AlreadyRegistered -> context.getString(
+            R.string.settings_manager_registration_already,
+            report.signature?.shortLabel().orEmpty(),
+        )
+
+        RegistrationOutcome.NoManager ->
+            context.getString(R.string.settings_manager_registration_no_manager)
+
+        RegistrationOutcome.NoShell ->
+            context.getString(R.string.settings_manager_registration_no_shell)
+
+        RegistrationOutcome.Refused -> context.getString(
+            R.string.settings_manager_registration_refused,
+            report.detail.ifBlank { context.getString(R.string.settings_manager_registration_unreadable) },
+        )
+
+        RegistrationOutcome.NotHeld ->
+            context.getString(R.string.settings_manager_registration_not_held)
+    }
+
 internal data class SettingsReading(
     val label: String,
     val value: String,

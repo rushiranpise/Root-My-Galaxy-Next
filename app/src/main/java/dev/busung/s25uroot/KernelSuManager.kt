@@ -141,6 +141,21 @@ internal object KernelSuManager {
     fun isInstalled(context: Context, flavor: KernelSuFlavor): Boolean =
         installedFor(context, flavor) != null
 
+    /**
+     * Where the APK of an installed package lives, or null when it cannot be named.
+     *
+     * `sourceDir` rather than the split list, because the signature the kernel matches is the one on
+     * the base APK: a split carries the same signer, and the file `ksud` is asked to read has to be
+     * the one whose signing block holds it.
+     *
+     * Null is a real answer rather than a failure - a package removed between the scan and this call
+     * is the usual cause - and it is what keeps a caller from asking the daemon to read a path that is
+     * no longer there and reporting the daemon's confusion as its own.
+     */
+    fun apkPathOf(context: Context, packageName: String): String? = runCatching {
+        context.packageManager.getApplicationInfo(packageName, 0).sourceDir
+    }.getOrNull()?.takeIf(String::isNotBlank)
+
     /** The package the app will open for [flavor], installed or not. */
     fun packageFor(context: Context, flavor: KernelSuFlavor): String =
         installedFor(context, flavor)?.packageName ?: flavor.managerPackage

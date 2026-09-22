@@ -756,6 +756,16 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="settings_manager_version_looking">Looking for %1$s %2$s…</string>
     <string name="settings_manager_version_missing">No APK found in %1$s %2$s</string>
     <string name="settings_manager_version_reset">Restore (%1$s)</string>
+    <string name="settings_manager_registration">Manager registration</string>
+    <string name="settings_manager_registration_summary">Gives the kernel the signing key of the installed manager</string>
+    <string name="settings_manager_registration_no_manager">No manager installed</string>
+    <string name="settings_manager_registration_unset">No key registered</string>
+    <string name="settings_manager_registration_unreadable">Could not read what the kernel holds</string>
+    <string name="settings_manager_registration_done">Registered with the kernel (%1$s)</string>
+    <string name="settings_manager_registration_already">The kernel already held this key (%1$s)</string>
+    <string name="settings_manager_registration_no_shell">No root shell, so nothing was registered</string>
+    <string name="settings_manager_registration_refused">Refused: %1$s</string>
+    <string name="settings_manager_registration_not_held">Accepted, but the kernel reports a different key</string>
     <string name="run_flavor_conflict">%1$s is already loaded in this boot, so %2$s cannot be loaded. Restart the phone, then run this payload.</string>
     <string name="run_flavor_conflict_restart">Restart now</string>
     <string name="run_flavor_conflict_dismiss">Not now</string>
