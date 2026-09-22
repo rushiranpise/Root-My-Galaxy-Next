@@ -4,11 +4,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /** A manager this app found on the phone, whether or not its package is the published one. */
 internal data class InstalledManager(
@@ -224,6 +230,11 @@ internal object KernelSuManager {
      * manager. And it does not guess an asset name: a version's file carries a build number its version
      * does not (`KernelSU_v3.3.0_32601-release.apk`), so anything but a flavour's own default is
      * resolved through the release it names.
+     *
+     * The resolve is started on [lookups] rather than awaited here, because every caller of this is a
+     * tap and a tap handler runs on the main thread - where the socket that read wants to open is
+     * refused before it can be opened at all. A version whose asset name is known never asks, which is
+     * why only the versions worth looking up were the ones that could not be reached.
      */
     private fun openDownload(
         context: Context,
@@ -233,24 +244,32 @@ internal object KernelSuManager {
     ) {
         val named = version?.trim().orEmpty().ifBlank { null }
         if (named == null || named == flavor.defaultManagerVersion) {
-            view(context, flavor.defaultManagerRelease.url)
+            onMain { view(context, flavor.defaultManagerRelease.url) }
             return
         }
-        onMessage(context.getString(R.string.settings_manager_version_looking, flavor.label, named))
-        val resolved = resolve(context, flavor, named)
-        if (resolved == null) {
-            AppLog.warn(
-                AppLogTags.KERNEL_SU,
-                "No ${flavor.label} $named release could be resolved; opening the releases page",
-            )
-            onMessage(context.getString(R.string.settings_manager_version_missing, flavor.label, named))
-            return
+        onMain {
+            onMessage(context.getString(R.string.settings_manager_version_looking, flavor.label, named))
         }
-        AppLog.info(
-            AppLogTags.KERNEL_SU,
-            "Downloading the ${flavor.label} ${resolved.version} manager",
-        )
-        view(context, resolved.url)
+        lookups.launch {
+            val resolved = resolve(context, flavor, named)
+            onMain {
+                if (resolved == null) {
+                    AppLog.warn(
+                        AppLogTags.KERNEL_SU,
+                        "No ${flavor.label} $named release could be resolved; opening the releases page",
+                    )
+                    onMessage(
+                        context.getString(R.string.settings_manager_version_missing, flavor.label, named),
+                    )
+                    return@onMain
+                }
+                AppLog.info(
+                    AppLogTags.KERNEL_SU,
+                    "Downloading the ${flavor.label} ${resolved.version} manager",
+                )
+                view(context, resolved.url)
+            }
+        }
     }
 
     /**
@@ -268,6 +287,9 @@ internal object KernelSuManager {
      *
      * Read once per flavour per run: the answer changes only when upstream publishes, and a listing is
      * the largest answer this app asks GitHub for - see [MAX_LISTING_BYTES].
+     *
+     * A network read, so it belongs on a thread that may open a socket: every caller wraps it in
+     * `Dispatchers.IO`, and a caller that does not gets a refusal rather than a listing.
      */
     fun availableVersions(flavor: KernelSuFlavor): Result<List<String>> {
         cachedVersions[flavor]?.let { return Result.success(it) }
@@ -299,6 +321,9 @@ internal object KernelSuManager {
      * three are the same answer to the caller, which is that this version could not be turned into a
      * download. Going through the API is what lets a version be named at all: the asset's file name
      * carries a build number (`KernelSU_v3.3.0_32601-release.apk`) that the version does not.
+     *
+     * Opens a socket, so it must not be called from the main thread. [openDownload] is its only caller
+     * and it starts the read on [lookups] for that reason.
      */
     fun resolve(context: Context, flavor: KernelSuFlavor, version: String): ManagerRelease? {
         val body = runCatching { downloadText(managerReleaseApiUrl(flavor, version), MAX_RELEASE_BYTES) }
@@ -358,6 +383,38 @@ internal object KernelSuManager {
             )
         }
     }
+
+    /**
+     * Runs [block] on the main thread, whichever thread asked for it.
+     *
+     * Both things a finished lookup does want to be there: a toast is a window, and [view] starts an
+     * activity. The lookup itself arrives from [lookups], and the other path through this object runs
+     * straight from the tap that asked - so one of the two is always the wrong thread to call into.
+     */
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else mainHandler.post(block)
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * The manager lookups a tap starts, on a thread that may open a socket.
+     *
+     * This exists because of a bug that hid itself well: [openDownload] used to resolve on the thread
+     * that asked, every caller of it is a tap in a Compose handler, and that thread is the main one -
+     * where `connect()` throws `NetworkOnMainThreadException` instead of connecting. The consequence
+     * was not a crash or an error screen but a specific, plausible-looking sentence: naming 3.4.0, a
+     * release that was published and reachable the whole time, produced "could not read the
+     * KernelSU-Next 3.4.0 release" and sent the user to the releases page. The versions that always
+     * worked were the ones whose asset name this app already knows, because those never ask at all -
+     * so the failure looked like it was about the version named rather than about where it was read
+     * from, and the listing beside it (which does run on `Dispatchers.IO`) showed that version in the
+     * picker the whole time.
+     *
+     * A process-wide scope because there is nothing here to cancel: one small request whose answer is
+     * used once, and it outliving the screen that asked is harmless.
+     */
+    private val lookups = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun downloadText(url: String, ceiling: Int): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
