@@ -65,16 +65,34 @@ class KernelSuFlavorTest {
     fun `each flavour names its own manager package and release`() {
         assertEquals("me.weishu.kernelsu", KernelSuFlavor.KernelSu.managerPackage)
         assertEquals("com.rifsxd.ksunext", KernelSuFlavor.KernelSuNext.managerPackage)
-        // Both flavours offer the KernelSU this project's payloads are built from: the daemon a run
-        // stages and the manager that talks to it come from the same release, so the two defaults are
-        // the same number on purpose. Nothing rejects a manager installed by hand in their place.
+        // Each flavour offers the KernelSU this project's payloads for it are built from, so the daemon
+        // a run stages and the manager that talks to it come from the same release. The two are not the
+        // same number: the KernelSU-Next payload pins 3.4.0, KernelSU's is still 3.3.0. Nothing rejects
+        // a manager installed by hand in their place.
         assertEquals("3.3.0", KernelSuFlavor.KernelSu.defaultManagerVersion)
-        assertEquals("3.3.0", KernelSuFlavor.KernelSuNext.defaultManagerVersion)
+        assertEquals("3.4.0", KernelSuFlavor.KernelSuNext.defaultManagerVersion)
         assertEquals(
             "https://github.com/tiann/KernelSU/releases/download/v3.3.0/" +
                 "KernelSU_v3.3.0_32601-release.apk",
             KernelSuFlavor.KernelSu.defaultManagerRelease.url,
         )
+    }
+
+    @Test
+    fun `a default asset is named for the version it downloads`() {
+        // A default is the one download that never asks the release lookup - its file name is the whole
+        // answer - so a bump that moves the version without moving the asset name is a 404 that only
+        // appears on the phone. These two facts are the release's own shape: the tag it is published
+        // under, and the file inside it.
+        for (flavor in KernelSuFlavor.entries) {
+            assertTrue(
+                "${flavor.label}: ${flavor.defaultManagerAsset} does not name " +
+                    "v${flavor.defaultManagerVersion}",
+                flavor.defaultManagerAsset.contains("v${flavor.defaultManagerVersion}_"),
+            )
+            assertTrue(flavor.defaultManagerAsset.endsWith("-release.apk"))
+            assertTrue(flavor.defaultManagerRelease.url.contains(flavor.repository))
+        }
     }
 
     @Test

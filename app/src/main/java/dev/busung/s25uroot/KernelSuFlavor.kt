@@ -28,12 +28,14 @@ enum class KernelSuFlavor(
     /**
      * The manager version offered when nothing overrides it.
      *
-     * Both flavours offer 3.3.0, because that is the KernelSU this project's payloads are built from:
-     * the daemon a run stages and the manager that talks to it come from the same release, and offering
-     * one from an older line is how the app came to hand people a manager its own kernel was never
-     * built against. Nothing checks this against the version on the phone - a newer manager installs and
-     * is used exactly the same, and one picked by hand takes precedence - so it is only the one offered
-     * unprompted.
+     * Each flavour names the release this project's payloads for it are built from, because the daemon a
+     * run stages and the manager that talks to it come from the same release - and offering one from an
+     * older line is how the app came to hand people a manager its own kernel was never built against.
+     * The two are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's newest
+     * there), while KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published.
+     *
+     * Nothing checks this against the version on the phone - a newer manager installs and is used exactly
+     * the same, and one picked by hand takes precedence - so it is only the one offered unprompted.
      */
     val defaultManagerVersion: String,
     /** The file name that version was published under, for when the store cannot be asked. */
@@ -55,8 +57,8 @@ enum class KernelSuFlavor(
         label = "KernelSU-Next",
         managerPackage = "com.rifsxd.ksunext",
         repository = "KernelSU-Next/KernelSU-Next",
-        defaultManagerVersion = "3.3.0",
-        defaultManagerAsset = "KernelSU_Next_v3.3.0_33214-release.apk",
+        defaultManagerVersion = "3.4.0",
+        defaultManagerAsset = "KernelSU_Next_v3.4.0_33294-release.apk",
         summaryRes = R.string.flavor_kernelsu_next_summary,
     ),
     ;
