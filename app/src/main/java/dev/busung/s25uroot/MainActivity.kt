@@ -5649,6 +5649,25 @@ private fun TargetSelectionSheet(
                                             KernelMatch.None -> MaterialTheme.colorScheme.error
                                         },
                                     )
+                                    // What the run this candidate would start stages - the KernelSU
+                                    // whose manager is the one built against it. It is the fact the
+                                    // manager offer is derived from, so it belongs where the choice is
+                                    // made rather than in Settings after the fact, and a sibling that
+                                    // declares nothing says so instead of leaving the gap unexplained.
+                                    Text(
+                                        text = profile.kernelSuVersion?.let { version ->
+                                            stringResource(
+                                                R.string.target_loads_kernelsu,
+                                                profile.flavor.label,
+                                                version,
+                                            )
+                                        } ?: stringResource(
+                                            R.string.target_loads_kernelsu_unknown,
+                                            profile.flavor.label,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                     if (profile.sourceLabel.isNotEmpty()) {
                                         Text(
                                             profile.sourceLabel,
