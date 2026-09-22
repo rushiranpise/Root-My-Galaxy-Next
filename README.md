@@ -465,10 +465,20 @@ other flavour for this device is still a catalog that roots it, and refusing to 
 someone who picked the wrong flavour with no run at all and no way to tell why. Which flavour a profile
 takes is a property of the profile, the run log states it, and the run refuses only the one thing that
 cannot work: a load into a boot that already has the *other* flavour in the kernel. That refusal says
-which one is loaded and asks for a restart, because the two cannot share a boot. Both flavours offer
-manager 3.3.0 as the version the app installs unprompted, since the daemon a run stages and the manager
-that talks to it come from the same release; a version picked by hand takes precedence, and the manager
-version dialog lists what the project publishes and marks the one the app recommends.
+which one is loaded and asks for a restart, because the two cannot share a boot.
+
+**The manager version follows the payload, rather than being a number compiled into the app.** An entry
+may declare `"version": "3.4.0"` on its `kernelsu` artifact — the release its daemon was built from — and
+the app then offers that release's manager, because the daemon a run stages and the manager that talks to
+it have to come from the same release and only the feed knows which release that is. The app records it
+at the three moments it decides what this device will run — a run resolving its payload, a payload picked
+by hand in the target sheet, and the offline cache being loaded — so the settings rows can offer it
+without re-reading the sources. A version typed into the manager field still wins over everything; an
+entry that declares none, which is every entry written before the field existed, falls back to the
+flavour's own release (3.4.0 for KernelSU-Next, 3.3.0 for KernelSU — the newest each project has
+published), and that release is also the only one whose APK file name the app knows, so it is the only
+offer that downloads without first asking GitHub for the release. The manager version dialog lists what
+the project publishes and marks the one the app offers.
 
 ## Loading KernelSU, or not
 

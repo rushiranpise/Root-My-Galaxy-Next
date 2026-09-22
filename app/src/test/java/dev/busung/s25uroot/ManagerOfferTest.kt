@@ -1,5 +1,6 @@
 package dev.busung.s25uroot
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -80,4 +81,37 @@ class ManagerOfferTest {
         assertEquals(ManagerOfferOrigin.Named, offer.origin)
         assertTrue(offer.assetNameKnown)
     }
+
+    /**
+     * The offer reads a record, so a decision point that does not write one leaves the manager row
+     * offering the previous payload's release - silently, and with a version that looks plausible.
+     *
+     * These are the three moments the app decides what this device will run: a run resolving its
+     * payload, a payload picked in the target sheet, and the offline cache being loaded. A fourth is a
+     * change this test is meant to ask about rather than to discover on a phone.
+     */
+    @Test
+    fun `every moment a payload is decided records the KernelSU it stages`() {
+        val sites = mapOf(
+            "src/main/java/dev/busung/s25uroot/PayloadRepository.kt" to
+                "rememberResolvedPayload(context, resolved)",
+            "src/main/java/dev/busung/s25uroot/OfflinePayloadStore.kt" to
+                "rememberResolvedPayload(context, cached.profile())",
+            "src/main/java/dev/busung/s25uroot/MainActivity.kt" to
+                "rememberResolvedPayload(context, profile)",
+        )
+
+        for ((path, call) in sites) {
+            assertTrue(
+                "$path decides a payload without recording the KernelSU it stages",
+                source(path).contains(call),
+            )
+        }
+    }
+
+    private fun source(relativeToApp: String): String = listOf(
+        File(relativeToApp),
+        File("app/$relativeToApp"),
+    ).firstOrNull(File::isFile)?.readText()
+        ?: throw AssertionError("$relativeToApp was not found from ${File(".").absolutePath}")
 }
