@@ -29,6 +29,7 @@ class DfrCleanUpTest {
         [*] uid=0 apk=
         [+] read 4711054 bytes from /data/system/packages.xml
         [+] removed our pastSigs from android.uid.system
+        ${PackagesXml.keyChangedLine()}
         ${PackagesXml.keyRemovedLine(target, gone = true)}
         [*] restorecon rc=0
         [+] DONE. our key removed; soft reboot to apply
@@ -43,12 +44,34 @@ class DfrCleanUpTest {
     @Test
     fun `an uninstall on a file that never had the key is evidence too`() {
         // Nothing to remove is the same answer to the question being asked: our key is not in the file.
+        // It is *not* the same answer to "does the phone owe a restart" - see the two tests below.
         val log = """
             [*] read 4711054 bytes from /data/system/packages.xml
             ${PackagesXml.keyAbsentLine()}
-            [+] DONE. our key removed; soft reboot to apply
+            [+] DONE. our key was not in the file; nothing to apply
         """.trimIndent()
-        assertTrue(DfrResult(Uninstall, ok = true, log = log).uninstalled)
+        val result = DfrResult(Uninstall, ok = true, log = log)
+        assertTrue("our key is out of the file", result.uninstalled)
+        assertFalse("and nothing is waiting on a restart", result.keyTakenOut)
+    }
+
+    @Test
+    fun `an uninstall that changed the file owes a restart`() {
+        // The one case the working system has not caught up with: the certs are gone from packages.xml and
+        // the Package Manager that started before the change still holds them. The app records the instant
+        // from this, and the screen asks for the restart that makes it true.
+        val result = DfrResult(Uninstall, ok = true, log = removedLog())
+        assertTrue("the file was changed", result.keyTakenOut)
+
+        // The verification failed, so nothing was written - the injector prints its "changed" line before
+        // it verifies, which is exactly why the verdict is part of this reading and not only the line.
+        val unverified = DfrResult(
+            Uninstall,
+            ok = false,
+            log = "${PackagesXml.keyChangedLine()}\n[x] FAILED: verify FAILED for $target",
+        )
+        assertFalse("a run that failed earns no restart", unverified.keyTakenOut)
+        assertFalse("and does not read as a removal either", unverified.uninstalled)
     }
 
     @Test

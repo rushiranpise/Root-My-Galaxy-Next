@@ -110,8 +110,16 @@ object InjectMain {
                 val rc = Runtime.getRuntime().exec(arrayOf("/system/bin/restorecon", xml)).waitFor()
                 log.appendLine("[*] restorecon rc=$rc")
                 // Removal takes effect on the next framework start
-                // (PMS re-reads packages.xml), like the inject path.
-                log.appendLine("[+] DONE. our key removed; soft reboot to apply")
+                // (PMS re-reads packages.xml), like the inject path - but only when a removal actually
+                // happened. A file that was already clean needs no restart, and this line is the last
+                // thing the user reads before deciding whether to restart the phone.
+                log.appendLine(
+                    if (log.contains(PackagesXml.KEY_CHANGED)) {
+                        "[+] DONE. our key removed; soft reboot to apply"
+                    } else {
+                        "[+] DONE. our key was not in the file; nothing to apply"
+                    },
+                )
                 System.out.println(log.toString())
                 return
             }

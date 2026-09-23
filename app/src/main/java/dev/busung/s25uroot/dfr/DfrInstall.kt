@@ -1,6 +1,7 @@
 package dev.busung.s25uroot.dfr
 
 import android.content.Context
+import android.os.SystemClock
 import dev.busung.s25uroot.KernelSuRuntime
 import java.io.File
 
@@ -74,6 +75,18 @@ internal data class DfrResult(
     val uninstalled: Boolean
         get() = mode == DfrMode.Uninstall && ok &&
             (log.contains(PackagesXml.KEY_ABSENT) || log.contains("${PackagesXml.KEY_REMOVED}: true"))
+
+    /**
+     * Whether this run took the key out of the file, which is the one thing it did that a restart owes.
+     *
+     * [uninstalled] is true for both halves of the same answer - removed, or never there - because the
+     * question it answers is "is our key out of `packages.xml`". This one is narrower: the file was
+     * changed, so a Package Manager that started before the change is still holding the key, and it is
+     * that running copy the phone has to restart away. `ok` is required because the injector prints this
+     * line before it verifies and writes; a verify that fails means nothing was written.
+     */
+    val keyTakenOut: Boolean
+        get() = mode == DfrMode.Uninstall && ok && log.contains(PackagesXml.KEY_CHANGED)
 
     /** One line for the app log. */
     fun summary(): String = "dfr ${mode.name.lowercase()}: ${if (ok) "ok" else "failed"}" +
@@ -305,16 +318,20 @@ internal object DfrInstall {
     ): String = "/system/bin/am start -n '" + packageName + "/" + activity + "'"
 
     /**
-     * How long this boot has been up, from the kernel's own counter.
+     * How long this boot has been up.
      *
-     * The kernel's, not the wall clock's: uptime cannot be moved, so it is the only reading that can
-     * answer "has this phone restarted since then" - see [DfrFlow.rebootedSince]. A phone that cannot be
-     * read answers zero, which reads as "booted just now" and therefore as "the reboot still has to
-     * happen" - the instruction that is safe to repeat and dangerous to skip.
+     * A clock that counts from boot rather than the wall clock's: uptime cannot be moved, so it is the only
+     * reading that can answer "has this phone restarted since then" - see [DfrFlow.rebootedSince].
+     *
+     * This first read `/proc/uptime`, which is the same number and was **denied** on the phone this was
+     * tested on: the file is `proc_uptime`, an app domain has no read on it, so the failure was swallowed
+     * by a `runCatching` and every answer came back zero - and an uptime of zero is shorter than every
+     * elapsed time, so "has it rebooted since" answered **yes** for every instant the app had recorded.
+     * That is how the flow came to skip the reboot steps it exists to insist on. [SystemClock] is the app's
+     * own monotonic clock, needs no permission, and is the same quantity - the rest of this app already
+     * reads it for its own timeouts.
      */
-    fun uptimeMillis(): Long = runCatching {
-        File("/proc/uptime").readText().trim().substringBefore(' ').toDouble()
-    }.getOrDefault(0.0).let { (it * 1000).toLong() }
+    fun uptimeMillis(): Long = SystemClock.elapsedRealtime()
 
     /** Reads the three facts, or null when no root shell answered. */
     fun probe(): DfrProbe? {

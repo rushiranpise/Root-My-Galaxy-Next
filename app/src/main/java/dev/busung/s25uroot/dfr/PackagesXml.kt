@@ -81,6 +81,15 @@ object PackagesXml {
     const val KEY_REMOVED = "our key removed"
 
     /**
+     * Printed when the uninstall changed the file, as opposed to finding it already clean.
+     *
+     * This is the difference the app cannot read back afterwards: both cases leave `packages.xml` without
+     * our key, and only this one leaves a running Package Manager still holding it, which is why the phone
+     * owes a restart. Named among the other markers so the reading and the printing cannot drift.
+     */
+    const val KEY_CHANGED = "our key taken out of the file"
+
+    /**
      * The two lines above, as the uninstall actually prints them.
      *
      * Formatted here rather than inline so the app's reading of them is testable against the same
@@ -91,6 +100,10 @@ object PackagesXml {
 
     /** One verify line, printed after the uninstall re-read the bytes it wrote. */
     fun keyRemovedLine(target: String, gone: Boolean): String = "[verify] $target $KEY_REMOVED: $gone"
+
+    /** The line that says the file is not what it was - so the running system has not caught up yet. */
+    fun keyChangedLine(): String =
+        "[*] $KEY_CHANGED: the running system keeps the old list until it starts again"
 
     const val FLAG_SHARED_USER_ID = "2"
 
@@ -430,6 +443,10 @@ object PackagesXml {
             log.appendLine(keyAbsentLine())
             return raw.size
         }
+        // Before the verify and the write: what it says is that the *file* is being changed, which is the
+        // half of this a restart is owed for. A verify that then fails throws before the write, and the
+        // app reads this line together with the process's own verdict for that reason.
+        log.appendLine(keyChangedLine())
         val out = ByteArrayOutputStream()
         TransformerFactory.newInstance().newTransformer()
             .transform(DOMSource(doc), StreamResult(out))

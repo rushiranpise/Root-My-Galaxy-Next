@@ -23,6 +23,7 @@ class DfrFlowTest {
         stageTwoInstalled: Boolean = false,
         stageTwoIsSystemUid: Boolean = false,
         installedAtMillis: Long? = null,
+        keyRemovedAtMillis: Long? = null,
         stageTwoArmed: Boolean = false,
         helper: DfrHelperAvailability = DfrHelperAvailability.Ready,
         uptimeMillis: Long = 4 * 60 * 60 * 1000L,
@@ -32,6 +33,7 @@ class DfrFlowTest {
         stageTwoInstalled = stageTwoInstalled,
         stageTwoIsSystemUid = stageTwoIsSystemUid,
         installedAtMillis = installedAtMillis,
+        keyRemovedAtMillis = keyRemovedAtMillis,
         stageTwoArmed = stageTwoArmed,
         helper = helper,
         nowMillis = now,
@@ -237,6 +239,42 @@ class DfrFlowTest {
     }
 
     @Test
+    fun `a removal that has not been applied asks for the restart, not the inject`() {
+        // The state a clean-up leaves on this boot: the key is out of the file, and the Package Manager
+        // that started before the change is still holding it. Offering the inject here is the mistake this
+        // test is named for - it would re-add the key the user just removed, and the running copy's own
+        // next rewrite of packages.xml would put it back anyway.
+        val afterCleanUp = fresh(keyRemovedAtMillis = now - 60_000)
+        assertEquals(DfrStep.ApplyRemoval, DfrFlow.next(afterCleanUp))
+        assertNotEquals(DfrStep.Inject, DfrFlow.next(afterCleanUp))
+        assertNotEquals(
+            "a running exploit does not make a pending removal applied",
+            DfrStep.Ready,
+            DfrFlow.next(fresh(keyRemovedAtMillis = now - 60_000, stageTwoArmed = true)),
+        )
+    }
+
+    @Test
+    fun `once the phone restarts, the removal is done and the ladder starts again`() {
+        // The removal happened before this boot: uptime is shorter than the elapsed time, so nothing is
+        // waiting - and the phone is genuinely uninjected, which is step one.
+        val rebooted = fresh(
+            keyRemovedAtMillis = now - 30 * 60 * 1000L,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.Inject, DfrFlow.next(rebooted))
+    }
+
+    @Test
+    fun `a key that came back is the ladder, not a pending removal`() {
+        // Package Manager rewrites packages.xml from its memory, so a key can reappear after a removal.
+        // The file is then the reading that matters, and a restart would apply the key rather than the
+        // removal - so the pending step has nothing to say here.
+        val back = fresh(keyInjected = true, keyRemovedAtMillis = now - 60_000)
+        assertEquals(DfrStep.Reboot, DfrFlow.next(back))
+    }
+
+    @Test
     fun `an install with no record of when it happened is treated as needing the reboot`() {
         // The install was done by hand, or by a build of this app that did not keep a record. Assuming a
         // reboot that cannot be shown would skip the step the install depends on.
@@ -263,6 +301,18 @@ class DfrFlowTest {
         assertEquals(true, DfrFlow.rebootedSince(now - 60_000, now, 5_000))
         assertEquals(false, DfrFlow.rebootedSince(now - 60_000, now, 4 * 60 * 60 * 1000L))
         assertEquals(false, DfrFlow.rebootedSince(null, now, 5_000))
+    }
+
+    @Test
+    fun `an uptime of zero is read as every reboot having happened`() {
+        // The shape that made this flow skip its own reboot steps on a real phone: uptime came back zero
+        // because /proc/uptime is denied to an app domain, and zero is shorter than every elapsed time, so
+        // each recorded instant looked like it predated a reboot. The clock is fixed; the shape is worth
+        // pinning, because a measurement that fails to zero is the one failure that inverts this rule.
+        assertEquals(true, DfrFlow.rebootedSince(now - 60_000, now, 0))
+        assertEquals(DfrStep.InstallStageTwo, DfrFlow.next(
+            fresh(keyInjected = true, injectedAtMillis = now - 60_000, uptimeMillis = 0),
+        ))
     }
 
     @Test
@@ -303,6 +353,9 @@ class DfrFlowTest {
                 uptimeMillis = 5 * 60 * 1000L,
             ),
             fresh(stageTwoArmed = true),
+            // A clean-up that changed the file on this boot: no key in packages.xml, a removal waiting on
+            // the restart that makes it true.
+            fresh(keyRemovedAtMillis = now - 60_000),
             // A build whose assets have no helper in them, which is the one state here that is not a
             // reading of the phone.
             fresh(helper = DfrHelperAvailability.NotInBuild),

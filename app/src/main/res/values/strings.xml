@@ -670,6 +670,8 @@
     <string name="dfr_step_helper_unwritable_detail">This build carries the helper APK, and it could not be written to the app\'s own storage - usually because there is no room left. Free some space and read again: nothing was injected, and nothing on the device was touched.</string>
     <string name="dfr_step_read">Read the device</string>
     <string name="dfr_step_read_detail">Nothing could be read: no root shell answered. Allow root for this app, then read again.</string>
+    <string name="dfr_step_apply_removal">Restart to finish removing the key</string>
+    <string name="dfr_step_apply_removal_detail">The certificate is out of packages.xml and still live in the Package Manager that started before the change - and that running copy rewrites the file from itself, which would put the key back. Restart the phone and the removal is in force.</string>
     <string name="dfr_step_inject">Add this app\'s certificate</string>
     <string name="dfr_step_inject_detail">It goes into android.uid.system. The stage 2 can only install as a system app if its key is in that list.</string>
     <string name="dfr_step_reboot">Reboot</string>

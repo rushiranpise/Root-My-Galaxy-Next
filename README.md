@@ -94,6 +94,12 @@ assets when it is built, so the helper is always the one from the same commit; a
 reaches a phone only by building the app. Both modules read the launcher icon from `launcher-icon/` at
 the repository root — two APKs sitting in one launcher draw one icon, from one set of files.
 
+Package Manager reads `packages.xml` only when it starts, so both halves of that flow come into force a
+boot later: an inject and a clean-up each get their own *restart to apply* step, and the screen works out
+which one is owed by comparing the instant it recorded against the app's own clock since boot
+(`SystemClock.elapsedRealtime()` — not `/proc/uptime`, which an app domain is denied on this phone and
+which failed to zero when it was read that way, making every step look already applied).
+
 ## The app's screens
 
 Four pages, one question each. **Home** is what this phone is doing right now: the install card, the

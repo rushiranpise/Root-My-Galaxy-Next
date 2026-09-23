@@ -59,6 +59,7 @@ internal enum class DfrStep(
         R.string.dfr_step_helper_unwritable_detail,
     ),
     ReadState(R.string.dfr_step_read, R.string.dfr_step_read_detail),
+    ApplyRemoval(R.string.dfr_step_apply_removal, R.string.dfr_step_apply_removal_detail),
     Inject(R.string.dfr_step_inject, R.string.dfr_step_inject_detail),
     Reboot(R.string.dfr_step_reboot, R.string.dfr_step_reboot_detail),
     RemoveStageTwo(R.string.dfr_step_remove, R.string.dfr_step_remove_detail),
@@ -99,6 +100,15 @@ internal data class DfrState(
     val stageTwoIsSystemUid: Boolean,
     /** When this app recorded the stage-two install, or null. */
     val installedAtMillis: Long?,
+    /**
+     * When this app took its key out of `packages.xml`, or null when it never did.
+     *
+     * The third instant, and the only one about a change the phone has not caught up with yet: an
+     * uninstall writes the file, and Package Manager reads it at its own start, so between the two the
+     * running system still holds the key. It is also not [DfrState.keyInjected]'s opposite, because the
+     * file cannot say whether the key was there a moment ago.
+     */
+    val keyRemovedAtMillis: Long? = null,
     /** Whether the exploit's hooks are already in the kernel this boot. */
     val stageTwoArmed: Boolean,
     /**
@@ -139,6 +149,16 @@ internal object DfrFlow {
             DfrHelperAvailability.Ready -> Unit
             DfrHelperAvailability.NotInBuild -> return DfrStep.NoHelper
             DfrHelperAvailability.Unwritable -> return DfrStep.HelperUnwritable
+        }
+        // A removal waiting on a restart comes before everything below, including the armed check: the
+        // key is gone from the file and still live in the running system, so "Ready" would call a phone
+        // finished while the list it boots from is the one it will not use until it starts again. It is
+        // answered only while the file really is without our key - if Package Manager's own rewrite put it
+        // back, the ladder is the honest reading and this step has nothing to apply.
+        if (state.keyInjected == false && state.keyRemovedAtMillis != null &&
+            !rebootedSince(state.keyRemovedAtMillis, state.nowMillis, state.uptimeMillis)
+        ) {
+            return DfrStep.ApplyRemoval
         }
         // Armed is first because it is the only state that needs nothing: hooks in the kernel this boot
         // mean the flow already completed, whatever any file says about how it started.
@@ -181,6 +201,7 @@ internal object DfrFlow {
         uptimeMillis = 0L,
     )
 
+
     /** Every step in order, for the screen that shows how far along the flow is. */
     val order: List<DfrStep> = listOf(
         DfrStep.Inject,
@@ -195,7 +216,8 @@ internal object DfrFlow {
      * The steps that are not part of that order, because they are not steps forward.
      *
      * [DfrStep.ReadState] is where the flow stops when nothing could be measured,
-     * [DfrStep.RemoveStageTwo] undoes an install that landed under the wrong identity, and
+     * [DfrStep.RemoveStageTwo] undoes an install that landed under the wrong identity,
+     * [DfrStep.ApplyRemoval] is a clean-up waiting on the restart that makes it true, and
      * [DfrStep.NoHelper] and [DfrStep.HelperUnwritable] stop it before it starts because this build
      * cannot produce the APK the whole flow exists to install - so none of them has a position, and a
      * screen that numbered them would be claiming progress that has not happened. They are named on their
@@ -206,5 +228,6 @@ internal object DfrFlow {
         DfrStep.HelperUnwritable,
         DfrStep.ReadState,
         DfrStep.RemoveStageTwo,
+        DfrStep.ApplyRemoval,
     )
 }

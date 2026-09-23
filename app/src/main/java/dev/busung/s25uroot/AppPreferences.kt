@@ -71,6 +71,11 @@ object AppPreferences {
     // is what says whether it is done, and these are read to answer "and has it rebooted since?".
     private const val DFR_INJECTED_AT = "dfr_injected_at"
     private const val DFR_INSTALLED_AT = "dfr_installed_at"
+    // The third one, and it is the same kind of fact: a clean-up changes packages.xml, and Package
+    // Manager reads that file only when it starts - so between the two, the removal is written down and
+    // not yet in force. Recorded when the file was actually changed, which is the one thing the file
+    // itself cannot say afterwards.
+    private const val DFR_KEY_REMOVED_AT = "dfr_key_removed_at"
     private const val PAYLOAD_SOURCES = "payload_sources"
     // Superseded by the source list; read once so an existing selection survives the upgrade.
     private const val LEGACY_PAYLOAD_REPOSITORY = "payload_repository"
@@ -695,6 +700,21 @@ object AppPreferences {
     fun setDfrInstalledAt(context: Context, at: Long?) {
         val editor = prefs(context).edit()
         if (at == null) editor.remove(DFR_INSTALLED_AT) else editor.putLong(DFR_INSTALLED_AT, at)
+        editor.apply()
+    }
+
+    /**
+     * When this app last took its key out of `packages.xml`, or null when it never did.
+     *
+     * Only written when the uninstall changed the file: an uninstall that found nothing to remove leaves
+     * this alone, because there is nothing waiting on a restart to take effect.
+     */
+    fun dfrKeyRemovedAt(context: Context): Long? =
+        prefs(context).getLong(DFR_KEY_REMOVED_AT, -1L).takeIf { it >= 0L }
+
+    fun setDfrKeyRemovedAt(context: Context, at: Long?) {
+        val editor = prefs(context).edit()
+        if (at == null) editor.remove(DFR_KEY_REMOVED_AT) else editor.putLong(DFR_KEY_REMOVED_AT, at)
         editor.apply()
     }
 

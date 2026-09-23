@@ -118,6 +118,8 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         }
     }
 
+    // Every earlier record is written over by this one: an inject puts the key back in the file, so there
+    // is no longer a removal for a restart to apply.
     fun inject() = act("inject") {
         // Refused here as well as by the step the screen shows, because this is the action that writes to
         // the file the phone boots from: with no helper in the APK, the inject would put a certificate into
@@ -136,6 +138,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // command's output looked like a failure left a stamp from a previous boot, and an older stamp
         // reads as "already rebooted", so the flow went straight to the install.
         AppPreferences.setDfrInjectedAt(context, System.currentTimeMillis())
+        AppPreferences.setDfrKeyRemovedAt(context, null)
         result.log
     }
 
@@ -187,6 +190,12 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         val outcome = DfrCleanUpOutcome.of(removed, helper)
         if (outcome.keyGone) AppPreferences.setDfrInjectedAt(context, null)
         if (outcome.helperGone) AppPreferences.setDfrInstalledAt(context, null)
+        // Recorded only when this run changed the file: an uninstall that found nothing to remove has
+        // nothing waiting on a restart. What it earns is [DfrStep.ApplyRemoval] - the key is out of the
+        // file and still live in the Package Manager that started before the change.
+        if (removed?.keyTakenOut == true) {
+            AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
+        }
         removed?.log ?: context.getString(R.string.dfr_no_root)
     }
 
@@ -304,7 +313,9 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         DfrStep.Inject -> FilledTonalButton(enabled = enabled, onClick = { inject() }) {
                             Text(stringResource(R.string.dfr_inject))
                         }
-                        DfrStep.Reboot, DfrStep.RebootAgain -> FilledTonalButton(
+                        // The same action as the two reboot steps: applying a removal is a restart, and the
+                        // screen's own word for that is the one the other two use.
+                        DfrStep.Reboot, DfrStep.RebootAgain, DfrStep.ApplyRemoval -> FilledTonalButton(
                             enabled = enabled,
                             onClick = { reboot() },
                         ) {
@@ -393,11 +404,19 @@ private fun readState(context: Context, helper: DfrHelperAvailability): DfrReadi
         stageTwoInstalled = probe.installed,
         stageTwoIsSystemUid = probe.isSystemUid,
         installedAtMillis = AppPreferences.dfrInstalledAt(context),
+        // The third instant, and the only one about a change still waiting on a restart: without it a
+        // clean-up reads as a phone that was never injected, and the screen offers the inject it just undid.
+        keyRemovedAtMillis = AppPreferences.dfrKeyRemovedAt(context),
         stageTwoArmed = probe.armed,
         // Reached only when the read said Ready, which is what got this far.
         helper = helper,
         nowMillis = System.currentTimeMillis(),
         uptimeMillis = DfrInstall.uptimeMillis(),
+    )
+    AppLog.info(
+        AppLogTags.KERNEL_SU,
+        "system uid flow read: key=$injected removedAt=${state.keyRemovedAtMillis} " +
+            "now=${state.nowMillis} uptime=${state.uptimeMillis} -> ${DfrFlow.next(state)}",
     )
     return DfrReading(DfrFlow.next(state), probe, injected)
 }
