@@ -1,6 +1,7 @@
 package dev.busung.s25uroot.dfr
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
@@ -23,7 +24,7 @@ class DfrFlowTest {
         stageTwoIsSystemUid: Boolean = false,
         installedAtMillis: Long? = null,
         stageTwoArmed: Boolean = false,
-        helperPresent: Boolean = true,
+        helper: DfrHelperAvailability = DfrHelperAvailability.Ready,
         uptimeMillis: Long = 4 * 60 * 60 * 1000L,
     ) = DfrState(
         keyInjected = keyInjected,
@@ -32,7 +33,7 @@ class DfrFlowTest {
         stageTwoIsSystemUid = stageTwoIsSystemUid,
         installedAtMillis = installedAtMillis,
         stageTwoArmed = stageTwoArmed,
-        helperPresent = helperPresent,
+        helper = helper,
         nowMillis = now,
         uptimeMillis = uptimeMillis,
     )
@@ -40,7 +41,54 @@ class DfrFlowTest {
     @Test
     fun `a build with no helper refuses on a fresh device`() {
         // The refusal the screen shows before it opens a shell: there is nothing to inject a key for.
-        assertEquals(DfrStep.NoHelper, DfrFlow.next(fresh(helperPresent = false)))
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(fresh(helper = DfrHelperAvailability.NotInBuild)))
+    }
+
+    @Test
+    fun `a helper that could not be unpacked is its own refusal`() {
+        // Not [DfrStep.NoHelper], because the two send somebody to different places: one is a build to
+        // replace, and this one is a phone with no room, where reading again after freeing some is the
+        // action that works. One sentence for both would tell a full disk that its APK is missing.
+        assertEquals(
+            DfrStep.HelperUnwritable,
+            DfrFlow.next(fresh(helper = DfrHelperAvailability.Unwritable)),
+        )
+        assertNotEquals(
+            DfrFlow.next(fresh(helper = DfrHelperAvailability.NotInBuild)),
+            DfrFlow.next(fresh(helper = DfrHelperAvailability.Unwritable)),
+        )
+    }
+
+    @Test
+    fun `both refusals are reached before the phone is asked anything, and by name`() {
+        // The state the screen builds without measuring: every other field is empty, so a step that
+        // depended on one of them could not be reached this way - which is the point of the two refusals
+        // being decided before the first shell command.
+        assertEquals(
+            DfrStep.NoHelper,
+            DfrFlow.next(DfrFlow.refusalState(DfrHelperAvailability.NotInBuild)),
+        )
+        assertEquals(
+            DfrStep.HelperUnwritable,
+            DfrFlow.next(DfrFlow.refusalState(DfrHelperAvailability.Unwritable)),
+        )
+        // And a refused build never reads as finished whatever the phone looks like: the reason alone is
+        // what the answer rests on.
+        assertEquals(
+            DfrStep.HelperUnwritable,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 2 * 60 * 60 * 1000L,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 30 * 60 * 1000L,
+                    stageTwoArmed = true,
+                    helper = DfrHelperAvailability.Unwritable,
+                    uptimeMillis = 5 * 60 * 1000L,
+                ),
+            ),
+        )
     }
 
     @Test
@@ -48,7 +96,7 @@ class DfrFlowTest {
         // The case that makes this a refusal rather than a hint: an armed kernel is otherwise Ready, and
         // a system-uid install is otherwise the end of the flow. Neither can be reached from here,
         // because the helper is the APK doing the asking and not a reading of the phone.
-        val armed = fresh(stageTwoArmed = true, helperPresent = false)
+        val armed = fresh(stageTwoArmed = true, helper = DfrHelperAvailability.NotInBuild)
         assertEquals(DfrStep.NoHelper, DfrFlow.next(armed))
         val finished = fresh(
             keyInjected = true,
@@ -56,7 +104,7 @@ class DfrFlowTest {
             stageTwoInstalled = true,
             stageTwoIsSystemUid = true,
             installedAtMillis = now - 30 * 60 * 1000L,
-            helperPresent = false,
+            helper = DfrHelperAvailability.NotInBuild,
             uptimeMillis = 5 * 60 * 1000L,
         )
         assertEquals(DfrStep.NoHelper, DfrFlow.next(finished))
@@ -66,7 +114,7 @@ class DfrFlowTest {
     fun `the state the screen builds without a helper is the refusal`() {
         // What the screen asks for instead of deciding: it can name this state before it measures
         // anything, because the helper is a file in this app's own assets.
-        assertEquals(DfrStep.NoHelper, DfrFlow.next(DfrFlow.noHelperState()))
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(DfrFlow.refusalState(DfrHelperAvailability.NotInBuild)))
     }
 
     @Test
@@ -104,7 +152,10 @@ class DfrFlowTest {
         // Both are detours and both stop the flow, but they are answered by different fields: one by a
         // file in this app, the other by a shell that said nothing. A screen that read them as one state
         // would send somebody to find a root shell for a problem that no shell can fix.
-        assertEquals(DfrStep.NoHelper, DfrFlow.next(fresh(helperPresent = false, keyInjected = null)))
+        assertEquals(
+            DfrStep.NoHelper,
+            DfrFlow.next(fresh(helper = DfrHelperAvailability.NotInBuild, keyInjected = null)),
+        )
         assertEquals(DfrStep.ReadState, DfrFlow.next(fresh(keyInjected = null)))
     }
 
@@ -254,8 +305,10 @@ class DfrFlowTest {
             fresh(stageTwoArmed = true),
             // A build whose assets have no helper in them, which is the one state here that is not a
             // reading of the phone.
-            fresh(helperPresent = false),
-            DfrFlow.noHelperState(),
+            fresh(helper = DfrHelperAvailability.NotInBuild),
+            fresh(helper = DfrHelperAvailability.Unwritable),
+            DfrFlow.refusalState(DfrHelperAvailability.NotInBuild),
+            DfrFlow.refusalState(DfrHelperAvailability.Unwritable),
         ).map(DfrFlow::next).toSet()
 
         assertEquals(

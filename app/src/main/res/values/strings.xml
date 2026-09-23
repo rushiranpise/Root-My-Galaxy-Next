@@ -648,6 +648,7 @@
     <string name="dfr_description">Runs an APK as a system app, so root no longer needs the exploit.</string>
     <string name="dfr_summary">Adds the signing certificate of this app\'s helper APK to android.uid.system, which is what lets the helper afterwards be installed as a system app. Reboot first, then install it: Package Manager only reads this at boot, so installing before the reboot does nothing.</string>
     <string name="dfr_apk_default">This app has no helper APK in its assets, so there is nothing to inject or install.</string>
+    <string name="dfr_apk_unwritable">This build carries the helper APK and it could not be unpacked into app storage, so there is nothing to inject or install yet. Free some space and read again.</string>
     <string name="dfr_apk_bundled">Using the helper APK this app ships with.</string>
     <string name="dfr_inject">Inject</string>
     <string name="dfr_clean_up">Clean up</string>
@@ -660,10 +661,13 @@
     <string name="dfr_no">no</string>
     <string name="dfr_no_root">No root shell answered.</string>
     <string name="dfr_no_helper">This build carries no helper APK, so there is nothing to inject. Nothing was written to the device.</string>
+    <string name="dfr_helper_unwritable">The helper APK this build carries could not be unpacked to the app\'s own storage, which usually means there is no room. Nothing was written to the device.</string>
 
     <!-- The flow's step list. Each step is a row, and the one the phone is on says why it is next. -->
     <string name="dfr_step_no_helper">This build has no helper</string>
     <string name="dfr_step_no_helper_detail">The helper APK is carried in this app, and this build does not have one. Nothing here can be injected: the certificate would go into android.uid.system with no app on the device signed with it.</string>
+    <string name="dfr_step_helper_unwritable">The helper could not be unpacked</string>
+    <string name="dfr_step_helper_unwritable_detail">This build carries the helper APK, and it could not be written to the app\'s own storage - usually because there is no room left. Free some space and read again: nothing was injected, and nothing on the device was touched.</string>
     <string name="dfr_step_read">Read the device</string>
     <string name="dfr_step_read_detail">Nothing could be read: no root shell answered. Allow root for this app, then read again.</string>
     <string name="dfr_step_inject">Add this app\'s certificate</string>

@@ -26,6 +26,36 @@ import java.io.File
  * one. So a helper built from another commit reaches a phone by building this app, which is the same
  * thing CI does.
  */
+/**
+ * This build's helper APK, or the reason there is none.
+ *
+ * A pair rather than a nullable file, because the two ways this can come back empty are answered by
+ * different actions: a build that carries no helper is a build to replace, and an APK that is in the
+ * assets and could not be written to app storage is a phone with no room. A `null` said both, and the
+ * screen said "no helper APK in its assets" for either - which is the wrong sentence for a full disk, and
+ * the wrong action with it.
+ */
+internal data class DfrBundled(
+    /** The unpacked APK, or null when [availability] is anything but [DfrHelperAvailability.Ready]. */
+    val file: File?,
+    val availability: DfrHelperAvailability,
+)
+
+/**
+ * Which of the three cases a read of this build's helper came to.
+ *
+ * Separate from the read itself so it can be tested without an `APK` to unpack: the failure this exists
+ * to prevent is a decision, not a file.
+ */
+internal fun classifyHelper(bytes: ByteArray?, written: Boolean): DfrHelperAvailability = when {
+    // No asset, or an empty one, which is what a build with no `:dfr` artifact staged into it looks like.
+    bytes == null || bytes.isEmpty() -> DfrHelperAvailability.NotInBuild
+    // The bytes are there and did not reach app storage: a full disk, or storage this app may not write
+    // to. The APK is in this build, so nothing about the build needs changing.
+    !written -> DfrHelperAvailability.Unwritable
+    else -> DfrHelperAvailability.Ready
+}
+
 object DfrApk {
     private const val DIRECTORY = "dfr-apk"
 
@@ -39,17 +69,19 @@ object DfrApk {
     private const val BUNDLED_ASSET = "stage2.apk"
     private const val BUNDLED_FILE = "bundled.apk"
 
-    /** The stage two this app ships, or null when this build has no bundle in its assets. */
-    fun bundled(context: Context): File? {
+    /** The stage two this app ships, or why there is not one. */
+    internal fun bundled(context: Context): DfrBundled {
         val destination = File(directory(context).apply { mkdirs() }, BUNDLED_FILE)
         val bytes = runCatching {
             context.assets.open(BUNDLED_ASSET).use { it.readBytes() }
         }.getOrNull()
-        if (bytes == null || bytes.isEmpty()) return null
-        return runCatching {
-            destination.writeBytes(bytes)
-            destination.takeIf { it.isFile && it.length() > 0L }
-        }.getOrNull()
+        val written = bytes?.takeIf { it.isNotEmpty() }?.let { data ->
+            runCatching {
+                destination.writeBytes(data)
+                destination.takeIf { it.isFile && it.length() > 0L }
+            }.getOrNull()
+        }
+        return DfrBundled(written, classifyHelper(bytes, written != null))
     }
 
     /**

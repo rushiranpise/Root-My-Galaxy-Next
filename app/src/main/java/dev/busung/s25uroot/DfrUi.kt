@@ -26,6 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.busung.s25uroot.dfr.DfrApk
 import dev.busung.s25uroot.dfr.DfrFlow
+import dev.busung.s25uroot.dfr.DfrHelperAvailability
 import dev.busung.s25uroot.dfr.DfrInstall
 import dev.busung.s25uroot.dfr.DfrMode
 import dev.busung.s25uroot.dfr.DfrProbe
@@ -67,8 +68,23 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     // The stage two this app ships, resolved on the IO thread rather than at composition because it is
     // unpacked out of the app's own assets.
     var bundledApk by remember { mutableStateOf<File?>(null) }
+    // Why there is no file, when there is none: the two refusals differ in what they tell somebody to do,
+    // so which one this is has to survive the read rather than be assumed from the missing file.
+    var helperRefusal by remember { mutableStateOf<DfrHelperAvailability?>(null) }
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * The sentence for the refusal this build is in.
+     *
+     * Taken from the reason the read recorded rather than from the missing file, because an absent helper
+     * is the one case here with two answers - and both actions that can be pressed name it, so no two
+     * lines about the same disk can end up disagreeing about why there is nothing to install.
+     */
+    fun helperRefusalRes(): Int = when (helperRefusal) {
+        DfrHelperAvailability.Unwritable -> R.string.dfr_helper_unwritable
+        else -> R.string.dfr_no_helper
+    }
 
     fun refresh() {
         busy = true
@@ -76,8 +92,9 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             val next = withContext(Dispatchers.IO) {
                 DfrApk.discardPickedCopy(context)
                 val helper = DfrApk.bundled(context)
-                bundledApk = helper
-                readState(context, helper)
+                bundledApk = helper.file
+                helperRefusal = helper.availability.takeIf { it != DfrHelperAvailability.Ready }
+                readState(context, helper.availability)
             }
             reading = next
             readFailed = next == null
@@ -103,8 +120,9 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     fun inject() = act("inject") {
         // Refused here as well as by the step the screen shows, because this is the action that writes to
         // the file the phone boots from: with no helper in the APK, the inject would put a certificate into
-        // android.uid.system that nothing on the device can spend, and undoing it is another flow.
-        val helper = bundledApk ?: return@act context.getString(R.string.dfr_no_helper)
+        // android.uid.system that nothing on the device can spend, and undoing it is another flow. The
+        // sentence names which of the two refusals this is, so a full disk is not reported as a missing APK.
+        val helper = bundledApk ?: return@act context.getString(helperRefusalRes())
         // The bundled helper's own certificate, read from the file that will be installed rather than
         // assumed from this app's signer - the two are one key by construction, and the file is what
         // Package Manager will actually check the shared user against.
@@ -121,7 +139,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun install() = act("install") {
-        val file = bundledApk ?: return@act context.getString(R.string.dfr_apk_default)
+        val file = bundledApk ?: return@act context.getString(helperRefusalRes())
         val action = DfrInstall.runAction(DfrInstall.installCommand(file.absolutePath))
             ?: return@act context.getString(R.string.dfr_no_root)
         // Stamped on the attempt, for the same reason as the inject above: `pm install` prints more than
@@ -249,11 +267,16 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     )
                 }
                 Text(
-                    if (bundledApk != null) {
-                        stringResource(R.string.dfr_apk_bundled)
-                    } else {
-                        stringResource(R.string.dfr_apk_default)
-                    },
+                    // Three lines rather than two, for the same reason the refusal is two steps: "this app
+                    // ships no helper" and "it ships one that could not be unpacked" send somebody to two
+                    // different places, and the line under the step list is where that is read.
+                    stringResource(
+                        when (helperRefusal) {
+                            DfrHelperAvailability.Unwritable -> R.string.dfr_apk_unwritable
+                            DfrHelperAvailability.NotInBuild -> R.string.dfr_apk_default
+                            else -> R.string.dfr_apk_bundled
+                        },
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -347,11 +370,13 @@ private class DfrReading(
  * Package Manager's view of an installed app, the other is a parser's view of a file - and a device can
  * answer one and not the other.
  */
-private fun readState(context: Context, helperApk: File?): DfrReading? {
+private fun readState(context: Context, helper: DfrHelperAvailability): DfrReading? {
     // Answered before the phone is asked anything, and that order is the point: the helper is this app's
-    // own asset rather than a reading, so a build that is missing it refuses on a device where no shell
-    // answers at all - which is exactly the device a mis-built APK gets tried on.
-    if (helperApk == null) return DfrReading(DfrFlow.next(DfrFlow.noHelperState()), probe = null, injected = null)
+    // own asset rather than a reading, so a build that cannot produce it refuses on a device where no
+    // shell answers at all - which is exactly the device a mis-built APK gets tried on.
+    if (helper != DfrHelperAvailability.Ready) {
+        return DfrReading(DfrFlow.next(DfrFlow.refusalState(helper)), probe = null, injected = null)
+    }
     val probe = DfrInstall.probe() ?: return null
     val check = DfrInstall.run(context, DfrMode.Check)
     val injected = check?.allInjected
@@ -362,7 +387,8 @@ private fun readState(context: Context, helperApk: File?): DfrReading? {
         stageTwoIsSystemUid = probe.isSystemUid,
         installedAtMillis = AppPreferences.dfrInstalledAt(context),
         stageTwoArmed = probe.armed,
-        helperPresent = true,
+        // Reached only when the read said Ready, which is what got this far.
+        helper = helper,
         nowMillis = System.currentTimeMillis(),
         uptimeMillis = DfrInstall.uptimeMillis(),
     )
