@@ -46,7 +46,25 @@ import org.w3c.dom.Element
  */
 object PackagesXml {
     const val PACKAGES_XML = "/data/system/packages.xml"
-    const val BACKUP_SUFFIX = ".bak-df-installer"
+
+    /**
+     * The pre-inject copy of packages.xml, and the file a rename swap stages before it replaces it.
+     *
+     * Both carry this fork's name rather than DFReroot's `.bak-df-installer` / `.new-df-installer`, and
+     * that is a rule rather than a preference. The two installs can be on one phone, both name
+     * `/data/system/packages.xml`, and the backup is written **once** - `overwrite = false`, never over
+     * one that is already there - so a shared suffix would leave this install adopting DFReroot's
+     * pre-inject file as its own rescue copy and never making one of its own. The same shape as the
+     * daemon path, and the same reason.
+     *
+     * [TEMP_SUFFIX] is not written by a successful write at all: it is the file a failed direct write
+     * leaves behind, and the log names the manual `mv` that finishes the job.
+     */
+    const val BACKUP_SUFFIX = ".bak-rmgnext"
+
+    /** The staged copy a rename swap writes before replacing packages.xml with it. */
+    const val TEMP_SUFFIX = ".new-rmgnext"
+
     const val FLAG_SHARED_USER_ID = "2"
 
     /** Parse either ABX or text into DOM. Returns doc; throws with reason. */
@@ -409,6 +427,11 @@ object PackagesXml {
     /**
      * Backup (once) + direct-overwrite-then-rename-swap write + perms +
      * restorecon. Shared by inject and uninstall backends.
+     *
+     * The backup is kept rather than restored: an uninstall removes this app's key surgically (see
+     * [uninstallDirect]), because PMS rewrites this file on every install and uninstall, so restoring a
+     * pre-inject copy would roll back every app the user has installed since. Both files this can leave
+     * are removed by the app's own clean-up action ([DfrInstall.cleanupFilesCommand]).
      */
     private fun writeBack(xmlPath: String, patched: ByteArray, log: StringBuilder) {
         val bak = java.io.File(xmlPath + BACKUP_SUFFIX)
@@ -448,7 +471,7 @@ object PackagesXml {
             // allowed where overwriting the existing inode is MAC-denied
             // (observed: backup copyTo succeeded, writeBytes failed), and
             // rename(2) walks a different permission vector.
-            val newPath = "$xmlPath.new-df-installer"
+            val newPath = "$xmlPath$TEMP_SUFFIX"
             java.io.File(newPath).writeBytes(patched)
             applyPerms(newPath, wantMode, wantUid, wantGid, log)
             execOk("restorecon", newPath)

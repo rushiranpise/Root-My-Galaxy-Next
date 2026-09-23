@@ -121,7 +121,10 @@ object InjectMain {
                 log.appendLine("[*] restorecon rc=$rc")
                 // PMS reads packages.xml only at boot (and on writeSettings),
                 // so the DFReroot install MUST happen after a reboot, never before.
-                log.appendLine("[+] DONE. next: reboot, THEN install DFReroot APK")
+                // This is the last line a user reads at the end of an inject, so it names this project's
+                // helper rather than the one this was ported from: the APK to install after the reboot is
+                // the one the app carries in its assets.
+                log.appendLine("[+] DONE. next: reboot, THEN install the RMG-NEXT helper APK")
             }
             System.out.println(log.toString())
         } catch (e: Exception) {

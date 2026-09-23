@@ -2,6 +2,7 @@ package dev.busung.s25uroot.dfr
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -202,6 +203,31 @@ class DfrPackagesXmlTest {
             }.exceptionOrNull()
             assertNotNull("key '$bad' must be refused", error)
         }
+    }
+
+    @Test
+    fun `the files an inject leaves are named as this project's, not the other install's`() {
+        // A shared name is not cosmetic. The backup is written once and never over an existing one, so
+        // this install finding DFReroot's `.bak-df-installer` would adopt their pre-inject file as its
+        // own rescue copy and never make one of its own - the same rule as the daemon path.
+        assertNotEquals("the backup is named where the other install names its own", ".bak-df-installer", PackagesXml.BACKUP_SUFFIX)
+        assertNotEquals("the staged copy is named where the other install names its own", ".new-df-installer", PackagesXml.TEMP_SUFFIX)
+        assertTrue(PackagesXml.BACKUP_SUFFIX, PackagesXml.BACKUP_SUFFIX.contains("rmgnext"))
+        assertTrue(PackagesXml.TEMP_SUFFIX, PackagesXml.TEMP_SUFFIX.contains("rmgnext"))
+    }
+
+    @Test
+    fun `the residue screen is told about both files an inject can leave`() {
+        // Listed rather than deleted: what an inject leaves in /data/system is the residue screen's to
+        // show, so the names there have to be the ones the injector writes. Typed out on the screen side
+        // instead of read from here, a rename would leave a file nothing lists.
+        assertEquals(
+            listOf(
+                PackagesXml.PACKAGES_XML + PackagesXml.BACKUP_SUFFIX,
+                PackagesXml.PACKAGES_XML + PackagesXml.TEMP_SUFFIX,
+            ),
+            DfrInstall.leftoverPaths,
+        )
     }
 
     @Test
