@@ -408,15 +408,15 @@ A run is one attempt at the exploit, and the app is not one thing: the boot gate
 `:autoroot_gate`, a run started from a screen is in the UI process, and that process can hold two screens
 with a view model each. Every guard the app had against a second attempt - the screen's own job, the gate's
 one-attempt-per-boot claim - was a guard about its *own* process, so a run could be started beside a run,
-which is two payloads racing one kernel and one of them being swept or overwritten while it works.
+which is two payloads racing one kernel and one of them overwriting what the other staged while it works.
 
 So a run writes down that it is running, in a form this app's other processes can read, and a start is
 refused when that record names a run that is not this screen's own. The record carries three things: the
 boot id, the pid, and the **start time** from `/proc/<pid>/stat`. The start time is not decoration - a pid is
 handed out again once its process is gone, and this record outlives its process by design, so on a long boot
 the number alone would name a stranger and refuse a legitimate run. It also carries the history entry its
-owner is writing, which is what lets a reader - the sweep, the notification, this guard - tell *which* run
-is in flight rather than only that somebody is.
+owner is writing, which is what lets a reader - the notification, the residue screen's delete, this guard -
+tell *which* run is in flight rather than only that somebody is.
 
 The refusal is reported as a failure with no history entry behind it: nothing was attempted, so there is
 nothing to record and the next run's history is not this one's. What the card offers is the app's ordinary
@@ -624,37 +624,60 @@ Two things take the wait away instead of offering it uselessly: a boot whose pip
 where only a restart refills it, and a payload that may still be running, where starting a second one can
 lock the phone up.
 
-## What the app leaves in `/data/local/tmp`
+## What the app leaves on the device
 
 The daemon, the helper and the exploit have to be executable by a shell, and `/data/local/tmp` is the one
 directory that is both writable by the transports this app uses and outside the app's own sandbox — so
 the app stages there, and the staging is *public in the way that matters*: the directory is mode `0771`,
 any app on the device may reach a path inside it by name, and the files themselves are world-readable. A
 detector needs no root and no shell to find them; it needs the names, and the names this app uses are
-fixed and published in its own source.
+fixed and published in its own source. The system-uid flow leaves its own files in `/data/system` instead,
+which is the same problem the other way round: no app on the phone can read that directory at all, and the
+two files an inject leaves there are a copy of the package database and the daemon the helper stages.
 
-**The sweep.** After every run — a successful one included — the app deletes what it staged, through a
-shell it already has: KernelSU's `su`, or the `shell`-uid server Shizuku provides, whose uid *owns* the
-directory and is the only reason deletion is possible at all, since the app's own uid may not write
-there. A device with no shell has no way to clean up, and asking for one — starting Shizuku, turning on
-wireless debugging — to delete a few files would cost far more than the files are worth, so a sweep that
-finds no shell says so and the files stay until there is one. Nothing staged is spared: the payload's
-helper bind-mounts the staged daemon over `logcat` for the late-load, but that request is made inside the
-run, so by the time the run is over the file has no reader left.
+**Nothing deletes itself.** A run used to end by sweeping what it staged, and every launch used to sweep
+again for the runs that never got that far; both are gone. Deleting is now a thing a person asks for,
+from the screen that lists what is there. The automatic version was not wrong about the facts, it was
+wrong about who decides: `/data/local/tmp/ksud-s25u-kdp` is read by the payload during a run and by
+nothing afterwards, which is a fact about a *moment* — and the sweep that ran after a failed run was the
+one that could take a file a retry was about to use. The last straw was the system-uid flow's own two
+files in `/data/system`: a pre-inject copy of `packages.xml` is a rescue, and an automatic clean-up threw
+it away as part of a button whose name said nothing about it.
 
-**The reading.** **Settings → System Management** carries a *Shared temp directory* card that reads the
-directory the way a detector would — from the app's own context rather than through a shell, because a
-shell reading answers "what is on disk" where the interesting question is what another app can see. The
-`--x` on the directory is what makes the check a name-by-name `stat`: an app may traverse it and may not
-list it. Those names come from the same constants the staging code uses, and that alone was the first
-version's whole answer — wrong in the direction that matters, because a name the catalog does not know —
-a payload's own log, a marker written by a script — left the card reading *Nothing left*, which is the
-same sentence as a clean device and the opposite of the truth. So there are two halves now: the catalog
-is stat-ed, and the directory is *listed* through a shell as well, with anything the listing names that
-the catalog does not carried as an extra. An extra is enough to stop the card reading clean, something
-that cannot be read is reported as unreadable rather than as absent, and a card with no listing says the
-weaker sentence it has earned. Rows can be deleted one at a time, and **Delete All** empties the
-directory.
+Deletion still needs a shell — KernelSU's `su`, or the `shell`-uid server Shizuku provides, whose uid
+*owns* the temp directory and is the only reason deletion there is possible at all, since the app's own
+uid may not write in it. A device with no shell deletes nothing and says so; the files stay listed.
+
+**The reading.** **Settings → System Management** carries a *Residue* card opening a screen with three
+folders, because one directory was never the whole picture:
+
+- **`/data/local/tmp`** — the shared temp directory, mode `0771`, reached by any app on the phone by
+  name. Read from the app's own context as well as through a shell, because a shell reading answers "what
+  is on disk" where the interesting question is what another app can see. The `--x` on the directory is
+  what makes the check a name-by-name `stat`: an app may traverse it and may not list it. Those names
+  come from the same constants the staging code uses, and that alone was the first version's whole
+  answer — wrong in the direction that matters, because a name the catalog does not know — a payload's
+  own log, a marker written by a script — left the card reading *Nothing left*, which is the same
+  sentence as a clean device and the opposite of the truth. So the catalog is stat-ed and the directory
+  is *listed* as well, with anything the listing names that the catalog does not carried as an extra.
+- **`/data/system`** — root-only, which is exactly why the system-uid flow works there: the daemon the
+  helper stages, and the inject's own copies of `packages.xml`. Read by name from a catalog rather than
+  listed, because the directory holds hundreds of files belonging to the platform and to every app.
+- **`/data/adb`** — KernelSU's own. Listed, and never deleted from: everything in it is the root this app
+  has just obtained, so no row there has a delete button, and neither does the folder.
+
+Nothing found is reported as absent when it could not be read: an entry that cannot be stat-ed counts as
+present and is shown as *not readable*, and a directory that could not be listed says that rather than
+reading as empty. That distinction is the point of the screen — "nothing there" and "not allowed to
+look" are opposite answers, and a detector's finding is usually checked against this list.
+
+Each folder is a **closed heading** that carries what it holds — a count and a size, or the sentence its
+empty reading earned — and opens on a tap. Closed is the default because a list drawn in full puts the
+directory a detector found something in below the two that are clean. Inside, a row's own delete removes
+that one file; the delete in a folder's heading removes everything in **that folder only**, confirmed
+first, by whichever route the folder allows: the temp directory is emptied by glob, `/data/system` by
+naming the paths the catalog lists. **Delete All** at the bottom of the screen is the wider action, which
+is why it is asked for and confirmed.
 
 ## KernelSU readiness
 
