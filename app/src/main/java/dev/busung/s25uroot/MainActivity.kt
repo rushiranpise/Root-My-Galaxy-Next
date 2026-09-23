@@ -3619,8 +3619,10 @@ private fun SettingsPage(
     }
     var showPayloadSourcesSheet by remember { mutableStateOf(false) }
     var showLocalPayloadDialog by remember { mutableStateOf(false) }
+    var showPermissiveModule by remember { mutableStateOf(false) }
     var showRunPlanDialog by remember { mutableStateOf(false) }
     var localPayloadName by remember { mutableStateOf(LocalPayload.displayName(context)) }
+    var permissiveModuleName by remember { mutableStateOf(LocalModule.displayName(context)) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     var bootSettleMenuTop by remember { mutableStateOf(32.dp) }
@@ -3702,6 +3704,14 @@ private fun SettingsPage(
             initialName = localPayloadName,
             onDismiss = { showLocalPayloadDialog = false },
             onNameChanged = { name -> localPayloadName = name },
+        )
+    }
+
+    if (showPermissiveModule) {
+        PermissiveModuleDialog(
+            initialName = permissiveModuleName,
+            onDismiss = { showPermissiveModule = false },
+            onNameChanged = { name -> permissiveModuleName = name },
         )
     }
 
@@ -4913,6 +4923,20 @@ private fun SettingsPage(
                     onCheckedChange = { enabled ->
                         clickHaptic(view)
                         onRestartAfterRootChanged(enabled)
+                    },
+                )
+                // The permissive module, which is a thing done *to* this kernel rather than a
+                // setting about the next run - so it sits at the end of the section, beside the
+                // other post-root actions, and says what the device answered about it.
+                SettingsCard(
+                    icon = Icons.Rounded.LockOpen,
+                    title = stringResource(R.string.permissive_module),
+                    description = stringResource(R.string.permissive_module_description),
+                    value = permissiveModuleName ?: stringResource(R.string.permissive_module_none),
+                    position = SettingsCardPosition.Middle,
+                    onClick = {
+                        clickHaptic(view)
+                        showPermissiveModule = true
                     },
                 )
                 SettingsCard(

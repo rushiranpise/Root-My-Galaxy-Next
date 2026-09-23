@@ -66,6 +66,7 @@ object AppPreferences {
     private const val PAYLOAD_MODE = "payload_mode"
     private const val BATTERY_PROMPT_SHOWN = "battery_prompt_shown"
     private const val LOCAL_PAYLOAD_NAME = "local_payload_name"
+    private const val LOCAL_MODULE_NAME = "local_module_name"
     private const val PAYLOAD_SOURCES = "payload_sources"
     // Superseded by the source list; read once so an existing selection survives the upgrade.
     private const val LEGACY_PAYLOAD_REPOSITORY = "payload_repository"
@@ -663,6 +664,16 @@ object AppPreferences {
     fun setLocalPayloadName(context: Context, name: String?) {
         val editor = prefs(context).edit()
         if (name == null) editor.remove(LOCAL_PAYLOAD_NAME) else editor.putString(LOCAL_PAYLOAD_NAME, name)
+        editor.apply()
+    }
+
+    /** Name of the imported kernel module, kept for display only; the file itself is in app storage. */
+    fun localModuleName(context: Context): String? =
+        prefs(context).getString(LOCAL_MODULE_NAME, null)
+
+    fun setLocalModuleName(context: Context, name: String?) {
+        val editor = prefs(context).edit()
+        if (name == null) editor.remove(LOCAL_MODULE_NAME) else editor.putString(LOCAL_MODULE_NAME, name)
         editor.apply()
     }
 
