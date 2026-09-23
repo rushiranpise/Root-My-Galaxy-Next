@@ -119,7 +119,18 @@ class SharedStagingNameTest {
         return staged
     }
 
-    private fun shippedSources(): List<File> = listOf(File("src/main/java"), File("app/src/main/java"))
+    /**
+     * Both APKs' sources: the stage two ships too, and it reads the daemon the app stages.
+     *
+     * Its write is into `/data/system`, which this file's rule is not about - but it reads
+     * `/data/local/tmp/ksud-s25u-kdp`, and that is a name on the shared list, so the module belongs in a
+     * scan whose subject is which install may touch which name.
+     */
+    private fun shippedSources(): List<File> = listOf(
+        File("src/main/java"),
+        File("app/src/main/java"),
+        File("dfr/src/main/java"),
+    )
         .filter(File::isDirectory)
         .flatMap { root -> root.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList() }
         .distinctBy { it.absolutePath }

@@ -67,6 +67,11 @@ object AppPreferences {
     private const val BATTERY_PROMPT_SHOWN = "battery_prompt_shown"
     private const val LOCAL_PAYLOAD_NAME = "local_payload_name"
     private const val LOCAL_MODULE_NAME = "local_module_name"
+
+    // When this app performed the two steps of the system-uid flow. Ordering only: each step's own tool
+    // is what says whether it is done, and these are read to answer "and has it rebooted since?".
+    private const val DFR_INJECTED_AT = "dfr_injected_at"
+    private const val DFR_INSTALLED_AT = "dfr_installed_at"
     private const val PAYLOAD_SOURCES = "payload_sources"
     // Superseded by the source list; read once so an existing selection survives the upgrade.
     private const val LEGACY_PAYLOAD_REPOSITORY = "payload_repository"
@@ -674,6 +679,26 @@ object AppPreferences {
     fun setLocalModuleName(context: Context, name: String?) {
         val editor = prefs(context).edit()
         if (name == null) editor.remove(LOCAL_MODULE_NAME) else editor.putString(LOCAL_MODULE_NAME, name)
+        editor.apply()
+    }
+
+    /** When this app last injected the certificate, or null when it never did or has no record. */
+    fun dfrInjectedAt(context: Context): Long? =
+        prefs(context).getLong(DFR_INJECTED_AT, -1L).takeIf { it >= 0L }
+
+    fun setDfrInjectedAt(context: Context, at: Long?) {
+        val editor = prefs(context).edit()
+        if (at == null) editor.remove(DFR_INJECTED_AT) else editor.putLong(DFR_INJECTED_AT, at)
+        editor.apply()
+    }
+
+    /** When this app last installed the stage two, or null. */
+    fun dfrInstalledAt(context: Context): Long? =
+        prefs(context).getLong(DFR_INSTALLED_AT, -1L).takeIf { it >= 0L }
+
+    fun setDfrInstalledAt(context: Context, at: Long?) {
+        val editor = prefs(context).edit()
+        if (at == null) editor.remove(DFR_INSTALLED_AT) else editor.putLong(DFR_INSTALLED_AT, at)
         editor.apply()
     }
 

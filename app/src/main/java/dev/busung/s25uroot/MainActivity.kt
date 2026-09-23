@@ -3620,6 +3620,7 @@ private fun SettingsPage(
     var showPayloadSourcesSheet by remember { mutableStateOf(false) }
     var showLocalPayloadDialog by remember { mutableStateOf(false) }
     var showPermissiveModule by remember { mutableStateOf(false) }
+    var showDfrInstall by remember { mutableStateOf(false) }
     var showRunPlanDialog by remember { mutableStateOf(false) }
     var localPayloadName by remember { mutableStateOf(LocalPayload.displayName(context)) }
     var permissiveModuleName by remember { mutableStateOf(LocalModule.displayName(context)) }
@@ -3713,6 +3714,10 @@ private fun SettingsPage(
             onDismiss = { showPermissiveModule = false },
             onNameChanged = { name -> permissiveModuleName = name },
         )
+    }
+
+    if (showDfrInstall) {
+        DfrInstallDialog(onDismiss = { showDfrInstall = false })
     }
 
     if (showLanguageDialog) {
@@ -4925,9 +4930,20 @@ private fun SettingsPage(
                         onRestartAfterRootChanged(enabled)
                     },
                 )
-                // The permissive module, which is a thing done *to* this kernel rather than a
-                // setting about the next run - so it sits at the end of the section, beside the
-                // other post-root actions, and says what the device answered about it.
+                // The two records an install can leave behind that are not a setting at all: a
+                // system-uid APK accepted by Package Manager, and a kernel module loaded on demand.
+                // Both are one-off actions with their own screens, which is why they sit here rather
+                // than anywhere a run reads its configuration from.
+                SettingsCard(
+                    icon = Icons.Rounded.VerifiedUser,
+                    title = stringResource(R.string.dfr_title),
+                    description = stringResource(R.string.dfr_description),
+                    position = SettingsCardPosition.Middle,
+                    onClick = {
+                        clickHaptic(view)
+                        showDfrInstall = true
+                    },
+                )
                 SettingsCard(
                     icon = Icons.Rounded.LockOpen,
                     title = stringResource(R.string.permissive_module),

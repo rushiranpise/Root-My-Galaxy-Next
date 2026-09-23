@@ -116,6 +116,18 @@ class InstallIdentityTest {
         AllowedUse("the activity's own class name, which the shortcut resource has to spell out") { _, line ->
             line.contains("${OLD_PACKAGE_PREFIX}s25uroot.MainActivity")
         },
+        AllowedUse("the stage two's activity name, which `am start` has to spell out") { _, line ->
+            // Same shape as the class name above, one APK further on: `am start -n pkg/class` takes a
+            // component name, and the component is another APK's activity - there is no build value here
+            // to read, because the build value that matters belongs to the `:dfr` module.
+            line.contains("${OLD_PACKAGE_PREFIX}s25uroot.dfr.stage2.Stage2Activity")
+        },
+        AllowedUse("the main class app_process runs, which is named by string and cannot be read") { _, line ->
+            // The ported installer is entered by `app_process`, which takes a class *name*: there is
+            // no way to spell this one other than as text, and it is this app's Java package rather
+            // than the id it installs under - the same case as the activity class name above.
+            line.contains("${OLD_PACKAGE_PREFIX}s25uroot.dfr.InjectMain")
+        },
         AllowedUse("the check for whether the app it came from is installed") { file, line ->
             file.name == "SiblingInstall.kt" && line.contains("\"${OLD_PACKAGE_PREFIX}s25uroot\"")
         },
@@ -153,8 +165,14 @@ class InstallIdentityTest {
         return files
     }
 
-    /** Where the app module is, whichever directory the test JVM was started in. */
-    private fun moduleRoots(): List<File> = listOf(File("."), File("app"))
+    /**
+     * Where the shipped modules are, whichever directory the test JVM was started in.
+     *
+     * `dfr` is in here for the same reason `app` is: it is an APK that ships, it names this app's Java
+     * package in its own sources, and a rename that missed it would leave a second artifact on the phone
+     * still aimed at the id this fork moved off.
+     */
+    private fun moduleRoots(): List<File> = listOf(File("."), File("app"), File("dfr"))
         .filter { File(it, "src/main").isDirectory }
 }
 
