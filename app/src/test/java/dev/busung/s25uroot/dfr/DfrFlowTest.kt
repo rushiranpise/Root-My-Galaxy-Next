@@ -23,6 +23,7 @@ class DfrFlowTest {
         stageTwoIsSystemUid: Boolean = false,
         installedAtMillis: Long? = null,
         stageTwoArmed: Boolean = false,
+        helperPresent: Boolean = true,
         uptimeMillis: Long = 4 * 60 * 60 * 1000L,
     ) = DfrState(
         keyInjected = keyInjected,
@@ -31,9 +32,81 @@ class DfrFlowTest {
         stageTwoIsSystemUid = stageTwoIsSystemUid,
         installedAtMillis = installedAtMillis,
         stageTwoArmed = stageTwoArmed,
+        helperPresent = helperPresent,
         nowMillis = now,
         uptimeMillis = uptimeMillis,
     )
+
+    @Test
+    fun `a build with no helper refuses on a fresh device`() {
+        // The refusal the screen shows before it opens a shell: there is nothing to inject a key for.
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(fresh(helperPresent = false)))
+    }
+
+    @Test
+    fun `a build with no helper refuses on a phone that looks finished`() {
+        // The case that makes this a refusal rather than a hint: an armed kernel is otherwise Ready, and
+        // a system-uid install is otherwise the end of the flow. Neither can be reached from here,
+        // because the helper is the APK doing the asking and not a reading of the phone.
+        val armed = fresh(stageTwoArmed = true, helperPresent = false)
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(armed))
+        val finished = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 2 * 60 * 60 * 1000L,
+            stageTwoInstalled = true,
+            stageTwoIsSystemUid = true,
+            installedAtMillis = now - 30 * 60 * 1000L,
+            helperPresent = false,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(finished))
+    }
+
+    @Test
+    fun `the state the screen builds without a helper is the refusal`() {
+        // What the screen asks for instead of deciding: it can name this state before it measures
+        // anything, because the helper is a file in this app's own assets.
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(DfrFlow.noHelperState()))
+    }
+
+    @Test
+    fun `a stamp from a previous boot is read as a reboot that already happened`() {
+        // Correct for an inject that really did happen before this boot, and identical to how an inject
+        // from *this* boot looks when nothing moves the stamp. The app moves the stamp when the action
+        // runs, whatever the command's output says - this is the case that makes that necessary, and it
+        // is why the reboot step can go missing rather than being asked for twice.
+        val state = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 30 * 60 * 1000L,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.InstallStageTwo, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `a stale install stamp is read as the second reboot having happened`() {
+        // The same hazard one step later: a system-uid install whose stamp is older than this boot is
+        // sent straight to opening the helper, so the restart that makes the shared user take effect is
+        // never asked for.
+        val state = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 30 * 60 * 1000L,
+            stageTwoInstalled = true,
+            stageTwoIsSystemUid = true,
+            installedAtMillis = now - 20 * 60 * 1000L,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.OpenStageTwo, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `a missing helper is not the same detour as a device that could not be read`() {
+        // Both are detours and both stop the flow, but they are answered by different fields: one by a
+        // file in this app, the other by a shell that said nothing. A screen that read them as one state
+        // would send somebody to find a root shell for a problem that no shell can fix.
+        assertEquals(DfrStep.NoHelper, DfrFlow.next(fresh(helperPresent = false, keyInjected = null)))
+        assertEquals(DfrStep.ReadState, DfrFlow.next(fresh(keyInjected = null)))
+    }
 
     @Test
     fun `a fresh device is asked to inject`() {
@@ -179,6 +252,10 @@ class DfrFlowTest {
                 uptimeMillis = 5 * 60 * 1000L,
             ),
             fresh(stageTwoArmed = true),
+            // A build whose assets have no helper in them, which is the one state here that is not a
+            // reading of the phone.
+            fresh(helperPresent = false),
+            DfrFlow.noHelperState(),
         ).map(DfrFlow::next).toSet()
 
         assertEquals(

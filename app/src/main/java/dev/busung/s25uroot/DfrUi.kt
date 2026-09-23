@@ -1,8 +1,6 @@
 package dev.busung.s25uroot
 
 import android.content.Context
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -66,21 +64,20 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
 
     var reading by remember { mutableStateOf<DfrReading?>(null) }
     var readFailed by remember { mutableStateOf(false) }
-    // The stage two to use: what was picked by hand, or the copy this app ships. Both are resolved on
-    // the IO thread rather than at composition, because the bundled one is unpacked from assets.
-    var pickedApk by remember { mutableStateOf<File?>(null) }
+    // The stage two this app ships, resolved on the IO thread rather than at composition because it is
+    // unpacked out of the app's own assets.
     var bundledApk by remember { mutableStateOf<File?>(null) }
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf<String?>(null) }
-    val apk = pickedApk ?: bundledApk
 
     fun refresh() {
         busy = true
         scope.launch {
             val next = withContext(Dispatchers.IO) {
-                if (pickedApk == null) pickedApk = DfrApk.file(context)
-                bundledApk = DfrApk.bundled(context)
-                readState(context)
+                DfrApk.discardPickedCopy(context)
+                val helper = DfrApk.bundled(context)
+                bundledApk = helper
+                readState(context, helper)
             }
             reading = next
             readFailed = next == null
@@ -104,20 +101,33 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun inject() = act("inject") {
-        // The file's own certificate when there is a file, and this app's when there is not: the bundled
-        // stage two is the case this is normally used for, and reading its certificate is exact where the
-        // fallback assumes the two APKs share a signer.
-        val result = DfrInstall.run(context, DfrMode.Inject, apkPath = apk?.absolutePath)
+        // Refused here as well as by the step the screen shows, because this is the action that writes to
+        // the file the phone boots from: with no helper in the APK, the inject would put a certificate into
+        // android.uid.system that nothing on the device can spend, and undoing it is another flow.
+        val helper = bundledApk ?: return@act context.getString(R.string.dfr_no_helper)
+        // The bundled helper's own certificate, read from the file that will be installed rather than
+        // assumed from this app's signer - the two are one key by construction, and the file is what
+        // Package Manager will actually check the shared user against.
+        val result = DfrInstall.run(context, DfrMode.Inject, apkPath = helper.absolutePath)
         if (result == null) return@act context.getString(R.string.dfr_no_root)
-        if (result.ok) AppPreferences.setDfrInjectedAt(context, System.currentTimeMillis())
+        // Stamped because the inject *ran*, not because it reported success. The stamp answers one
+        // question - has this phone rebooted since the app last tried - and whether the write landed is
+        // answered by reading the file, which the flow does. Keying the stamp on the injector's own
+        // verdict is what made the flow skip its own reboot step: an inject that landed while the
+        // command's output looked like a failure left a stamp from a previous boot, and an older stamp
+        // reads as "already rebooted", so the flow went straight to the install.
+        AppPreferences.setDfrInjectedAt(context, System.currentTimeMillis())
         result.log
     }
 
     fun install() = act("install") {
-        val file = apk ?: return@act context.getString(R.string.dfr_apk_default)
+        val file = bundledApk ?: return@act context.getString(R.string.dfr_apk_default)
         val action = DfrInstall.runAction(DfrInstall.installCommand(file.absolutePath))
             ?: return@act context.getString(R.string.dfr_no_root)
-        if (action.ok) AppPreferences.setDfrInstalledAt(context, System.currentTimeMillis())
+        // Stamped on the attempt, for the same reason as the inject above: `pm install` prints more than
+        // one word beginning with Failure, and a stamp that only moves on a clean verdict leaves the
+        // second reboot indistinguishable from one that has already happened.
+        AppPreferences.setDfrInstalledAt(context, System.currentTimeMillis())
         action.log
     }
 
@@ -148,19 +158,6 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         AppPreferences.setDfrInjectedAt(context, null)
         AppPreferences.setDfrInstalledAt(context, null)
         removed?.log ?: context.getString(R.string.dfr_no_root)
-    }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        runCatching { DfrApk.import(context, uri) }
-            .onSuccess { file ->
-                pickedApk = file
-                log = null
-                // The one thing picking a file is for: the next step is the install, so it happens now
-                // rather than after a second press of a button that only became enabled.
-                if (reading?.step == DfrStep.InstallStageTwo) install()
-            }
-            .onFailure { failure -> log = failure.message ?: failure.javaClass.simpleName }
     }
 
     val step = reading?.step
@@ -220,7 +217,10 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                 )
                 // What was measured, as three answers rather than only the step drawn from them: the step
                 // is this app's conclusion, and a wrong conclusion is only arguable against these.
-                reading?.let { current ->
+                // Only when something was measured: with no helper the flow refuses before it opens a
+                // shell, so a line about the package, the certificate and the hooks would be three claims
+                // nobody made.
+                reading?.probe?.let { probe ->
                     Text(
                         stringResource(
                             R.string.dfr_measured,
@@ -229,23 +229,25 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                             // app)" is what a pair of fields says when nothing asks whether both apply.
                             stringResource(
                                 when {
-                                    !current.probe.installed -> R.string.dfr_stage_not_installed
-                                    current.probe.isSystemUid -> R.string.dfr_stage_system
+                                    !probe.installed -> R.string.dfr_stage_not_installed
+                                    probe.isSystemUid -> R.string.dfr_stage_system
                                     else -> R.string.dfr_stage_ordinary
                                 },
                             ),
-                            stringResource(if (current.injected == true) R.string.dfr_yes else R.string.dfr_no),
-                            stringResource(if (current.probe.armed) R.string.dfr_yes else R.string.dfr_no),
+                            stringResource(
+                                if (reading?.injected == true) R.string.dfr_yes else R.string.dfr_no,
+                            ),
+                            stringResource(if (probe.armed) R.string.dfr_yes else R.string.dfr_no),
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Text(
-                    when {
-                        pickedApk != null -> stringResource(R.string.dfr_apk_set, pickedApk!!.name)
-                        bundledApk != null -> stringResource(R.string.dfr_apk_bundled)
-                        else -> stringResource(R.string.dfr_apk_default)
+                    if (bundledApk != null) {
+                        stringResource(R.string.dfr_apk_bundled)
+                    } else {
+                        stringResource(R.string.dfr_apk_default)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -279,8 +281,10 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         ) {
                             Text(stringResource(R.string.dfr_action_remove_stage2))
                         }
+                        // No condition on the helper here any more: a build without one never reaches this
+                        // step, because the flow refuses before it - see [DfrStep.NoHelper].
                         DfrStep.InstallStageTwo -> FilledTonalButton(
-                            enabled = enabled && apk != null,
+                            enabled = enabled,
                             onClick = { install() },
                         ) {
                             Text(stringResource(R.string.dfr_action_install_stage2))
@@ -293,8 +297,13 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         DfrStep.Ready -> Unit
                         else -> Unit
                     }
-                    TextButton(enabled = !busy, onClick = { refresh() }) {
-                        Text(stringResource(R.string.dfr_action_read_state))
+                    // Not offered on the refusal: nothing on the phone decides whether this build has a
+                    // helper in its assets, so reading again can only produce the same answer. A button
+                    // that cannot change anything is how a refusal starts to look like a step.
+                    if (step != DfrStep.NoHelper) {
+                        TextButton(enabled = !busy, onClick = { refresh() }) {
+                            Text(stringResource(R.string.dfr_action_read_state))
+                        }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -305,21 +314,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             }
         },
         dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    // Providers report an APK as the package mime type, as octet-stream, or as nothing
-                    // usable, so the picker is left unfiltered and the copy validates it.
-                    picker.launch(arrayOf("application/vnd.android.package-archive", "*/*"))
-                }) {
-                    Text(stringResource(R.string.dfr_choose_apk))
-                }
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onDismiss()
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+            TextButton(onClick = {
+                clickHaptic(view)
+                onDismiss()
+            }) {
+                Text(stringResource(R.string.action_cancel))
             }
         },
     )
@@ -328,7 +327,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
 /** The step the phone is on, with what was measured to decide it. */
 private class DfrReading(
     val step: DfrStep,
-    val probe: DfrProbe,
+    /**
+     * What was measured, or null when nothing was: a build with no helper refuses before it opens a shell,
+     * and a reading that invented a probe would put three unmeasured claims on the screen.
+     */
+    val probe: DfrProbe?,
     val injected: Boolean?,
 )
 
@@ -339,7 +342,11 @@ private class DfrReading(
  * Package Manager's view of an installed app, the other is a parser's view of a file - and a device can
  * answer one and not the other.
  */
-private fun readState(context: Context): DfrReading? {
+private fun readState(context: Context, helperApk: File?): DfrReading? {
+    // Answered before the phone is asked anything, and that order is the point: the helper is this app's
+    // own asset rather than a reading, so a build that is missing it refuses on a device where no shell
+    // answers at all - which is exactly the device a mis-built APK gets tried on.
+    if (helperApk == null) return DfrReading(DfrFlow.next(DfrFlow.noHelperState()), probe = null, injected = null)
     val probe = DfrInstall.probe() ?: return null
     val check = DfrInstall.run(context, DfrMode.Check)
     val injected = check?.allInjected
@@ -350,6 +357,7 @@ private fun readState(context: Context): DfrReading? {
         stageTwoIsSystemUid = probe.isSystemUid,
         installedAtMillis = AppPreferences.dfrInstalledAt(context),
         stageTwoArmed = probe.armed,
+        helperPresent = true,
         nowMillis = System.currentTimeMillis(),
         uptimeMillis = DfrInstall.uptimeMillis(),
     )

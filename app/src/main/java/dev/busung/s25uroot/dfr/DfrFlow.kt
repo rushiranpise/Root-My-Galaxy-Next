@@ -29,6 +29,16 @@ import dev.busung.s25uroot.R
  * The other limit is deliberate: [DfrStep.ReadState]. When no shell answered, nothing was observed, and
  * an app that guessed here would either offer an inject that refuses because the key is already there,
  * or hide a step that has not happened. So "could not read" is its own step, and it says so.
+ *
+ * ## The one thing that is this app's own state
+ *
+ * Every other step is about the phone. [DfrStep.NoHelper] is about *this build*: the helper APK is
+ * carried in this app's assets, so a build without it has nothing to install and no way to get one -
+ * and that is checkable before anything else, because it is not a reading of the device at all. It comes
+ * first for the reason the whole flow is written as a state rather than as prose: the alternative is
+ * walking somebody to an inject whose certificate can only ever be used by a helper that is not in the
+ * APK they are holding. An inject that cannot be followed by an install is worse than no inject - it puts
+ * a signing certificate into `android.uid.system` with nothing on the device to spend it.
  */
 internal enum class DfrStep(
     /** The row's own label. */
@@ -36,6 +46,7 @@ internal enum class DfrStep(
     /** One line for what this step is for, or why it is the one being asked for. */
     @StringRes val detail: Int,
 ) {
+    NoHelper(R.string.dfr_step_no_helper, R.string.dfr_step_no_helper_detail),
     ReadState(R.string.dfr_step_read, R.string.dfr_step_read_detail),
     Inject(R.string.dfr_step_inject, R.string.dfr_step_inject_detail),
     Reboot(R.string.dfr_step_reboot, R.string.dfr_step_reboot_detail),
@@ -60,6 +71,14 @@ internal data class DfrState(
     val installedAtMillis: Long?,
     /** Whether the exploit's hooks are already in the kernel this boot. */
     val stageTwoArmed: Boolean,
+    /**
+     * Whether this build carries the helper APK at all.
+     *
+     * The one field here that is not a reading of the phone: the helper is an asset of the APK that is
+     * doing the asking, and [DfrApk.bundled] answers whether this build has one. False is a refusal before
+     * anything else, because every other step ends at that file.
+     */
+    val helperPresent: Boolean = true,
     val nowMillis: Long,
     val uptimeMillis: Long,
 )
@@ -80,6 +99,11 @@ internal object DfrFlow {
 
     /** The step the phone is on, given what was observed. */
     fun next(state: DfrState): DfrStep {
+        // First, and before the armed check that would otherwise answer Ready: a build with no helper in
+        // its assets can install nothing, so "rooted without the exploit" is not a state it can be in, and
+        // the honest answer is the refusal rather than a step that reads as success. It is also the only
+        // field here that does not come from the phone, so nothing about the device can change it.
+        if (!state.helperPresent) return DfrStep.NoHelper
         // Armed is first because it is the only state that needs nothing: hooks in the kernel this boot
         // mean the flow already completed, whatever any file says about how it started.
         if (state.stageTwoArmed) return DfrStep.Ready
@@ -102,6 +126,25 @@ internal object DfrFlow {
         return DfrStep.InstallStageTwo
     }
 
+    /**
+     * The state of a build that carries no helper, for the caller that can say so before it measures.
+     *
+     * Every field but [DfrState.helperPresent] is written as the emptiest value there is, and none of them
+     * is ever read: [next] answers on the first line. They are empty rather than plausible on purpose - a
+     * later step that looked at one would find "nothing measured" rather than a device that looks real.
+     */
+    fun noHelperState(): DfrState = DfrState(
+        keyInjected = null,
+        injectedAtMillis = null,
+        stageTwoInstalled = false,
+        stageTwoIsSystemUid = false,
+        installedAtMillis = null,
+        stageTwoArmed = false,
+        helperPresent = false,
+        nowMillis = 0L,
+        uptimeMillis = 0L,
+    )
+
     /** Every step in order, for the screen that shows how far along the flow is. */
     val order: List<DfrStep> = listOf(
         DfrStep.Inject,
@@ -113,12 +156,17 @@ internal object DfrFlow {
     )
 
     /**
-     * The two steps that are not part of that order, because they are not steps forward.
+     * The steps that are not part of that order, because they are not steps forward.
      *
-     * [DfrStep.ReadState] is where the flow stops when nothing could be measured, and
-     * [DfrStep.RemoveStageTwo] undoes an install that landed under the wrong identity - so neither has a
-     * position, and a screen that numbered them would be claiming progress that has not happened. They
-     * are named on their own line instead.
+     * [DfrStep.ReadState] is where the flow stops when nothing could be measured,
+     * [DfrStep.RemoveStageTwo] undoes an install that landed under the wrong identity, and
+     * [DfrStep.NoHelper] stops it before it starts because this build is missing the APK the whole flow
+     * exists to install - so none of them has a position, and a screen that numbered them would be
+     * claiming progress that has not happened. They are named on their own line instead.
      */
-    val detours: List<DfrStep> = listOf(DfrStep.ReadState, DfrStep.RemoveStageTwo)
+    val detours: List<DfrStep> = listOf(
+        DfrStep.NoHelper,
+        DfrStep.ReadState,
+        DfrStep.RemoveStageTwo,
+    )
 }
