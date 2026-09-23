@@ -153,6 +153,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun cleanUp() = act("clean up") {
+        // The two things this flow put on the device: the key in the shared user, and the helper
+        // installed under it. The files an inject leaves in /data/system - the pre-inject copy of
+        // packages.xml and the staged copy a failed rename swap writes - are deliberately not touched
+        // here. Deleting them is what the residue screen is for, where they are listed with everything
+        // else the app left behind and can be removed one at a time or together.
         val removed = DfrInstall.run(context, DfrMode.Uninstall)
         DfrInstall.runAction(DfrInstall.uninstallCommand())
         AppPreferences.setDfrInjectedAt(context, null)

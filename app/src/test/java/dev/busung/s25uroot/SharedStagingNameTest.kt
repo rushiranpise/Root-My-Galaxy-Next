@@ -49,17 +49,14 @@ class SharedStagingNameTest {
     }
 
     @Test
-    fun `the sweep leaves exactly the names the other install's own runs write`() {
-        val alone = StagingSweep.removable(otherInstallPresent = false).map { it.name }.toSet()
-        val withTheOtherInstall = StagingSweep.removable(otherInstallPresent = true).map { it.name }.toSet()
-
-        // The whole difference the other install makes, and nothing else about the sweep may depend on
-        // it: it is the five names that app stages, plus the socket the payload's daemon leaves behind,
-        // which is nobody's to add to a list about *staging* - it is not staged at all, it is created.
+    fun `exactly the names the other install's own runs write are marked as shared`() {
+        // What the marking is for, now that nothing deletes on its own: a row whose name is in this set
+        // is the one case in the temp directory where the file may not be this app's at all, so it is the
+        // one case that reaches a confirmation instead of going on a single tap.
         assertEquals(
-            "the sweep is leaving something other than the paths the other install writes",
+            "a path is treated as possibly another install's, or left out of that judgement, wrongly",
             WRITTEN_BY_THE_OTHER_INSTALL + PAYLOAD_SOCKET,
-            alone - withTheOtherInstall,
+            StagedResidue.sharedWithTheOtherInstall,
         )
     }
 

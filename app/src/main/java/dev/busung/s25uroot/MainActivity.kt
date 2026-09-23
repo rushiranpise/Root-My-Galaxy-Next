@@ -861,18 +861,6 @@ private fun RootApp(
         }
         frameworkRestart = report
     }
-    // What earlier runs left in /data/local/tmp, taken away here because here is the one screen every
-    // launch goes through. A sweep after every run is what keeps the directory empty; this is what
-    // handles the files a run could not sweep for itself - one that was killed, one whose app was
-    // never opened again, and everything staged by the builds that came before the sweep existed.
-    //
-    // Silent when there is nothing to say. A device with no shell keeps its files and is not told
-    // about it: that is the normal state before a first run, and a notice about it would be an alarm
-    // about the app not having rooted the phone yet.
-    LaunchedEffect(Unit) {
-        val sweep = withContext(Dispatchers.IO) { StagingSweep.sweepWhenQuiet(context) }
-        sweep.logLine(context)?.let { line -> AppLog.info(AppLogTags.STAGING, line) }
-    }
     // The updater stands down while a run is in flight, and says so when it is asked.
     //
     // A run's delicate part is the payload's own timing, and an update check or a download beside it is
@@ -3569,18 +3557,19 @@ private fun SettingsPage(
     var managerVersionDraft by remember { mutableStateOf("") }
     var flavorMenuTop by remember { mutableStateOf(0.dp) }
     var showColorDialog by remember { mutableStateOf(false) }
-    // What this app has left in /data/local/tmp, read once when the screen is opened rather than on
-    // every pass: the staging changes during a run, not while a settings list is on screen, and the
-    // reading is a stat per catalogued path. Null is "not read yet" and is shown as such, because a
-    // check that has not answered must not look like a check that found nothing.
-    var residue by remember { mutableStateOf<ResidueReport?>(null) }
+    // What this app has left on the device, read once when the screen is opened rather than on every
+    // pass: the residue changes during a run, not while a settings list is on screen, and the reading is
+    // a stat per catalogued path plus two shell listings. Null is "not read yet" and is shown as such,
+    // because a check that has not answered must not look like a check that found nothing.
+    var residue by remember { mutableStateOf<ResidueSurvey?>(null) }
     var showResidueDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        val report = withContext(Dispatchers.IO) { StagedResidue.read() }
-        residue = report
+        val survey = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+        residue = survey
         // Filed where the reading can be copied out of, because the list is worth having outside the
-        // app for exactly one reason: to compare it against what something else reports seeing.
-        AppLog.info(AppLogTags.STAGING, report.logLine(context))
+        // app for exactly one reason: to compare it against what something else reports seeing. One
+        // line per place with something in it - see [ResidueSurvey.logLines].
+        survey.logLines(context).forEach { line -> AppLog.info(AppLogTags.STAGING, line) }
     }
     var showShizukuMissingDialog by remember { mutableStateOf(false) }
     // Read live, not once at composition: Shizuku hands out its binder asynchronously after the
@@ -5026,43 +5015,48 @@ private fun SettingsPage(
 }
 
 /**
- * What this app has left in `/data/local/tmp`, one row per file, read the way another app reads it.
+ * What this app has left behind, in the three places it can leave anything.
  *
  * Read again here rather than handed the reading the card took: the card's reading was taken when
  * Settings was opened, and a run could have happened since - the list this is for is the one that is
  * true now. The fresh reading is passed back so the card's own line follows it, which is what keeps
  * the two from disagreeing about the same device.
+ *
+ * Three sections rather than one list, because the three directories are read differently and mean
+ * different things to whoever is looking: `/data/local/tmp` is what any other app can see by name,
+ * `/data/system` is what only root can see, and `/data/adb` is the root implementation's own. [ResidueScope]
+ * says why the third has no delete button on any row.
  */
 @Composable
 private fun StagedResidueDialog(
-    initial: ResidueReport?,
+    initial: ResidueSurvey?,
     onDismiss: () -> Unit,
-    onRead: (ResidueReport) -> Unit,
+    onRead: (ResidueSurvey) -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var report by remember { mutableStateOf(initial) }
     LaunchedEffect(Unit) {
-        val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
+        val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
         report = fresh
         onRead(fresh)
     }
-    // Emptying the directory is a second step and a wider claim than anything else on this screen: it
-    // takes the names this app cannot account for as well, so it is asked for, confirmed, and only
-    // then attempted - and what came of it is said where the button was.
+    // Deleting the whole list is a second step and a wider claim than any one row: it takes the names this
+    // app cannot account for as well, so it is asked for, confirmed, and only then attempted - and what
+    // came of it is said where the button was.
     var confirmingClear by remember { mutableStateOf(false) }
     var clearOutcome by remember { mutableStateOf<SweepOutcome?>(null) }
-    // A row's own delete, waiting for its confirmation. Held with its label and whether it is this
-    // app's, because that is what the confirmation has to say: taking an entry this app did not stage
-    // out of a shared directory is a different claim from clearing up after itself.
+    // A row's own delete, waiting for its confirmation. Only two kinds of row get here: an entry this app
+    // did not stage, and a file in `/data/system`, where being root-only is the reason to read the name
+    // twice before removing it.
     var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
     var deleteOutcome by remember { mutableStateOf<Pair<PendingDelete, SweepOutcome>?>(null) }
     var clearing by remember { mutableStateOf(false) }
     /**
      * Removes one entry and reports what came of it.
      *
-     * A named function rather than a body inside the confirmation, because two kinds of row reach it now: one
+     * A named function rather than a body inside the confirmation, because two kinds of row reach it: one
      * that confirms first and one that does not.
      */
     val deleteNow: (PendingDelete) -> Unit = { pending ->
@@ -5072,14 +5066,14 @@ private fun StagedResidueDialog(
             val outcome = withContext(Dispatchers.IO) {
                 StagingSweep.removeWhenQuiet(context, listOf(pending.path))
             }
-            // The list is read again here for the same reason it is after a clear: a row's absence is the
-            // receipt, and a name that survived the delete has to come back.
-            val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
+            // The list is read again here for the same reason it is after a delete-all: a row's absence is
+            // the receipt, and a name that survived the delete has to come back.
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
             report = fresh
             onRead(fresh)
             AppLog.info(
                 AppLogTags.STAGING,
-                context.getString(R.string.residue_log_delete, pending.label),
+                context.getString(R.string.residue_log_delete, pending.label, pending.path),
             )
             if (outcome !is SweepOutcome.Done || outcome.left.isNotEmpty() ||
                 outcome.complaint.isNotEmpty()
@@ -5090,11 +5084,40 @@ private fun StagedResidueDialog(
             clearing = false
         }
     }
+    /**
+     * Deletes everything the three sections found.
+     *
+     * Two commands, because the temp directory goes by glob and the catalogs go by name: emptying it is
+     * the wider claim - it takes the entry this app cannot account for too - and the named delete is what
+     * clears `/data/system`. The second only runs when the first did, so a device where nobody answered
+     * the first shell is not asked for a second one that will not answer either.
+     */
+    val deleteAll: () -> Unit = {
+        clearing = true
+        clearOutcome = null
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val emptied = StagingSweep.clearWhenQuiet(context)
+                if (emptied !is SweepOutcome.Done || emptied.left.isNotEmpty()) {
+                    emptied
+                } else {
+                    val named = report?.deletablePaths.orEmpty()
+                    combine(emptied, if (named.isEmpty()) null else StagingSweep.removeWhenQuiet(context, named))
+                }
+            }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
+            clearOutcome = outcome
+            clearing = false
+        }
+    }
     val reading = report
-    val present = reading?.present.orEmpty()
+    val present = reading?.temp?.present.orEmpty()
     // The half a catalog cannot produce: names the app does not write, listed through a shell. Shown
     // rather than counted, because what makes them worth knowing is which names they are.
-    val extras = reading?.extras.orEmpty()
+    val extras = reading?.temp?.extras.orEmpty()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.residue_dialog_title)) },
@@ -5117,21 +5140,23 @@ private fun StagedResidueDialog(
                         )
                     }
 
-                    reading.blind -> Text(
+                    reading.temp.blind -> Text(
                         stringResource(R.string.residue_blind_body),
                         style = MaterialTheme.typography.bodyMedium,
                     )
 
-                    // Two clean sentences, because there are two clean readings: an empty directory,
-                    // and a directory that could not be listed and holds none of the known names.
-                    present.isEmpty() && extras.isEmpty() -> Text(
+                    // Two clean sentences, because there are two clean readings of the temp directory:
+                    // an empty one, and one that could not be listed and holds none of the known names.
+                    // The second is only reached when the other two directories are empty as well, so a
+                    // clean claim here is about everything on the screen.
+                    present.isEmpty() && extras.isEmpty() && reading.sections.none { it.anything } -> Text(
                         stringResource(
-                            if (reading.directoryListed) {
+                            if (reading.temp.directoryListed) {
                                 R.string.residue_clean_listed_body
                             } else {
                                 R.string.residue_clean_by_name_body
                             },
-                            reading.findings.size,
+                            reading.temp.findings.size,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -5142,26 +5167,31 @@ private fun StagedResidueDialog(
                             .heightIn(max = RESIDUE_LIST_MAX),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
+                        item(key = "temp") {
+                            ResidueScopeLabel(scope = ResidueScope.TempDirectory)
+                        }
                         if (present.isNotEmpty()) {
                             item(key = "staged") {
                                 ResidueSectionLabel(stringResource(R.string.residue_section_staged))
                             }
                             items(present, key = { it.staged.path }) { finding ->
+                                // A name both installs write is the one case in this directory where the file
+                                // may not be this app's at all: with the other install present, deleting it
+                                // could be taking the payload another app's run is about to load. Everything
+                                // else here is removed on one tap - the app holds its own copy of what it
+                                // staged and a finished run does not need it back, so asking first charged
+                                // every cleanup a confirmation to protect against nothing.
+                                val pending = PendingDelete(
+                                    label = finding.staged.name,
+                                    path = finding.staged.path,
+                                    warning = R.string.residue_delete_shared,
+                                )
+                                val ambiguous = reading.siblingPresent &&
+                                    finding.staged.name in StagedResidue.sharedWithTheOtherInstall
                                 ResidueRow(
                                     finding = finding,
                                     deleteEnabled = !clearing,
-                                    // This app's own staging, removed on one tap: nothing else is lost, because
-                                    // the app holds its own copy of every file it staged, and the run that
-                                    // would need them has finished. Asking first charged every cleanup a
-                                    // confirmation to protect against a mistake with no consequence.
-                                    onDelete = {
-                                        deleteNow(
-                                            PendingDelete(
-                                                label = finding.staged.name,
-                                                path = finding.staged.path,
-                                            ),
-                                        )
-                                    },
+                                    onDelete = { if (ambiguous) pendingDelete = pending else deleteNow(pending) },
                                 )
                             }
                         }
@@ -5183,7 +5213,83 @@ private fun StagedResidueDialog(
                                     entry = entry,
                                     deleteEnabled = !clearing,
                                     onDelete = {
-                                        pendingDelete = PendingDelete(entry.name, entry.path)
+                                        pendingDelete = PendingDelete(
+                                            label = entry.name,
+                                            path = entry.path,
+                                            warning = R.string.residue_delete_other,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                        // The other two directories, each with its own heading and its own rule about
+                        // deleting. Rendered whether or not they hold anything: a section that appears
+                        // only when it has something is a section nobody knows to look for, and "nothing
+                        // here" is the answer that makes the three worth reading.
+                        reading.sections.forEach { section ->
+                            item(key = "scope:${section.scope.path}") {
+                                ResidueScopeLabel(scope = section.scope)
+                            }
+                            if (!section.listed) {
+                                item(key = "unlisted:${section.scope.path}") {
+                                    Text(
+                                        stringResource(R.string.residue_scope_unlisted, section.scope.path),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (!section.anything) {
+                                item(key = "empty:${section.scope.path}") {
+                                    Text(
+                                        stringResource(
+                                            // A listed directory says the stronger thing - it is empty -
+                                            // and a directory read by name can only say its own names are
+                                            // absent, which is a different claim about the same space.
+                                            if (section.named.isEmpty()) {
+                                                R.string.residue_scope_clean_listed
+                                            } else {
+                                                R.string.residue_scope_clean
+                                            },
+                                            section.named.size,
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            items(section.visibleNamed, key = { it.staged.path }) { finding ->
+                                ResidueRow(
+                                    finding = finding,
+                                    deletable = section.scope.deletable,
+                                    deleteEnabled = !clearing,
+                                    // Confirmed, unlike the temp directory's own rows: what is in here is a
+                                    // copy of packages.xml the phone boots from, or another install's
+                                    // daemon, and neither is a file this app holds a spare of.
+                                    onDelete = {
+                                        pendingDelete = PendingDelete(
+                                            label = finding.staged.name,
+                                            path = finding.staged.path,
+                                            warning = R.string.residue_delete_system,
+                                        )
+                                    },
+                                )
+                            }
+                            items(section.visibleEntries, key = { "entry:${section.scope.path}:${it.name}" }) { entry ->
+                                TempEntryRow(
+                                    entry = entry,
+                                    deletable = section.scope.deletable,
+                                    // Named as whose it is: a name in the temp directory is a file this app
+                                    // cannot account for, and one inside KernelSU's own directory is a file
+                                    // whose owner is known - the two want different sentences.
+                                    roleRes = section.scope.roleRes,
+                                    deleteEnabled = !clearing,
+                                    onDelete = {
+                                        pendingDelete = PendingDelete(
+                                            label = entry.name,
+                                            path = entry.path,
+                                            warning = R.string.residue_delete_other,
+                                        )
                                     },
                                 )
                             }
@@ -5193,19 +5299,24 @@ private fun StagedResidueDialog(
                 // What the check looked at, said out loud, because the count of what it found means
                 // nothing without the count of what it asked about - and because a path that could not
                 // be read is not a path that is not there.
-                if (reading != null && !reading.blind) {
+                if (reading != null && !reading.temp.blind) {
                     Text(
                         text = stringResource(
                             R.string.residue_dialog_checked,
-                            reading.findings.size,
-                            reading.findings.count { it.reading is ResidueReading.Unreadable },
+                            // Every path the screen asked about, across all three directories: a count of
+                            // what was looked for is the only thing that gives the count of what was found
+                            // its meaning.
+                            reading.temp.findings.size +
+                                reading.sections.sumOf { it.named.size + it.entries.size },
+                            reading.temp.findings.count { it.reading is ResidueReading.Unreadable } +
+                                reading.sections.sumOf { it.unreadableNamed.size + it.unreadableEntries.size },
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // Said where the names are, not in the help text at the top: what it changes is how
                     // much this particular list is worth.
-                    if (!reading.directoryListed) {
+                    if (!reading.temp.directoryListed) {
                         Text(
                             text = stringResource(R.string.residue_unlisted_body),
                             style = MaterialTheme.typography.labelSmall,
@@ -5216,7 +5327,7 @@ private fun StagedResidueDialog(
                 // The one action that changes the device rather than describing it, and the only one
                 // here that can take something that is not this app's - so it is offered last, in the
                 // error colour, and only when there is something to remove.
-                if (reading != null && !reading.blind && (present.isNotEmpty() || extras.isNotEmpty())) {
+                if (reading != null && !reading.temp.blind && reading.anything) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilledTonalButton(
                             enabled = !clearing,
@@ -5281,26 +5392,16 @@ private fun StagedResidueDialog(
         AlertDialog(
             onDismissRequest = { confirmingClear = false },
             title = { Text(stringResource(R.string.residue_clear_title)) },
-            text = { Text(stringResource(R.string.residue_clear_body, extras.size)) },
+            // The confirmation names both halves, and the count of what it cannot account for: emptying
+            // the temp directory takes other apps' files too, which is the one claim on this screen that
+            // is wider than this app's own residue - so it is said in the sentence that is agreed to.
+            text = { Text(stringResource(R.string.residue_clear_body, extras.size, reading?.deletablePaths?.size ?: 0)) },
             confirmButton = {
                 TextButton(onClick = {
                     clickHaptic(view)
                     confirmingClear = false
-                    clearing = true
                     deleteOutcome = null
-                    scope.launch {
-                        val outcome = withContext(Dispatchers.IO) {
-                            StagingSweep.clearWhenQuiet(context)
-                        }
-                        // The list is the receipt, not the outcome: what the read finds afterwards is the
-                        // only thing that says whether the delete actually happened.
-                        val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
-                        report = fresh
-                        onRead(fresh)
-                        AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
-                        clearOutcome = outcome
-                        clearing = false
-                    }
+                    deleteAll()
                 }) {
                     Text(stringResource(R.string.residue_clear_confirm))
                 }
@@ -5320,7 +5421,10 @@ private fun StagedResidueDialog(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text(stringResource(R.string.residue_delete_title, pending.label)) },
-            text = { Text(stringResource(R.string.residue_delete_other)) },
+            // Which of the two warnings this is depends on the path, not on the row: what the dialog has
+            // to say is whether the file is one this app wrote, and `/data/system` and the shared
+            // directory both hold files from elsewhere.
+            text = { Text(stringResource(pending.warning)) },
             confirmButton = {
                 TextButton(onClick = {
                     clickHaptic(view)
@@ -5345,12 +5449,17 @@ private fun StagedResidueDialog(
 /**
  * A row's delete, held between the button that asked and the confirmation that agrees to it.
  *
- * Only rows this app did not stage ever get here: one of its own files goes on a single tap, because the app
- * holds its own copy of everything it staged and a finished run does not need it back. A name in that
- * directory that the app did not write is a different thing to remove, and that is what the confirmation is
- * for.
+ * Only rows where a mistake would be hard to undo ever get here: one of this app's own files goes on a
+ * single tap, because the app holds its own copy of everything it staged and a finished run does not need
+ * it back - while a file in `/data/system`, or a name in the shared directory that the app did not write,
+ * is something to read twice before removing.
  */
-private data class PendingDelete(val label: String, val path: String)
+private data class PendingDelete(
+    val label: String,
+    val path: String,
+    /** What the confirmation warns about, which is a fact about where the file is. */
+    @StringRes val warning: Int,
+)
 
 /** What one row's delete came to, said under the list rather than beside a row that may be gone. */
 private fun deleteOutcomeLine(context: Context, label: String, outcome: SweepOutcome): String =
@@ -5378,10 +5487,17 @@ private fun clearOutcomeLine(context: Context, outcome: SweepOutcome): String = 
     }
 }
 
-/** One staged file: the name a detector matches on, then what it is and how long it has been there. */
+/**
+ * One staged file: the name a detector matches on, then what it is and how long it has been there.
+ *
+ * [deletable] is the scope's answer, not the row's: `/data/adb` is listed and never deleted from - the
+ * daemon and the modules in it are the root this app just obtained - so those rows carry no button at all
+ * rather than a disabled one, which would read as "not right now".
+ */
 @Composable
 private fun ResidueRow(
     finding: ResidueFinding,
+    deletable: Boolean = true,
     deleteEnabled: Boolean,
     onDelete: () -> Unit,
 ) {
@@ -5407,7 +5523,13 @@ private fun ResidueRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        ResidueDeleteButton(name = finding.staged.name, enabled = deleteEnabled, onDelete = onDelete)
+        if (deletable) {
+            ResidueDeleteButton(
+                name = finding.staged.name,
+                enabled = deleteEnabled,
+                onDelete = onDelete,
+            )
+        }
     }
 }
 
@@ -5449,6 +5571,50 @@ private fun ResidueSectionLabel(text: String) {
 }
 
 /**
+ * One of the three directories, and why it matters.
+ *
+ * The body line is not decoration: two of these directories are unreadable to another app and one is
+ * read by detectors without root, and a list of paths that did not say which is which would make the
+ * three sections look like three spellings of the same screen.
+ */
+@Composable
+private fun ResidueScopeLabel(scope: ResidueScope) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = stringResource(scope.titleRes),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+        Text(
+            text = stringResource(scope.bodyRes),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * What a delete-all came to, from its two halves.
+ *
+ * The temp directory is emptied by glob and everything else by name, and the screen has one line for one
+ * button - so the two are added up. A second command that never ran, or that no shell answered, is the
+ * stronger answer and replaces the first: reporting "deleted 6 entries" over a half that was refused
+ * would be the one lie this screen cannot afford.
+ */
+private fun combine(first: SweepOutcome, second: SweepOutcome?): SweepOutcome = when {
+    second == null -> first
+    second !is SweepOutcome.Done -> second
+    first !is SweepOutcome.Done -> first
+    else -> SweepOutcome.Done(
+        found = first.found + second.found,
+        left = first.left + second.left,
+        complaint = listOf(first.complaint, second.complaint)
+            .filter { it.isNotEmpty() }
+            .joinToString(", "),
+    )
+}
+
+/**
  * One entry that this app did not stage: its name, then everything that can honestly be said about it.
  *
  * Which is less than a staged row says, and deliberately so: the role is unknown by definition, and a
@@ -5458,6 +5624,8 @@ private fun ResidueSectionLabel(text: String) {
 @Composable
 private fun TempEntryRow(
     entry: TempEntry,
+    deletable: Boolean = true,
+    @StringRes roleRes: Int = R.string.residue_role_other,
     deleteEnabled: Boolean,
     onDelete: () -> Unit,
 ) {
@@ -5476,7 +5644,7 @@ private fun TempEntryRow(
             Text(
                 text = stringResource(
                     R.string.residue_row_detail,
-                    stringResource(R.string.residue_role_other),
+                    stringResource(roleRes),
                     tempEntrySizeLabel(context, entry),
                     StagedResidue.ageLabelOf(at?.modifiedAtMillis),
                 ),
@@ -5484,7 +5652,9 @@ private fun TempEntryRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        ResidueDeleteButton(name = entry.name, enabled = deleteEnabled, onDelete = onDelete)
+        if (deletable) {
+            ResidueDeleteButton(name = entry.name, enabled = deleteEnabled, onDelete = onDelete)
+        }
     }
 }
 

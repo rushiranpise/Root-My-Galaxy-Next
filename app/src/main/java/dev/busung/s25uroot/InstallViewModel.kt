@@ -755,7 +755,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // Whether this run has already swept its staging. A run that is about to ask for a userspace
             // restart does it early, because that request ends this process - so the sweep in the finally
             // below must not then do it a second time.
-            var stagingSwept = false
             try {
                 activeStage = RunStage.Target
                 setPhase(InstallPhase.Checking, app.getString(R.string.status_checking_github))
@@ -1057,15 +1056,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 finishHistory(
                     if (loadKernelSu) InstallRunResult.Succeeded else InstallRunResult.RootOnly,
                 )
-                // Swept here rather than left to the finally below, and the order is the whole point of
-                // this line: requesting the userspace restart ends everything this process is in the
-                // middle of, so a sweep left to the finally on a successful run never got to run a shell
-                // at all - the process was gone first. That is how a loaded root came to leave its
-                // staged helper and payload in /data/local/tmp for a detector to find, on exactly the
-                // runs that worked. Nothing staged is needed by a run that has finished: the module
-                // lives in /data/adb, and the daemon the restart reaches is the installed one.
-                stagingSwept = true
-                sweepStaging(app)
                 // Last, and only for a run that loaded KernelSU: modules take effect when the userspace
                 // is built again, and KernelSU's own soft reboot is the way that walks their lifecycle
                 // in the normal order. After the result is written, because the restart ends everything
@@ -1169,12 +1159,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             } finally {
                 activeRunShizuku = null
                 activeRunTransport = null
-                // The run is over, so its files are no longer anything but evidence: swept here rather
-                // than at the next launch because this is the one moment that knows the run has
-                // finished, including the runs that failed or were stopped. A successful run that is
-                // about to restart the userspace has already swept for the same reason, and it says so.
+                // The run is over, so its claim on this device goes with it. Nothing is deleted here:
+                // what the run staged is listed in Settings, where a person can see it and decide. The
+                // release still has to happen in this block, because the record is what makes every
+                // delete stand down while a run is in flight - and this one is not any more, whether it
+                // succeeded, failed or was stopped.
                 RunInFlight.end(app)
-                if (!stagingSwept) sweepStaging(app)
                 // The run is over. A success clears the notification, because Home's card is the account of
                 // it and a shade line saying "done" about the thing you just did is noise - but anything else
                 // stays, wearing its verdict: a run that failed while the phone was in a pocket is exactly
@@ -1196,25 +1186,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
         }
-    }
-
-    /**
-     * Sweeps what the run staged, and files what came of it.
-     *
-     * The order inside is the same one the runner's own `finally` used to do inline, and it matters:
-     * `RunInFlight.end` comes first, because the record of this run exists so that no sweep takes the
-     * payload out from under it - and the run is over by the time this is called. Anything still holding
-     * a record belongs to another process's run, and the sweep stands down for that one.
-     *
-     * Called from two places now - the one that is about to end this process, and the one that catches
-     * everything else - so it is a function rather than a pair of identical paragraphs. Blocking, and on
-     * the run's own IO dispatcher, like every other shell this app runs.
-     */
-    private fun sweepStaging(context: Context): SweepOutcome {
-        RunInFlight.end(context)
-        val outcome = StagingSweep.sweepWhenQuiet(context)
-        outcome.logLine(context)?.let { line -> AppLog.info(AppLogTags.STAGING, line) }
-        return outcome
     }
 
     /**
@@ -2061,8 +2032,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
          *
          * The `rmgnext-` prefix is the fork's own generation of names. Both installs share one
          * `/data/local/tmp`, and the names this app is free to choose are chosen apart from the ones the
-         * app it came from writes - [StagedResidue] is the whole picture, and [StagingSweep] is what
-         * reads it.
+         * app it came from writes - [StagedResidue] is the whole picture, and the residue screen reads
+         * it.
          */
         private const val ADB_HELPER_PATH = "/data/local/tmp/rmgnext-ksud-helper"
         private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmgnext-payload"

@@ -54,6 +54,18 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
     /** The KernelSU daemon. */
     Daemon(R.string.residue_role_daemon),
 
+    /** A copy of `packages.xml` an inject wrote, before or during its own edit of the file. */
+    Backup(R.string.residue_role_backup),
+
+    /**
+     * A file with this project's name in it that this project's own code does not write.
+     *
+     * Named as its own role rather than given a role that would read as this app's: the daemon and the
+     * backup from the other install sit in the same directory as this app's, both are residue, and only
+     * one of them is this app clearing up after itself.
+     */
+    OtherInstall(R.string.residue_role_other_install),
+
     /** The root helper the exploit is loaded with. */
     Helper(R.string.residue_role_helper),
 
@@ -121,6 +133,14 @@ internal data class TempEntry(
     val reading: ResidueReading,
     /** A directory rather than a file, which the listing cannot say and the stat can. */
     val isDirectory: Boolean = false,
+    /**
+     * The directory it was listed in, which is the temp directory unless the caller says otherwise.
+     *
+     * A parameter because this type is now used for two listings - the shared temp directory and
+     * KernelSU's own - and a path built from a constant would name the wrong one for the second, which
+     * is a delete aimed at a directory the file is not in.
+     */
+    val directory: String = StagedResidue.DIRECTORY,
 ) {
     /**
      * Where it is, put together the same way the catalogue's own paths are.
@@ -129,7 +149,7 @@ internal data class TempEntry(
      * caller keeps one spelling of the directory in the app, which is the same rule the catalogue
      * follows.
      */
-    val path: String get() = "${StagedResidue.DIRECTORY}/$name"
+    val path: String get() = "$directory/$name"
 }
 
 /** What one stat says: the reading, and the one other thing a stat can say. */
@@ -568,6 +588,16 @@ internal object StagedDirectory {
     internal const val LISTED_MARK = "listed"
 
     /**
+     * What a shell that may not read the directory says instead.
+     *
+     * Its own word, because the alternative is the mistake this whole check exists to prevent: a shell
+     * that is denied `/data/adb` prints nothing and would otherwise look exactly like a shell that found
+     * nothing. `/data/local/tmp` is readable by the `shell` uid and `/data/adb` is root-only, so the two
+     * directories genuinely differ in who can list them - and the reading has to say which happened.
+     */
+    internal const val DENIED_MARK = "denied"
+
+    /**
      * The listing, as one command.
      *
      * A glob rather than `ls`, and both halves of the glob because a dot-name is exactly the shape a
@@ -575,12 +605,15 @@ internal object StagedDirectory {
      * glob mean nothing rather than a file called `*`. Built from [StagedResidue.DIRECTORY] so the
      * directory is named once in this source tree.
      */
-    internal fun command(): String {
-        val directory = StagedResidue.DIRECTORY
-        return "for e in $directory/* $directory/.[!.]*; do [ -e \"\$e\" ] || continue; " +
+    internal fun command(directory: String = StagedResidue.DIRECTORY): String =
+        // The readability test comes first: a glob under a directory this shell may not enter expands to
+        // itself, `[ -e ]` fails on it, and the loop prints nothing - which would be reported as an empty
+        // directory rather than as a directory this shell cannot see into.
+        "if [ -r $directory ] && [ -x $directory ]; then " +
+            "for e in $directory/* $directory/.[!.]*; do [ -e \"\$e\" ] || continue; " +
             "printf '$NAME_PREFIX%s\\n' \"\${e##*/}\"; done; " +
-            "printf '$LISTED_MARK\\n'; exit 0"
-    }
+            "printf '$LISTED_MARK\\n'; " +
+            "else printf '$DENIED_MARK\\n'; fi; exit 0"
 
     /**
      * The names in a listing's output, or null when the listing never ran.
@@ -590,6 +623,9 @@ internal object StagedDirectory {
      */
     internal fun namesIn(output: String): List<String>? {
         val lines = output.lineSequence().map { it.trim() }.toList()
+        // Refused, and said so: no answer, rather than an empty directory. The caller may still be able to
+        // ask a shell with more privilege than this one.
+        if (lines.any { it == DENIED_MARK }) return null
         if (lines.none { it == LISTED_MARK }) return null
         return lines.filter { it.startsWith(NAME_PREFIX) }
             .map { it.removePrefix(NAME_PREFIX) }
@@ -604,16 +640,25 @@ internal object StagedDirectory {
      * reading that matters: another app's view of this directory is this app's view of it. So a name
      * this app cannot stat is still reported - as [ResidueReading.Unreadable] - rather than dropped.
      */
-    fun list(): List<TempEntry>? {
-        val command = command()
-        val result = runCatching {
-            KernelSuRuntime.unprivilegedShell(command)
-                ?: KernelSuRuntime.rootShell(command, timeoutSeconds = LISTING_TIMEOUT_SECONDS)
+    fun list(directory: String = StagedResidue.DIRECTORY): List<TempEntry>? {
+        val command = command(directory)
+        // The unprivileged shell first, then root - the order the deleting side uses in reverse, and the
+        // privilege is what decides it rather than the caller: `/data/local/tmp` is owned by the `shell`
+        // uid and `/data/adb` is root-only, so a reading that only ever asked one of the two would report
+        // one of those directories as empty on a phone where it is full.
+        val names = runCatching {
+            val unprivileged = KernelSuRuntime.unprivilegedShell(command)?.let { namesIn(it.output) }
+            unprivileged ?: KernelSuRuntime.rootShell(command, timeoutSeconds = LISTING_TIMEOUT_SECONDS)
+                ?.let { namesIn(it.output) }
         }.getOrNull() ?: return null
-        val names = namesIn(result.output) ?: return null
         return names.map { name ->
-            val stat = StagedResidue.statReading("${StagedResidue.DIRECTORY}/$name")
-            TempEntry(name = name, reading = stat.reading, isDirectory = stat.isDirectory)
+            val stat = StagedResidue.statReading("$directory/$name")
+            TempEntry(
+                name = name,
+                reading = stat.reading,
+                isDirectory = stat.isDirectory,
+                directory = directory,
+            )
         }
     }
 

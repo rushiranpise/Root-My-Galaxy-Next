@@ -8,49 +8,59 @@ import org.junit.Test
 import java.io.File
 
 /**
- * What a sweep deletes, what it refuses to, and what it is able to say about it.
+ * What a delete does, what it refuses to, and what it is able to say about it.
  *
- * The two rules worth pinning are the ones whose failure is silent. A sweep set that includes the
- * daemon breaks this boot's own repair actions, and a sweep that cannot see a run in flight deletes the
- * payload that run is executing - neither shows up as a failed assertion unless it is written as one.
+ * Nothing here runs on its own any more: the sweep that followed every run and every launch is gone, and
+ * what is left is the machinery the residue screen drives - remove these paths, empty that directory,
+ * and report what `rm` said. So the rules worth pinning are the ones that still hold: a delete stands
+ * down while a run is in flight, a name belonging to another install is one a person is asked about,
+ * and the answer is measured rather than asserted.
  */
 class StagingSweepTest {
 
     @Test
-    fun `every catalogued path is swept when this app is the only install`() {
-        // Nothing staged in /data/local/tmp outlives the run that staged it, and the daemon is the
-        // exemption worth pinning as absent: it is the largest artefact this app leaves behind and the
-        // first name a detector prints.
+    fun `every delete the app can ask for stands down for a run`() {
+        // The screen's two actions are the only deletes left, and a run is executed *out of* the temp
+        // directory: a path that reached `remove` or `clear` directly would take the payload out from
+        // under the process running it, and nothing about that failure would look like a bug.
+        val direct = sourceFiles()
+            .flatMap { file -> file.readLines().map { file.name to it } }
+            .filter { (_, line) ->
+                line.contains("StagingSweep.remove(") || line.contains("StagingSweep.clear(")
+            }
+            .map { (file, line) -> "$file: ${line.trim()}" }
+
         assertEquals(
-            StagedResidue.catalog.map { it.path }.toSet(),
-            StagingSweep.removable(otherInstallPresent = false).map { it.path }.toSet(),
+            "a delete bypasses the run-in-flight guard, so it can remove the payload of a running exploit",
+            emptyList<String>(),
+            direct,
         )
-        val names = StagingSweep.removable(false).map { it.name }
-        assertTrue(names.contains("ksud-s25u-kdp"))
-        assertTrue(names.contains(".ksud-stage"))
     }
 
     @Test
-    fun `the names both installs write are left alone while the other install is here`() {
+    fun `the names both installs write are the ones a person is asked about`() {
         // Those names are the payload's rather than either app's, so both apps write them and neither
-        // can tell whose file it is looking at. Deleting one while the other app is mid-run is deleting
-        // the payload that run is about to load, which is the one way this sweep can break something
-        // outside itself.
-        val swept = StagingSweep.removable(otherInstallPresent = true).map { it.name }.toSet()
+        // can tell whose file it is looking at. With the other install present, deleting one can break
+        // that app's run - so it is the one case in the temp directory that reaches a confirmation
+        // instead of going on a single tap.
+        val source = sourceFiles().first { it.name == "MainActivity.kt" }.readText()
 
-        StagedResidue.sharedWithTheOtherInstall.forEach { shared ->
-            assertFalse("$shared is swept even though the other install writes it", swept.contains(shared))
-        }
-        // And everything else still goes: the exemption must not become a sweep that stops sweeping.
-        val ours = StagedResidue.catalog
-            .map { it.name }
-            .filterNot { it in StagedResidue.sharedWithTheOtherInstall }
-        assertTrue("the exemption covers the whole catalogue", ours.isNotEmpty())
-        assertEquals(ours.toSet(), swept)
+        assertTrue(
+            "the temp directory's own rows no longer consult the shared names, so a file the other " +
+                "install is about to execute can be deleted on one tap",
+            source.contains("in StagedResidue.sharedWithTheOtherInstall"),
+        )
+        assertTrue(
+            "the shared rows no longer confirm first",
+            source.contains("if (ambiguous) pendingDelete = pending else deleteNow(pending)"),
+        )
+        // And the marking is a subset of the catalogue: a name that is not read cannot be reasoned about.
+        val catalogued = StagedResidue.catalog.mapTo(HashSet()) { it.name }
+        assertTrue(StagedResidue.sharedWithTheOtherInstall.all { it in catalogued })
     }
 
     @Test
-    fun `no name this app chooses is ever exempt from the sweep`() {
+    fun `no name this app chooses is ever treated as another install's`() {
         // The list is "what we may not rename", not "what we decided not to clean": a name this fork
         // picks that ended up on it would quietly shrink the sweep on every device that also has the
         // other app installed, which is the failure nobody would report.
@@ -119,8 +129,8 @@ class StagingSweepTest {
 
 
     @Test
-    fun `everything a detector names as temp-root residue is swept, the daemon aside`() {
-        val swept = StagingSweep.removable(otherInstallPresent = false).map { it.name }
+    fun `everything a detector names as temp-root residue is in the list`() {
+        val swept = StagedResidue.catalog.map { it.name }
 
         assertTrue(swept.contains("rmgnext-helper"))
         assertTrue(swept.contains("rmgnext-shizuku-payload"))
@@ -218,25 +228,20 @@ class StagingSweepTest {
     }
 
     @Test
-    fun `a successful run sweeps before it asks for the restart that would end it`() {
-        // The failure this prevents is silent, and it was real: the sweep lived only in the runner's own
-        // `finally`, while a successful run asks for the userspace restart from inside the `try` - so the
-        // process was gone before the shell could answer, and a loaded root left its staged helper and
-        // payload in /data/local/tmp for a detector to find, on exactly the runs that worked. The order
-        // is the fix, so the order is what this asserts, against the source that holds it.
-        val source = sourceFiles().firstOrNull { it.name == "InstallViewModel.kt" }
-        requireNotNull(source) { "InstallViewModel.kt was not found; the scan is looking at the wrong directory" }
-        val text = source.readText()
+    fun `no run deletes anything, on any of its paths`() {
+        // This used to be the opposite test - the run had to sweep before it asked for the userspace
+        // restart, or a loaded root left its staged helper and payload in /data/local/tmp on exactly the
+        // runs that worked. The sweep is gone: deleting is a person's decision now, and what a run does at
+        // the end is release its claim on the device. So this pins the removal, because "the run cleans up
+        // after itself" is exactly the kind of behaviour somebody adds back on a quiet afternoon.
+        val runner = sourceFiles().firstOrNull { it.name == "InstallViewModel.kt" }
+        requireNotNull(runner) { "InstallViewModel.kt was not found; the scan is looking at the wrong directory" }
+        val text = runner.readText()
 
-        // The first mention of each: the success path's sweep, and the restart it has to precede.
-        val sweep = text.indexOf("sweepStaging(app)")
-        val restart = text.indexOf("RecoveryTool.SoftReboot")
-        assertTrue("the run never sweeps its staging", sweep >= 0)
-        assertTrue("the run never asks for the restart", restart >= 0)
-        assertTrue(
-            "the restart is asked for before the sweep, and the restart ends the process that sweeps",
-            sweep < restart,
-        )
+        assertFalse("a run deletes files again", text.contains("StagingSweep"))
+        // And the claim is still released, whatever else changes: every delete in the app stands down for
+        // a run in flight, so a record that outlived its run would make the screen refuse for ever.
+        assertTrue("the run no longer ends its in-flight claim", text.contains("RunInFlight.end(app)"))
     }
 
     @Test

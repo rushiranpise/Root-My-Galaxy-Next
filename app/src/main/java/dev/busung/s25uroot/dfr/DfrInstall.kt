@@ -240,6 +240,22 @@ internal object DfrInstall {
         "/system/bin/pm install -r -d --user 0 '" + apkPath + "'"
 
     /**
+     * The two files an inject can leave in `/data/system`, for the screen that lists them.
+     *
+     * Named from the injector's own constants rather than typed out, because the list has to name what
+     * the inject actually writes: `packages.xml` is a file a detector reads closely, and a copy of it
+     * from before this app touched it is the inject's own fingerprint - written by the inject, not by
+     * the platform, and removed by nothing on the phone.
+     *
+     * Nothing deletes these automatically. They are the residue screen's to show and the user's to
+     * remove, one row or all of them.
+     */
+    val leftoverPaths: List<String> = listOf(
+        PackagesXml.PACKAGES_XML + PackagesXml.BACKUP_SUFFIX,
+        PackagesXml.PACKAGES_XML + PackagesXml.TEMP_SUFFIX,
+    )
+
+    /**
      * Removes the stage two, which is the only way past an install that landed as an ordinary app:
      * Package Manager assigns a package's uid when it installs it and never revisits it.
      */
