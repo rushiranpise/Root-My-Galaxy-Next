@@ -1,7 +1,10 @@
 package dev.busung.s25uroot.dfr
 
+import dev.busung.s25uroot.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -301,6 +304,47 @@ class DfrFlowTest {
         assertEquals(true, DfrFlow.rebootedSince(now - 60_000, now, 5_000))
         assertEquals(false, DfrFlow.rebootedSince(now - 60_000, now, 4 * 60 * 60 * 1000L))
         assertEquals(false, DfrFlow.rebootedSince(null, now, 5_000))
+    }
+
+    @Test
+    fun `the clean-up confirmation names both things it removes, not just one`() {
+        // The button writes a file the phone boots from and does two unrelated things, so the question it
+        // asks has to be about both. Key first, because that is the one with a restart behind it.
+        assertEquals(
+            listOf(R.string.dfr_clean_up_key, R.string.dfr_clean_up_helper),
+            DfrFlow.cleanUpRemovals(keyInjected = true, helperInstalled = true),
+        )
+        assertEquals(
+            "only the certificate is there, so only it is named",
+            listOf(R.string.dfr_clean_up_key),
+            DfrFlow.cleanUpRemovals(keyInjected = true, helperInstalled = false),
+        )
+        assertEquals(
+            "and only the helper, on a phone whose key is out",
+            listOf(R.string.dfr_clean_up_helper),
+            DfrFlow.cleanUpRemovals(keyInjected = false, helperInstalled = true),
+        )
+    }
+
+    @Test
+    fun `a clean-up with nothing to remove says so instead of asking`() {
+        // An empty list is the screen's cue to show the sentence and one Close, rather than a Remove for a
+        // run that would change nothing - the same reason the inject step is not offered on a build that
+        // carries no helper.
+        assertTrue(DfrFlow.cleanUpRemovals(keyInjected = false, helperInstalled = false).isEmpty())
+    }
+
+    @Test
+    fun `an unreadable check is named as such rather than as a removal`() {
+        // The one state where the certificate may be there and cannot be confirmed: the sentence has to
+        // say it removes it *if* it is, because a confirmation for a check that did not happen would be
+        // the app claiming a measurement it does not have.
+        val unread = DfrFlow.cleanUpRemovals(keyInjected = null, helperInstalled = false)
+        assertEquals(listOf(R.string.dfr_clean_up_key_unread), unread)
+        assertFalse(
+            "the unread case must not borrow the wording of a confirmed one",
+            unread.contains(R.string.dfr_clean_up_key),
+        )
     }
 
     @Test

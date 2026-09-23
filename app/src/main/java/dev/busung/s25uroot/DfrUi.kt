@@ -74,6 +74,9 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     var helperRefusal by remember { mutableStateOf<DfrHelperAvailability?>(null) }
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf<String?>(null) }
+    // The clean-up asks first: it is the one action here that writes a file the phone boots from, and it
+    // does two unrelated things, so which of them this press will take off is named before it runs.
+    var confirmCleanUp by remember { mutableStateOf(false) }
 
     /**
      * The sentence for the refusal this build is in.
@@ -353,7 +356,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(enabled = !busy, onClick = { cleanUp() }) {
+                    TextButton(enabled = !busy, onClick = { confirmCleanUp = true }) {
                         Text(stringResource(R.string.dfr_clean_up))
                     }
                 }
@@ -368,6 +371,67 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             }
         },
     )
+
+    if (confirmCleanUp) {
+        // Read from the measurement the dialog already has rather than asked for again: the question is
+        // about what is on the phone now, and a second reading could answer about a different phone than
+        // the one the step list was drawn from.
+        val removals = DfrFlow.cleanUpRemovals(
+            keyInjected = reading?.injected,
+            helperInstalled = reading?.probe?.installed == true,
+        )
+        AlertDialog(
+            onDismissRequest = { confirmCleanUp = false },
+            title = { Text(stringResource(R.string.dfr_clean_up_confirm_title)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (removals.isEmpty()) {
+                        // Nothing to confirm: both answers are that it is not there, and a confirm button
+                        // for a removal that would change nothing is how a refusal starts to look like an
+                        // action. The row below is the one that can still tell somebody what will happen.
+                        Text(stringResource(R.string.dfr_clean_up_nothing))
+                    } else {
+                        removals.forEach { removal ->
+                            Text("\u2022 " + stringResource(removal))
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.dfr_clean_up_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                if (removals.isEmpty()) {
+                    TextButton(onClick = { confirmCleanUp = false }) {
+                        Text(stringResource(R.string.dfr_clean_up_close))
+                    }
+                } else {
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            clickHaptic(view)
+                            confirmCleanUp = false
+                            cleanUp()
+                        },
+                    ) {
+                        Text(stringResource(R.string.dfr_clean_up_confirm))
+                    }
+                }
+            },
+            // One button when there is nothing to remove: a Close beside a Cancel is the same press twice.
+            dismissButton = if (removals.isEmpty()) {
+                null
+            } else {
+                {
+                    TextButton(onClick = { confirmCleanUp = false }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                }
+            },
+        )
+    }
 }
 
 /** The step the phone is on, with what was measured to decide it. */

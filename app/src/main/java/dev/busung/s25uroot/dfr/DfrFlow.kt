@@ -202,6 +202,30 @@ internal object DfrFlow {
     )
 
 
+    /**
+     * What a clean-up will take off the phone, named from what was measured rather than from the flow's own
+     * records.
+     *
+     * The clean-up is the one button in this flow that writes a file the phone boots from, and it does two
+     * unrelated things - takes this app's certificate out of the shared user's past signatures, and removes
+     * the helper installed under it - so a confirmation that said "clean up?" would be asking about one
+     * write while performing two. The list is what the reading says is there, which also means it can be
+     * empty: that is a state worth showing rather than a question worth asking, because nothing would be
+     * removed and the screen should say so instead of offering an action that cannot change anything.
+     *
+     * The key's line has a third answer, for a reading that could not be taken ([keyInjected] is null): the
+     * certificate is removed if it is there, and the sentence says so rather than claiming a check that did
+     * not happen.
+     */
+    fun cleanUpRemovals(keyInjected: Boolean?, helperInstalled: Boolean): List<Int> = buildList {
+        when (keyInjected) {
+            true -> add(R.string.dfr_clean_up_key)
+            null -> add(R.string.dfr_clean_up_key_unread)
+            false -> Unit
+        }
+        if (helperInstalled) add(R.string.dfr_clean_up_helper)
+    }
+
     /** Every step in order, for the screen that shows how far along the flow is. */
     val order: List<DfrStep> = listOf(
         DfrStep.Inject,
