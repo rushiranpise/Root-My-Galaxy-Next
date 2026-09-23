@@ -789,7 +789,7 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="error_shizuku_start_no_root">Cannot start Shizuku here. This phone has no root, wireless debugging pairing, or start token.</string>
     <string name="error_no_root_shell">No root shell is available yet</string>
     <string name="settings_ksu_flavor">KernelSU flavour</string>
-    <string name="settings_ksu_flavor_dialog_title">KernelSU flavour</string>
+    <string name="settings_ksu_flavor_from_payload">Set by the payload you pick for this device.</string>
     <string name="settings_ksu_flavor_pending">Restart to apply · this boot loaded %1$s</string>
     <string name="settings_manager">Manager</string>
     <string name="settings_manager_summary">Install %1$s</string>
@@ -883,6 +883,8 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="target_show_everything">Search every device</string>
     <string name="show_my_device_only">Show only my device</string>
     <string name="no_matching_devices">No payload matches this model and kernel version.</string>
+    <string name="no_matching_devices_flavor">No payload in the enabled sources stages %1$s.</string>
+    <string name="target_flavor_any">Any KernelSU</string>
     <string name="device_mismatch_title">Device mismatch</string>
     <string name="device_mismatch_body">This phone is %1$s, but the selected payload supports %2$s. Running it may crash or damage the device.</string>
     <string name="kernel_version_mismatch_title">Kernel version mismatch</string>

@@ -24,7 +24,7 @@ The device feed and native payloads used here are maintained in
 
 ## Application
 
-<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
+<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: the flavour chips, and the candidates that stage each one" src="docs/screenshots/payload-picker.png" />
 <img width="200" alt="Settings, grouped into sections" src="docs/screenshots/settings.png" />
 <img width="200" alt="The app log" src="docs/screenshots/logs.png" />
 
@@ -136,7 +136,7 @@ starts open, so the page a fresh install shows is the whole page.
 | Run Management | advanced mode (on by default), disable KSU modules, protect image partitions, boot settle, run limits, run plan |
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start token, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
-| Root Management | KernelSU flavour, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
+| Root Management | KernelSU flavour (a readout of the payload), install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
 | Recovery Management | reload modules, restart Zygote, KernelSU soft reboot, reboot and unroot — each confirms first |
 | System Management | the battery-optimisation exemption a run with the screen off depends on, and what the app has left in `/data/local/tmp` |
 
@@ -454,17 +454,31 @@ still there.
 
 ## Two KernelSUs, one at a time
 
-**Settings → Root Management → KernelSU flavour** picks which KernelSU the app installs and drives:
-KernelSU (`me.weishu.kernelsu`, releases from `tiann/KernelSU`) or KernelSU-Next
-(`com.rifsxd.ksunext`, releases from `KernelSU-Next/KernelSU-Next`). They are separate projects with
-separate kernels, separate managers and separate daemons, and they **cannot both be in the kernel at
-once** — each hooks the same syscall paths — so a boot carries one of them or neither.
+The app drives one KernelSU at a time: KernelSU (`me.weishu.kernelsu`, releases from `tiann/KernelSU`),
+KernelSU-Next (`com.rifsxd.ksunext`, releases from `KernelSU-Next/KernelSU-Next`) or ReSukiSU. They are
+separate projects with separate kernels, separate managers and separate daemons, and they **cannot both
+be in the kernel at once** — each hooks the same syscall paths — so a boot carries one of them or neither.
 
-That is why the choice is stored for the app rather than passed to a single run: it decides which daemon
-a run stages, which manager is offered and opened afterwards, and which module *root on boot* puts back.
-Changing it therefore takes effect after a restart, and the row says so with the reason — which flavour
-this boot is actually holding — rather than only that a restart is owed, because "after a restart" on
-its own leaves the reason to be guessed.
+**Which one is not a setting. It follows the payload.** The flavour decides which daemon a run stages,
+which manager is offered and looked for, which releases the version dialog lists, and which module *root
+on boot* puts back — every one of those a fact about the KernelSU a payload stages — so the payload that
+resolves for this phone is what writes it. The alternative was tried and is the reason for the rule: a
+setting standing beside the payload could disagree with it, and setting KernelSU while a KernelSU-Next
+payload resolved for this device made the app offer and look for official KernelSU's manager against a
+kernel whose only manager is KernelSU-Next's — with nothing on the screen saying so. Deriving it removes
+that state rather than warning about it.
+
+Where it is chosen, then, is the payload sheet: its **flavour chips** (Any, KernelSU, KernelSU-Next,
+ReSukiSU) narrow the candidate list to the payloads that stage one KernelSU, and the line under them says
+what the selected name is. Any is the default and the filter is not stored, because it is a way to find
+a payload of a kind rather than a setting — a sheet that reopened filtered would hide the entry somebody
+came back for. Picking a payload of another flavour is the override, and it is the only one: there is no
+second switch to forget. **Settings → Root Management → KernelSU flavour** is a readout of that decision
+("Set by the payload you pick for this device") rather than a picker, and tapping it opens the sheet.
+
+A flavour that differs from what this boot loaded takes effect after a restart, and the row says so with
+the reason — which flavour this boot is actually holding — rather than only that a restart is owed,
+because "after a restart" on its own leaves the reason to be guessed.
 
 The flavour is the feed's word too, not only the app's. A payload entry declares `"flavor":
 "kernelsu-next"`, an entry that declares nothing is KernelSU — which is what keeps every manifest written
@@ -472,10 +486,9 @@ before flavours existed readable — and an id that is neither is refused rather
 since a manifest that says `"kernel-su"` was written for something and installing the other project's
 kernel on a phone that asked for this one is not a repair.
 
-**The flavour is a preference when the catalog is read, not a filter.** A catalog that only carries the
-other flavour for this device is still a catalog that roots it, and refusing to use it would leave
-someone who picked the wrong flavour with no run at all and no way to tell why. Which flavour a profile
-takes is a property of the profile, the run log states it, and the run refuses only the one thing that
+**The flavour narrows the sheet, and resolution still falls back.** A catalog that only carries the
+other flavour for this device is still a catalog that roots it — the run takes that payload and the
+flavour follows it, rather than refusing to run at all. The run then refuses only the one thing that
 cannot work: a load into a boot that already has the *other* flavour in the kernel. That refusal says
 which one is loaded and asks for a restart, because the two cannot share a boot.
 
@@ -484,8 +497,8 @@ may declare `"version": "3.4.0"` on its `kernelsu` artifact — the release its 
 the app then offers that release's manager, because the daemon a run stages and the manager that talks to
 it have to come from the same release and only the feed knows which release that is. The app records it
 at the three moments it decides what this device will run — a run resolving its payload, a payload picked
-by hand in the target sheet, and the offline cache being loaded — so the settings rows can offer it
-without re-reading the sources. A version typed into the manager field still wins over everything; an
+by hand in the target sheet, and the offline cache being loaded — which are also the moments the flavour
+is set, so the settings rows can offer it without re-reading the sources. A version typed into the manager field still wins over everything; an
 entry that declares none, which is every entry written before the field existed, falls back to the
 flavour's own release (3.4.0 for KernelSU-Next, 3.3.0 for KernelSU — the newest each project has
 published), and that release is also the only one whose APK file name the app knows, so it is the only

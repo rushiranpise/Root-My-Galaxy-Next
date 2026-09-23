@@ -56,7 +56,13 @@ enum class KernelSuFlavor(
      * kernel that has no such feature would put a control on the screen that cannot work.
      */
     val supportsDynamicManager: Boolean = false,
-    /** What this flavour is, for the settings row that offers it. */
+    /**
+     * What this flavour is, in one line.
+     *
+     * Shown under the payload sheet's flavour chips, beside the two other forks: the names differ by a
+     * suffix and all three abbreviate to the same letters, so the chips can only be read by someone who
+     * already knows which is which.
+     */
     @StringRes val summaryRes: Int,
 ) {
     KernelSu(

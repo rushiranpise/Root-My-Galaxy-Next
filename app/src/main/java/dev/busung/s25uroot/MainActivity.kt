@@ -446,10 +446,11 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setLoadKernelSu(this, enabled)
                         loadKernelSu = enabled
                     },
-                    onKernelsuFlavorChanged = { flavor ->
-                        AppPreferences.setKernelsuFlavor(this, flavor)
-                        kernelsuFlavor = flavor
-                    },
+                    // Not a preference any more: the payload decides the flavour and
+                    // [rememberResolvedPayload] writes it, so this only moves the copy the screens are
+                    // drawn from - otherwise the rows would keep showing the previous flavour until the
+                    // app was opened again.
+                    onPayloadFlavorResolved = { flavor -> kernelsuFlavor = flavor },
                     // Stored per flavour, so naming one for KernelSU does not name one for
                     // KernelSU-Next as well - they are different projects with different versions.
                     onManagerVersionChanged = { version ->
@@ -681,7 +682,6 @@ private fun RootApp(
     onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
-    onKernelsuFlavorChanged: (KernelSuFlavor) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -696,6 +696,8 @@ private fun RootApp(
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
+    /** The flavour of the payload that has just become the one a run would use. */
+    onPayloadFlavorResolved: (KernelSuFlavor) -> Unit,
     requestNotificationPermission: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     openInstaller: (String?) -> Unit,
@@ -1010,9 +1012,12 @@ private fun RootApp(
             onNext = { profile ->
                 selectedProfile = profile
                 // A payload picked by hand is a decision about which KernelSU this phone will load, so
-                // the manager rows follow it from here - before the run that proves it works, because
-                // the manager is installed to drive the load that run performs.
+                // the flavour follows it from here - before the run that proves it works, because the
+                // manager is installed to drive the load that run performs. The state is updated with
+                // the preference: the rows that read it are on other screens and are drawn from this
+                // one's value.
                 rememberResolvedPayload(context, profile)
+                onPayloadFlavorResolved(profile.flavor)
                 showTargetPicker = false
                 compatibilityWarning = when {
                     !profile.matchesDevice(device) -> CompatibilityWarning.Device
@@ -1245,7 +1250,6 @@ private fun RootApp(
                         onAdvancedModeChanged = onAdvancedModeChanged,
                         onDisableKsuModulesChanged = onDisableKsuModulesChanged,
                         onLoadKernelSuChanged = onLoadKernelSuChanged,
-                        onKernelsuFlavorChanged = onKernelsuFlavorChanged,
                         onManagerVersionChanged = onManagerVersionChanged,
                         onShizukuModeChanged = onShizukuModeChanged,
                         onPayloadSourcesChanged = onPayloadSourcesChanged,
@@ -1260,6 +1264,10 @@ private fun RootApp(
                         onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
                         onPayloadModeChanged = onPayloadModeChanged,
                         onForgetCachedPayload = onForgetCachedPayload,
+                        onOpenPayloadSheet = {
+                            showTargetPicker = true
+                            installViewModel.loadTargetCatalog()
+                        },
                         onRequestNotificationPermission = requestNotificationPermission,
                         onRequestBatteryExemption = onRequestBatteryExemption,
                         shizukuStarting = shizukuStarting,
@@ -2791,6 +2799,19 @@ private fun historyFilterLabel(filter: HistoryFilter): Int = when (filter) {
 }
 
 @Composable
+private fun FlavorFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val view = LocalView.current
+    FilterChip(
+        selected = selected,
+        onClick = {
+            clickHaptic(view)
+            onClick()
+        },
+        label = { Text(label) },
+    )
+}
+
+@Composable
 private fun HistoryFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val view = LocalView.current
     FilterChip(
@@ -3519,7 +3540,6 @@ private fun SettingsPage(
     onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
-    onKernelsuFlavorChanged: (KernelSuFlavor) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -3534,6 +3554,8 @@ private fun SettingsPage(
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
+    /** Opens the sheet where a payload - and so the flavour - is chosen. */
+    onOpenPayloadSheet: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     /** True while an attempt to start Shizuku is in flight, which the rows report as a state. */
@@ -3552,10 +3574,8 @@ private fun SettingsPage(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var showLanguageDialog by remember { mutableStateOf(false) }
-    var showFlavorDialog by remember { mutableStateOf(false) }
     var showManagerVersionDialog by remember { mutableStateOf(false) }
     var managerVersionDraft by remember { mutableStateOf("") }
-    var flavorMenuTop by remember { mutableStateOf(0.dp) }
     var showColorDialog by remember { mutableStateOf(false) }
     // What this app has left on the device, read once when the screen is opened rather than on every
     // pass: the residue changes during a run, not while a settings list is on screen, and the reading is
@@ -3749,19 +3769,6 @@ private fun SettingsPage(
                 onPayloadModeChanged(if (index == 1) PayloadMode.Offline else PayloadMode.Online)
             },
             onDismiss = { showPayloadModeDialog = false },
-        )
-    }
-
-    if (showFlavorDialog) {
-        SideChoiceMenu(
-            choices = KernelSuFlavor.entries.map { it.label },
-            selectedIndex = KernelSuFlavor.entries.indexOf(kernelsuFlavor).coerceAtLeast(0),
-            topOffset = flavorMenuTop,
-            onSelected = { index ->
-                showFlavorDialog = false
-                onKernelsuFlavorChanged(KernelSuFlavor.entries[index])
-            },
-            onDismiss = { showFlavorDialog = false },
         )
     }
 
@@ -4646,34 +4653,38 @@ private fun SettingsPage(
                 // The flavour is first because everything below it is about this flavour's module:
                 // which daemon a run stages, which manager opens afterwards, and which module root
                 // on boot puts back.
+                //
+                // A readout and not a picker. It is the flavour of the payload this device resolves to,
+                // written by [rememberResolvedPayload] whenever a payload becomes the one a run would
+                // use - so it cannot disagree with the kernel that is about to be loaded, which is the
+                // state a separate switch used to be able to reach: official KernelSU's manager offered
+                // for a KernelSU-Next kernel. The override is the payload sheet, where the rows say
+                // which KernelSU each candidate stages.
                 // Re-read when the flavour changes, because the marker below is exactly the state a
                 // change produces.
                 val loadedFlavor = remember(kernelsuFlavor) { AppPreferences.loadedFlavor(context) }
                 SettingsCard(
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        flavorMenuTop = with(density) { coordinates.positionInWindow().y.toDp() }
-                    },
                     icon = Icons.Rounded.Security,
                     title = stringResource(R.string.settings_ksu_flavor),
-                    description = stringResource(kernelsuFlavor.summaryRes),
-                    // The selected flavour sits in the band every other row puts its setting in, so it
-                    // lands on their centre line instead of riding up beside the title. That band is
-                    // measured before the text column next to it, which is why these two descriptions
-                    // are one line long: anything longer wraps into a second line at half the card's
-                    // width, and reads as a row that overflowed rather than one that fits.
+                    description = stringResource(R.string.settings_ksu_flavor_from_payload),
+                    // The flavour sits in the band every other row puts its setting in, so it lands on
+                    // their centre line instead of riding up beside the title. That band is measured
+                    // before the text column next to it, which is why these two descriptions are one
+                    // line long: anything longer wraps into a second line at half the card's width, and
+                    // reads as a row that overflowed rather than one that fits.
                     value = kernelsuFlavor.label,
                     // The pending marker is the only warning this screen can give: the two flavours
-                    // cannot both be in the kernel, so a switch made in a boot that already carries
-                    // one only takes effect after a restart. It says which flavour this boot is
+                    // cannot both be in the kernel, so a payload that differs from what this boot
+                    // loaded only takes effect after a restart. It says which flavour this boot is
                     // holding, because "after a restart" on its own leaves the reason to be guessed.
                     notice = loadedFlavor
                         ?.takeIf { it != kernelsuFlavor }
                         ?.let { stringResource(R.string.settings_ksu_flavor_pending, it.label) },
                     position = SettingsCardPosition.Top,
-                    onClick = {
-                        clickHaptic(view)
-                        showFlavorDialog = true
-                    },
+                    // Tapping it goes where the choice is made - the payload sheet - rather than opening a
+                    // second list of the same three names. A payload of another flavour is the override,
+                    // and the sheet's rows say which KernelSU each one stages.
+                    onClick = { onOpenPayloadSheet() },
                 )
                 // The version this app offers, which is the KernelSU the payload for this device loads
                 // when the user has named nothing - so a manager installed from this row is the one
@@ -5889,14 +5900,20 @@ private fun TargetSelectionSheet(
     // the wrong target gets picked.
     var showOnlyMyDevice by remember { mutableStateOf(AppPreferences.targetFitsDeviceOnly(context)) }
     var query by rememberSaveable { mutableStateOf("") }
+    // Not remembered across visits and not stored: it is a way to find a payload of a kind, not a
+    // setting, and a sheet that reopened filtered would hide the entries somebody came back for. Which
+    // KernelSU this app will use is decided by the payload that gets picked, below - see
+    // [rememberResolvedPayload].
+    var flavorFilter by remember { mutableStateOf<KernelSuFlavor?>(null) }
     var selectedSelectionId by remember { mutableStateOf<String?>(null) }
     val view = LocalView.current
-    val visibleProfiles = remember(catalog.profiles, showOnlyMyDevice, device, query) {
+    val visibleProfiles = remember(catalog.profiles, showOnlyMyDevice, device, query, flavorFilter) {
         visibleTargets(
             profiles = catalog.profiles,
             device = device,
             fitsDeviceOnly = showOnlyMyDevice,
             query = query,
+            flavor = flavorFilter,
         )
     }
     val selectedProfile = catalog.profiles.firstOrNull { it.selectionId == selectedSelectionId }
@@ -5955,6 +5972,40 @@ private fun TargetSelectionSheet(
             ) {
                 Checkbox(checked = showOnlyMyDevice, onCheckedChange = null)
                 Text(stringResource(R.string.show_my_device_only), style = MaterialTheme.typography.titleMedium)
+            }
+
+            // The flavour, beside the other two ways of narrowing: what a candidate stages decides which
+            // manager is built against it and which module root on boot puts back, so "show me the
+            // KernelSU-Next payloads" is the question somebody arrives with. Any is the default so the
+            // sheet opens on everything the sources carry.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FlavorFilterChip(
+                    label = stringResource(R.string.target_flavor_any),
+                    selected = flavorFilter == null,
+                    onClick = { flavorFilter = null },
+                )
+                KernelSuFlavor.entries.forEach { flavor ->
+                    FlavorFilterChip(
+                        label = flavor.label,
+                        selected = flavorFilter == flavor,
+                        onClick = { flavorFilter = flavor },
+                    )
+                }
+            }
+            // What the name means, for whichever one is selected. The three are forks of one project
+            // with the same three-letter abbreviation in all of them, and a chip row alone asks the
+            // reader to already know which is which - which is how somebody installs the manager of a
+            // kernel they are not running. Shown only under a selection, because "Any" is not a flavour
+            // and has nothing to describe.
+            flavorFilter?.let { flavor ->
+                Text(
+                    text = stringResource(flavor.summaryRes),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             // Beside the toggle rather than over the list: with a dozen sources configured the sheet
@@ -6023,17 +6074,23 @@ private fun TargetSelectionSheet(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // The most specific cause, named: a flavour with no payload for this phone is a
+                    // different answer from a search that matches nothing, and the two want different
+                    // next steps from the person reading.
                     Text(
-                        text = if (query.isBlank()) {
-                            stringResource(R.string.no_matching_devices)
-                        } else {
-                            stringResource(R.string.no_matching_devices_query, query.trim())
+                        text = when {
+                            query.isNotBlank() ->
+                                stringResource(R.string.no_matching_devices_query, query.trim())
+                            flavorFilter != null ->
+                                stringResource(R.string.no_matching_devices_flavor, flavorFilter!!.label)
+                            else -> stringResource(R.string.no_matching_devices)
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     FilledTonalButton(onClick = {
                         clickHaptic(view)
                         query = ""
+                        flavorFilter = null
                         showOnlyMyDevice = false
                         AppPreferences.setTargetFitsDeviceOnly(context, false)
                     }) {
