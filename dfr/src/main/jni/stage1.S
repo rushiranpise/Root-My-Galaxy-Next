@@ -165,7 +165,12 @@ lib_path:
 mod_args:
     .asciz ""
 ksud_path:
-    .asciz "/data/system/dfreroot-ksud"
+    // Compiled in rather than passable: this string is the file stage 2 bind-mounts and execs once the
+    // orphaned process has triggered the shellcode, so it has to name the path KsudStage actually
+    // writes. Renamed from DFReroot's own /data/system/dfreroot-ksud, because both installs stage a
+    // different daemon and one path would let either overwrite the other's. DfrDaemonPathTest holds
+    // this string and that constant together.
+    .asciz "/data/system/rmgnext-ksud"
 logcat_path:
     .asciz "/system/bin/logcat"
 root_path:
