@@ -121,6 +121,91 @@ class ResidueScopesTest {
     }
 
     @Test
+    fun `a closed folder's heading says what it holds in that folder's own words`() {
+        // The line that makes closing a folder the right default: the heading has to answer "what is in
+        // here" for the three together to be readable at a glance. The three empty cases stay distinct,
+        // because "empty", "none of the paths this app writes is there" and "could not be listed" are
+        // three different claims about one directory.
+        val holds = ResidueSection(
+            scope = ResidueScope.SystemDirectory,
+            named = listOf(
+                ResidueFinding(StagedPath(SYSTEM_STAGED_DAEMON, ResidueRole.Daemon), present(6_014_920L)),
+                ResidueFinding(StagedPath("$SYSTEM_DIRECTORY/packages.xml.bak-rmgnext", ResidueRole.Backup), absent()),
+            ),
+        )
+        assertEquals(R.string.residue_folder_tally, holds.folderSummary().res)
+        assertEquals(1, holds.folderSummary().args[0])
+        assertEquals(StagedResidue.sizeLabel(6_014_920L), holds.folderSummary().args[1])
+
+        // Everything found counts, an unreadable entry included: it is a fact about the device, and a
+        // folder that counted only what it could describe would call `/data/adb` empty.
+        val unreadable = ResidueSection(
+            scope = ResidueScope.AdbDirectory,
+            entries = listOf(TempEntry("ksud", unreadable(), directory = ADB_DIRECTORY)),
+        )
+        assertEquals(R.string.residue_folder_tally, unreadable.folderSummary().res)
+        assertEquals(1, unreadable.folderSummary().args[0])
+
+        // Listed and empty is the strong claim, read by name and clean is the weaker one, and a
+        // directory that could not be listed says neither.
+        assertEquals(
+            R.string.residue_scope_clean_listed,
+            ResidueSection(scope = ResidueScope.AdbDirectory).folderSummary().res,
+        )
+        // A catalogue read without a shell, where nothing in it is there: the same section that found
+        // nothing, said by name rather than as an empty directory.
+        val byName = ResidueSection(
+            scope = ResidueScope.SystemDirectory,
+            named = listOf(
+                ResidueFinding(StagedPath(SYSTEM_STAGED_DAEMON, ResidueRole.Daemon), absent()),
+                ResidueFinding(StagedPath("$SYSTEM_DIRECTORY/packages.xml.bak-rmgnext", ResidueRole.Backup), absent()),
+            ),
+        )
+        assertEquals(R.string.residue_scope_clean, byName.folderSummary().res)
+        assertEquals(byName.named.size, byName.folderSummary().args[0])
+        assertEquals(
+            R.string.residue_scope_unlisted,
+            ResidueSection(scope = ResidueScope.AdbDirectory, listed = false).folderSummary().res,
+        )
+    }
+
+    @Test
+    fun `the temp folder's heading counts both halves of its reading`() {
+        // This folder is a catalogue and a listing at once, so its heading is the one place the two
+        // numbers have to be added up - and the count is what somebody sees before deciding whether to
+        // open it at all.
+        val report = ResidueReport(
+            findings = listOf(
+                ResidueFinding(
+                    StagedPath("${StagedResidue.DIRECTORY}/ksu-payload", ResidueRole.Payload),
+                    present(1_048_576L),
+                ),
+            ),
+            directoryVisible = true,
+            extras = listOf(TempEntry("someone-elses.bin", present(2_097_152L))),
+            directoryListed = true,
+        )
+        assertEquals(R.string.residue_folder_tally, report.folderSummary().res)
+        assertEquals(2, report.folderSummary().args[0])
+        assertEquals(StagedResidue.sizeLabel(report.totalBytes), report.folderSummary().args[1])
+
+        // A temp directory read without a shell can only say its own paths are absent, and one that was
+        // listed can say it is empty; the two sentences differ because the claims do.
+        val cleanCatalogue = listOf(
+            ResidueFinding(
+                StagedPath("${StagedResidue.DIRECTORY}/ksu-payload", ResidueRole.Payload),
+                absent(),
+            ),
+        )
+        val byName = ResidueReport(findings = cleanCatalogue, directoryVisible = true)
+        assertEquals(R.string.residue_scope_clean, byName.folderSummary().res)
+        assertEquals(1, byName.folderSummary().args[0])
+        val listed = ResidueReport(findings = cleanCatalogue, directoryVisible = true, directoryListed = true)
+        assertEquals(R.string.residue_scope_clean_listed, listed.folderSummary().res)
+        assertTrue(listed.folderSummary().args.isEmpty())
+    }
+
+    @Test
     fun `the temp directory is not read as a section, because it has its own report`() {
         // Five verdicts - clean, clean by name, blind, and the two two-part cases - live in [ResidueReport]
         // and would be thrown away by flattening it into a section beside these two.

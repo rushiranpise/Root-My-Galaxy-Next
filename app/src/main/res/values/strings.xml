@@ -73,6 +73,11 @@
     <string name="residue_clear_title">Delete everything listed?</string>
     <string name="residue_clear_body">This empties /data/local/tmp - including %1$d entries that are not this app\'s - and removes the %2$d files the app left in /data/system. /data/adb is not touched.</string>
     <string name="residue_clear_confirm">Delete</string>
+    <string name="residue_folder_tally">%1$d file(s) \u00b7 %2$s</string>
+    <string name="residue_folder_clear">Delete everything in %1$s?</string>
+    <string name="residue_folder_clear_desc">Delete everything in %1$s</string>
+    <string name="residue_folder_clear_glob">This empties %1$s, %2$d entries that are not this app\'s included. The other two directories are untouched.</string>
+    <string name="residue_folder_clear_named">This removes the %1$d paths this app lists for %2$s. The other two directories are untouched.</string>
     <string name="residue_clear_done">Deleted %1$d entr(ies).</string>
     <string name="residue_clear_left">%1$d could not be deleted; they are still listed above.</string>
     <string name="residue_clear_refused">The shell refused some of them: %1$s</string>

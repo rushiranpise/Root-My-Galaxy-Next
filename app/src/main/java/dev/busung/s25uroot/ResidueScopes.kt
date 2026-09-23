@@ -183,6 +183,54 @@ internal class ResidueSection(
 }
 
 /**
+ * The second line of a folder's heading, as a string and its arguments.
+ *
+ * A string resource rather than a string because this is decided where there is no `Context`: the choice
+ * of sentence is the part that has to be right - "empty" and "could not be listed" are different claims
+ * about the same directory - and assembling it here is what lets both be tested.
+ */
+internal data class ResidueFolderSummary(@StringRes val res: Int, val args: List<Any> = emptyList())
+
+/**
+ * What a folder holds, said in one line, for the heading that is closed over it.
+ *
+ * This is the line that makes a collapsed list worth having: three folders that each answer "what is in
+ * here" let the one a detector found something in stand out, where a list that opened itself would bury
+ * it. The count is everything the folder is showing - an entry that could not be read included, because
+ * "unreadable" is a fact about the device and an absence is not.
+ *
+ * The empty cases stay distinct on purpose. A listed directory can say it is empty; one read by name can
+ * only say that none of the paths this app writes is there; and a directory that could not be listed says
+ * neither, because nothing was looked at. Those are three different sentences and one word - "clean" -
+ * would collapse them.
+ */
+internal fun ResidueSection.folderSummary(): ResidueFolderSummary = when {
+    anything -> ResidueFolderSummary(
+        R.string.residue_folder_tally,
+        listOf(visibleNamed.size + visibleEntries.size, StagedResidue.sizeLabel(totalBytes)),
+    )
+    !listed -> ResidueFolderSummary(R.string.residue_scope_unlisted, listOf(scope.path))
+    named.isEmpty() -> ResidueFolderSummary(R.string.residue_scope_clean_listed)
+    else -> ResidueFolderSummary(R.string.residue_scope_clean, listOf(named.size))
+}
+
+/**
+ * The same line for the temp directory, which keeps its own report.
+ *
+ * A listing and a catalogue in one folder, so "anything" here is the two of them together - and the
+ * by-name wording is chosen for a directory that could not be listed, which is the one case where a clean
+ * temp directory is a weaker claim than it looks.
+ */
+internal fun ResidueReport.folderSummary(): ResidueFolderSummary = when {
+    present.isNotEmpty() || extras.isNotEmpty() -> ResidueFolderSummary(
+        R.string.residue_folder_tally,
+        listOf(present.size + extras.size, StagedResidue.sizeLabel(totalBytes)),
+    )
+    directoryListed -> ResidueFolderSummary(R.string.residue_scope_clean_listed)
+    else -> ResidueFolderSummary(R.string.residue_scope_clean, listOf(findings.size))
+}
+
+/**
  * Everywhere this app has left something, as one reading.
  *
  * The temp directory keeps its own report rather than being flattened into a section: it is the one place

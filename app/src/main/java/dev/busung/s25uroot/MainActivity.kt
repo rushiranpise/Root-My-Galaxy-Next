@@ -5053,6 +5053,19 @@ private fun StagedResidueDialog(
     var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
     var deleteOutcome by remember { mutableStateOf<Pair<PendingDelete, SweepOutcome>?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    // Which directories are open, by path, and empty to start with. Closed is the right default here
+    // because each heading carries what its folder holds: the list that opens itself is the one where a
+    // directory a detector found something in sits below two that are clean, and the reason somebody
+    // opened this screen is usually one name they were told about.
+    var openFolders by remember { mutableStateOf(emptySet<String>()) }
+    // A folder's own delete, waiting for its confirmation. One per folder rather than one per row: a
+    // detector's report names a directory, and clearing that directory is the action somebody wants
+    // after reading it - the rows are for the one file worth keeping and the rest are for the folder.
+    var pendingFolderClear by remember { mutableStateOf<PendingFolderClear?>(null) }
+    /** Opens the folder that was tapped, or closes it again. */
+    val toggleFolder: (String) -> Unit = { path ->
+        openFolders = if (path in openFolders) openFolders - path else openFolders + path
+    }
     /**
      * Removes one entry and reports what came of it.
      *
@@ -5113,11 +5126,40 @@ private fun StagedResidueDialog(
             clearing = false
         }
     }
+    /**
+     * Deletes one folder's contents, and only that folder's.
+     *
+     * Two routes, because the two folders are read differently and so are emptied differently: the temp
+     * directory goes by glob - it is the one place with names this app cannot account for - and
+     * `/data/system` by naming the paths the catalogue lists, which leaves every other file in a
+     * platform directory alone. This is the narrower action of the two the screen offers: everything in
+     * one directory, rather than everything the whole reading found.
+     */
+    val clearFolder: (PendingFolderClear) -> Unit = { pending ->
+        clearing = true
+        clearOutcome = null
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                if (pending.byGlob) {
+                    StagingSweep.clearWhenQuiet(context)
+                } else {
+                    StagingSweep.removeWhenQuiet(context, pending.paths)
+                }
+            }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
+            clearOutcome = outcome
+            clearing = false
+        }
+    }
     val reading = report
     val present = reading?.temp?.present.orEmpty()
     // The half a catalog cannot produce: names the app does not write, listed through a shell. Shown
     // rather than counted, because what makes them worth knowing is which names they are.
     val extras = reading?.temp?.extras.orEmpty()
+    val tempOpen = ResidueScope.TempDirectory.path in openFolders
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.residue_dialog_title)) },
@@ -5168,9 +5210,35 @@ private fun StagedResidueDialog(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         item(key = "temp") {
-                            ResidueScopeLabel(scope = ResidueScope.TempDirectory)
+                            ResidueFolderHeading(
+                                folder = ResidueScope.TempDirectory,
+                                summary = reading.temp.folderSummary(),
+                                open = tempOpen,
+                                // Nothing to open when it holds nothing: an arrow over an empty folder
+                                // is an invitation to a list that is not there.
+                                expandable = present.isNotEmpty() || extras.isNotEmpty(),
+                                onToggle = { toggleFolder(ResidueScope.TempDirectory.path) },
+                                // The one delete on this screen that takes names this app cannot account
+                                // for, so it is offered only when there is something to take.
+                                delete = if (present.isNotEmpty() || extras.isNotEmpty()) {
+                                    {
+                                        pendingFolderClear = PendingFolderClear(
+                                            folder = ResidueScope.TempDirectory,
+                                            byGlob = true,
+                                            paths = emptyList(),
+                                            body = ResidueFolderSummary(
+                                                R.string.residue_folder_clear_glob,
+                                                listOf(ResidueScope.TempDirectory.path, extras.size),
+                                            ),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                deleteEnabled = !clearing,
+                            )
                         }
-                        if (present.isNotEmpty()) {
+                        if (tempOpen && present.isNotEmpty()) {
                             item(key = "staged") {
                                 ResidueSectionLabel(stringResource(R.string.residue_section_staged))
                             }
@@ -5195,7 +5263,7 @@ private fun StagedResidueDialog(
                                 )
                             }
                         }
-                        if (extras.isNotEmpty()) {
+                        if (tempOpen && extras.isNotEmpty()) {
                             item(key = "others") {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     ResidueSectionLabel(
@@ -5223,14 +5291,46 @@ private fun StagedResidueDialog(
                             }
                         }
                         // The other two directories, each with its own heading and its own rule about
-                        // deleting. Rendered whether or not they hold anything: a section that appears
-                        // only when it has something is a section nobody knows to look for, and "nothing
-                        // here" is the answer that makes the three worth reading.
+                        // deleting. Every heading is rendered whether or not its folder holds anything -
+                        // a section that appears only when it has something is a section nobody knows to
+                        // look for, and "nothing here" is the answer that makes the three worth reading -
+                        // but the body under it only exists when there is something to see.
                         reading.sections.forEach { section ->
+                            val sectionOpen = section.scope.path in openFolders
                             item(key = "scope:${section.scope.path}") {
-                                ResidueScopeLabel(scope = section.scope)
+                                ResidueFolderHeading(
+                                    folder = section.scope,
+                                    summary = section.folderSummary(),
+                                    open = sectionOpen,
+                                    expandable = section.anything,
+                                    onToggle = { toggleFolder(section.scope.path) },
+                                    // No delete on the root implementation's own directory, which is the
+                                    // rule this scope carries: everything in it belongs to the root.
+                                    delete = if (section.anything && section.scope.deletable) {
+                                        {
+                                            pendingFolderClear = PendingFolderClear(
+                                                folder = section.scope,
+                                                byGlob = false,
+                                                paths = section.deletablePaths,
+                                                body = ResidueFolderSummary(
+                                                    R.string.residue_folder_clear_named,
+                                                    listOf(
+                                                        section.deletablePaths.size,
+                                                        section.scope.path,
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    deleteEnabled = !clearing,
+                                )
                             }
-                            if (!section.listed) {
+                            // Inside the folder rather than in its heading, because it is a warning about
+                            // the list under it: a directory that could not be listed may be holding
+                            // names that were never looked at.
+                            if (sectionOpen && section.anything && !section.listed) {
                                 item(key = "unlisted:${section.scope.path}") {
                                     Text(
                                         stringResource(R.string.residue_scope_unlisted, section.scope.path),
@@ -5239,26 +5339,10 @@ private fun StagedResidueDialog(
                                     )
                                 }
                             }
-                            if (!section.anything) {
-                                item(key = "empty:${section.scope.path}") {
-                                    Text(
-                                        stringResource(
-                                            // A listed directory says the stronger thing - it is empty -
-                                            // and a directory read by name can only say its own names are
-                                            // absent, which is a different claim about the same space.
-                                            if (section.named.isEmpty()) {
-                                                R.string.residue_scope_clean_listed
-                                            } else {
-                                                R.string.residue_scope_clean
-                                            },
-                                            section.named.size,
-                                        ),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            items(section.visibleNamed, key = { it.staged.path }) { finding ->
+                            items(
+                                if (sectionOpen) section.visibleNamed else emptyList(),
+                                key = { it.staged.path },
+                            ) { finding ->
                                 ResidueRow(
                                     finding = finding,
                                     deletable = section.scope.deletable,
@@ -5275,7 +5359,10 @@ private fun StagedResidueDialog(
                                     },
                                 )
                             }
-                            items(section.visibleEntries, key = { "entry:${section.scope.path}:${it.name}" }) { entry ->
+                            items(
+                                if (sectionOpen) section.visibleEntries else emptyList(),
+                                key = { "entry:${section.scope.path}:${it.name}" },
+                            ) { entry ->
                                 TempEntryRow(
                                     entry = entry,
                                     deletable = section.scope.deletable,
@@ -5417,6 +5504,35 @@ private fun StagedResidueDialog(
         )
     }
 
+    pendingFolderClear?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingFolderClear = null },
+            title = { Text(stringResource(R.string.residue_folder_clear, pending.folder.path)) },
+            // What it removes and what it does not. This button sits in a heading beside two other
+            // headings, and the one thing to know before pressing it is that the other two directories
+            // are not part of it - the two routes say it in their own words, because one of them takes
+            // names this app cannot account for and the other names paths it can.
+            text = { Text(stringResource(pending.body.res, *pending.body.args.toTypedArray())) },
+            confirmButton = {
+                TextButton(onClick = {
+                    clickHaptic(view)
+                    pendingFolderClear = null
+                    clearFolder(pending)
+                }) {
+                    Text(stringResource(R.string.residue_clear_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    clickHaptic(view)
+                    pendingFolderClear = null
+                }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     pendingDelete?.let { pending ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -5459,6 +5575,28 @@ private data class PendingDelete(
     val path: String,
     /** What the confirmation warns about, which is a fact about where the file is. */
     @StringRes val warning: Int,
+)
+
+/**
+ * A folder's delete, held between the button that asked and the confirmation that agrees to it.
+ *
+ * A whole folder always asks first, where a row in the temp directory does not: a row names one file whose
+ * name and age the user has just read, and this names everything in a directory - in the temp case
+ * including entries this app cannot account for, and in `/data/system` a copy of `packages.xml` that a
+ * phone boots from.
+ */
+private data class PendingFolderClear(
+    val folder: ResidueScope,
+    /**
+     * Whether the folder is emptied by glob rather than by naming paths.
+     *
+     * The temp directory goes by glob because it is the one place holding names this app did not write, and
+     * `/data/system` goes by name because every other file in it belongs to the platform or to another
+     * app. [paths] is therefore empty for the glob route, and [body] is what tells the two apart on screen.
+     */
+    val byGlob: Boolean,
+    val paths: List<String>,
+    val body: ResidueFolderSummary,
 )
 
 /** What one row's delete came to, said under the list rather than beside a row that may be gone. */
@@ -5525,7 +5663,7 @@ private fun ResidueRow(
         }
         if (deletable) {
             ResidueDeleteButton(
-                name = finding.staged.name,
+                description = stringResource(R.string.residue_delete_row, finding.staged.name),
                 enabled = deleteEnabled,
                 onDelete = onDelete,
             )
@@ -5541,7 +5679,7 @@ private fun ResidueRow(
  * to explain before anything could be deleted at all.
  */
 @Composable
-private fun ResidueDeleteButton(name: String, enabled: Boolean, onDelete: () -> Unit) {
+private fun ResidueDeleteButton(description: String, enabled: Boolean, onDelete: () -> Unit) {
     val view = LocalView.current
     IconButton(
         enabled = enabled,
@@ -5552,7 +5690,10 @@ private fun ResidueDeleteButton(name: String, enabled: Boolean, onDelete: () -> 
     ) {
         Icon(
             imageVector = Icons.Rounded.Delete,
-            contentDescription = stringResource(R.string.residue_delete_row, name),
+            // The caller's sentence, because this button is on two kinds of thing: a row, where the name
+            // is what identifies it, and a folder's heading, where what is being removed is everything
+            // inside a directory.
+            contentDescription = description,
             modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.error,
         )
@@ -5571,25 +5712,81 @@ private fun ResidueSectionLabel(text: String) {
 }
 
 /**
- * One of the three directories, and why it matters.
+ * One of the three directories, closed until it is asked for.
  *
- * The body line is not decoration: two of these directories are unreadable to another app and one is
- * read by detectors without root, and a list of paths that did not say which is which would make the
- * three sections look like three spellings of the same screen.
+ * The heading carries what the folder holds, and that is what makes closed the right default: three
+ * folders that each answer "what is in here" in one line let the one a detector found something in stand
+ * out, where a list drawn in full buries it under the two that are clean.
+ *
+ * The body sentence - why this directory matters at all - is drawn only while the folder is open, so it
+ * sits with the list it explains instead of three times over in a list nobody has read down to yet.
+ *
+ * [delete] is null when there is nothing to remove, and for `/data/adb` it is null always: everything in
+ * that directory belongs to the root implementation, so an app offering to delete from it would be
+ * offering to break the root it just obtained.
  */
 @Composable
-private fun ResidueScopeLabel(scope: ResidueScope) {
+private fun ResidueFolderHeading(
+    folder: ResidueScope,
+    summary: ResidueFolderSummary,
+    open: Boolean,
+    expandable: Boolean,
+    onToggle: () -> Unit,
+    delete: (() -> Unit)?,
+    deleteEnabled: Boolean,
+) {
+    val view = LocalView.current
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(enabled = expandable) {
+                        clickHaptic(view)
+                        onToggle()
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // The arrow is absent rather than disabled over a folder with nothing in it: an
+                // invitation to a list that is not there is worse than no arrow at all.
+                if (expandable) {
+                    Icon(
+                        imageVector = if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource(folder.titleRes),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            delete?.let { onDelete ->
+                ResidueDeleteButton(
+                    description = stringResource(R.string.residue_folder_clear_desc, folder.path),
+                    enabled = deleteEnabled,
+                    onDelete = onDelete,
+                )
+            }
+        }
+        // What the folder holds, in the folder's own words for it: "empty", "none of the paths this app
+        // writes is there", and "could not be listed" are three different claims about one directory, and
+        // a heading that reduced them to one word would be the reading this screen exists to avoid.
         Text(
-            text = stringResource(scope.titleRes),
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(top = 10.dp),
-        )
-        Text(
-            text = stringResource(scope.bodyRes),
+            text = stringResource(summary.res, *summary.args.toTypedArray()),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (open) {
+            Text(
+                text = stringResource(folder.bodyRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -5653,7 +5850,11 @@ private fun TempEntryRow(
             )
         }
         if (deletable) {
-            ResidueDeleteButton(name = entry.name, enabled = deleteEnabled, onDelete = onDelete)
+            ResidueDeleteButton(
+                description = stringResource(R.string.residue_delete_row, entry.name),
+                enabled = deleteEnabled,
+                onDelete = onDelete,
+            )
         }
     }
 }
