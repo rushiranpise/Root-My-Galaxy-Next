@@ -198,8 +198,15 @@ object AppPreferences {
             .apply()
     }
 
+    /**
+     * On unless it was turned off.
+     *
+     * The picker is the honest default: a run spends the payload the phone has for this boot, and a
+     * plain confirmation hides which one that is. Off is the choice for someone who has already
+     * picked and wants the shorter path back.
+     */
     fun advancedMode(context: Context): Boolean =
-        prefs(context).getBoolean(ADVANCED_MODE, false)
+        prefs(context).getBoolean(ADVANCED_MODE, true)
 
     fun setAdvancedMode(context: Context, enabled: Boolean) {
         prefs(context).edit()

@@ -127,7 +127,7 @@ starts open, so the page a fresh install shows is the whole page.
 |---|---|
 | Appearance | theme mode, material colour, language |
 | Payload Management | payload mode, payload sources, cached payload, local payload |
-| Run Management | advanced mode, disable KSU modules, protect image partitions, boot settle, run limits, run plan |
+| Run Management | advanced mode (on by default), disable KSU modules, protect image partitions, boot settle, run limits, run plan |
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start token, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
 | Root Management | KernelSU flavour, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
