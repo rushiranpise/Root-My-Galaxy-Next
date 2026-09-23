@@ -27,14 +27,52 @@ object DfrApk {
     private const val FILE_NAME = "picked.apk"
     private const val PART_SUFFIX = ".part"
 
+    /**
+     * The stage two this app ships, copied out of its own assets.
+     *
+     * Bundled so that the flow has nothing to pick: the stage two has to be built from this repository
+     * (its manifest is what makes it a system app) and `app/build.gradle.kts` stages the artifact of that
+     * build into these assets, so the copy here is the one this app's own certificate covers. The name is
+     * the one that task writes; the two are held together by being the only writer and the only reader.
+     */
+    private const val BUNDLED_ASSET = "stage2.apk"
+    private const val BUNDLED_FILE = "bundled.apk"
+
     /** An APK is a zip; the biggest Android apps are well inside this. */
     const val MAX_BYTES = 512L * 1024 * 1024
 
     private val ZIP_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 
-    /** The stored APK, or null when none was picked or the stored file is gone. */
+    /** A stage two picked by hand, or null when none was or the stored copy is gone. */
     fun file(context: Context): File? = File(directory(context), FILE_NAME)
         .takeIf { it.isFile && it.length() > 0L }
+
+    /**
+     * The stage two to use: a picked APK when there is one, otherwise the bundled one, otherwise null.
+     *
+     * A pick wins because it is the newer statement of intent - someone who chose a file did so to use
+     * that file, usually because they built the stage two themselves.
+     */
+    fun source(context: Context): File? = file(context) ?: bundled(context)
+
+    /**
+     * The bundled stage two, unpacked into app storage where a root shell can install it from.
+     *
+     * Unpacked on every call rather than cached, because the asset can only change when the APK does, and
+     * an unpacked copy that outlived an update would install the previous stage two - the one failure this
+     * would be hardest to notice, since both install cleanly.
+     */
+    fun bundled(context: Context): File? {
+        val destination = File(directory(context).apply { mkdirs() }, BUNDLED_FILE)
+        val bytes = runCatching {
+            context.assets.open(BUNDLED_ASSET).use { it.readBytes() }
+        }.getOrNull()
+        if (bytes == null || bytes.isEmpty()) return null
+        return runCatching {
+            destination.writeBytes(bytes)
+            destination.takeIf { it.isFile && it.length() > 0L }
+        }.getOrNull()
+    }
 
     /** Copies [uri] in and returns the file the installer reads its key from. */
     fun import(context: Context, uri: Uri): File {
@@ -66,6 +104,9 @@ object DfrApk {
         val directory = directory(context)
         File(directory, FILE_NAME).delete()
         File(directory, "$FILE_NAME$PART_SUFFIX").delete()
+        // The unpacked bundle too: "clear" means the picked file AND the copy of the bundled one, so a
+        // clear that left the bundled stage two behind would look like it had not worked.
+        File(directory, BUNDLED_FILE).delete()
     }
 
     private fun copyInto(context: Context, uri: Uri, temporary: File): Long {

@@ -1,6 +1,13 @@
+import java.io.File
 import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ValueSource
 import org.gradle.api.provider.ValueSourceParameters
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     id("com.android.application")
@@ -205,4 +212,61 @@ dependencies {
     androidTestImplementation("androidx.test:core-ktx:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+}
+
+/**
+ * Copies the stage two into this APK's assets, one build type at a time.
+ *
+ * The stage two is a second APK that cannot be merged into this one - it declares
+ * `sharedUserId="android.uid.system"`, which is an application-level identity - so something has to
+ * carry it, and carrying it here is what makes the flow one screen with no file picking in it. The
+ * installer this was ported from does the same thing for the same reason: its `build.sh` copies the
+ * staged APK into its own assets.
+ *
+ * A generated directory rather than a file dropped into `src/main/assets`, so the artifact is never in
+ * git: the bytes only exist as the output of `:dfr`, and a stale copy cannot outlive the build that made
+ * it.
+ */
+abstract class StageTwoAsset : DefaultTask() {
+    @get:InputFile
+    abstract val apk: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun stage() {
+        val directory = outputDir.get().asFile
+        directory.mkdirs()
+        apk.get().asFile.copyTo(File(directory, ASSET_NAME), overwrite = true)
+        logger.lifecycle("staged $ASSET_NAME from ${apk.get().asFile}")
+    }
+
+    companion object {
+        /** The name the app reads it by; `DfrApk` hardcodes the same one. */
+        const val ASSET_NAME = "stage2.apk"
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        // Nullable in the API, and meaningless here: the artifact copied is chosen by build type, so a
+        // variant without one has nothing to copy rather than a default to fall back on.
+        val buildType = requireNotNull(variant.buildType) {
+            "variant ${variant.name} has no build type, so no stage two can be staged for it"
+        }
+        val capitalised = buildType.replaceFirstChar { it.uppercase() }
+        val stage = tasks.register<StageTwoAsset>("stageStageTwo$capitalised") {
+            // The artifact this copies is :dfr's, so the build it comes from must have run first -
+            // and the build type has to match, because a release app whose stage two was built
+            // unsigned would offer an install that can never succeed.
+            dependsOn(":dfr:assemble$capitalised")
+            apk.set(
+                project(":dfr").layout.buildDirectory
+                    .file("outputs/apk/$buildType/dfr-$buildType.apk"),
+            )
+            outputDir.set(layout.buildDirectory.dir("generated/stage2/$buildType"))
+        }
+        variant.sources.assets?.addGeneratedSourceDirectory(stage, StageTwoAsset::outputDir)
+    }
 }

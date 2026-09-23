@@ -650,8 +650,9 @@
     <string name="dfr_title">System UID install</string>
     <string name="dfr_description">Runs an APK as a system app, so root no longer needs the exploit.</string>
     <string name="dfr_summary">Adds the certificate of a chosen APK to android.uid.system, which is what lets that APK afterwards be installed as a system app. Reboot first, then install it: Package Manager only reads this at boot, so installing before the reboot does nothing.</string>
-    <string name="dfr_apk_default">Using this app\'s own certificate. Choose an APK to inject that one instead.</string>
-    <string name="dfr_apk_set">Using the certificate of %1$s.</string>
+    <string name="dfr_apk_default">No stage-2 APK found. Choose one to inject and install.</string>
+    <string name="dfr_apk_set">Using the stage 2 you chose: %1$s.</string>
+    <string name="dfr_apk_bundled">Using the stage 2 this app ships with.</string>
     <string name="dfr_inject">Inject</string>
     <string name="dfr_clean_up">Clean up</string>
     <string name="dfr_reading">Reading the device...</string>

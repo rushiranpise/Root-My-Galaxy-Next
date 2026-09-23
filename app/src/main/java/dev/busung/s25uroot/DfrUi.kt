@@ -33,6 +33,7 @@ import dev.busung.s25uroot.dfr.DfrMode
 import dev.busung.s25uroot.dfr.DfrProbe
 import dev.busung.s25uroot.dfr.DfrState
 import dev.busung.s25uroot.dfr.DfrStep
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,14 +66,22 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
 
     var reading by remember { mutableStateOf<DfrReading?>(null) }
     var readFailed by remember { mutableStateOf(false) }
-    var picked by remember { mutableStateOf(DfrApk.file(context)) }
+    // The stage two to use: what was picked by hand, or the copy this app ships. Both are resolved on
+    // the IO thread rather than at composition, because the bundled one is unpacked from assets.
+    var pickedApk by remember { mutableStateOf<File?>(null) }
+    var bundledApk by remember { mutableStateOf<File?>(null) }
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf<String?>(null) }
+    val apk = pickedApk ?: bundledApk
 
     fun refresh() {
         busy = true
         scope.launch {
-            val next = withContext(Dispatchers.IO) { readState(context) }
+            val next = withContext(Dispatchers.IO) {
+                if (pickedApk == null) pickedApk = DfrApk.file(context)
+                bundledApk = DfrApk.bundled(context)
+                readState(context)
+            }
             reading = next
             readFailed = next == null
             busy = false
@@ -95,15 +104,18 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun inject() = act("inject") {
-        val result = DfrInstall.run(context, DfrMode.Inject, apkPath = picked?.absolutePath)
+        // The file's own certificate when there is a file, and this app's when there is not: the bundled
+        // stage two is the case this is normally used for, and reading its certificate is exact where the
+        // fallback assumes the two APKs share a signer.
+        val result = DfrInstall.run(context, DfrMode.Inject, apkPath = apk?.absolutePath)
         if (result == null) return@act context.getString(R.string.dfr_no_root)
         if (result.ok) AppPreferences.setDfrInjectedAt(context, System.currentTimeMillis())
         result.log
     }
 
     fun install() = act("install") {
-        val apk = picked ?: return@act context.getString(R.string.dfr_choose_apk)
-        val action = DfrInstall.runAction(DfrInstall.installCommand(apk.absolutePath))
+        val file = apk ?: return@act context.getString(R.string.dfr_apk_default)
+        val action = DfrInstall.runAction(DfrInstall.installCommand(file.absolutePath))
             ?: return@act context.getString(R.string.dfr_no_root)
         if (action.ok) AppPreferences.setDfrInstalledAt(context, System.currentTimeMillis())
         action.log
@@ -142,7 +154,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { DfrApk.import(context, uri) }
             .onSuccess { file ->
-                picked = file
+                pickedApk = file
                 log = null
                 // The one thing picking a file is for: the next step is the install, so it happens now
                 // rather than after a second press of a button that only became enabled.
@@ -230,8 +242,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     )
                 }
                 Text(
-                    picked?.let { stringResource(R.string.dfr_apk_set, it.name) }
-                        ?: stringResource(R.string.dfr_apk_default),
+                    when {
+                        pickedApk != null -> stringResource(R.string.dfr_apk_set, pickedApk!!.name)
+                        bundledApk != null -> stringResource(R.string.dfr_apk_bundled)
+                        else -> stringResource(R.string.dfr_apk_default)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -265,7 +280,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                             Text(stringResource(R.string.dfr_action_remove_stage2))
                         }
                         DfrStep.InstallStageTwo -> FilledTonalButton(
-                            enabled = enabled && picked != null,
+                            enabled = enabled && apk != null,
                             onClick = { install() },
                         ) {
                             Text(stringResource(R.string.dfr_action_install_stage2))
