@@ -60,6 +60,11 @@ class InstallIdentityTest {
             .flatMap { file ->
                 file.readLines().withIndex()
                     .filter { (_, line) -> line.contains(installId) }
+                    // The helper's id is this id with `.helper` on it, so every line naming that one
+                    // contains this one as a substring. It is a different package aimed at a different
+                    // APK, and the one Kotlin line that spells it out is held to the `:dfr` module's own
+                    // `applicationId` by [dev.busung.s25uroot.dfr.StageTwoIdentityTest].
+                    .filterNot { (_, line) -> line.contains(stageTwoId) }
                     .map { (index, line) -> "${file.path}:${index + 1}: ${line.trim()}" }
             }
 
@@ -86,6 +91,12 @@ class InstallIdentityTest {
             )
         }
     }
+
+    /**
+     * The stage two's id, built from this one rather than written out, so this line is not itself a
+     * typed copy of the value the check above is looking for.
+     */
+    private val stageTwoId = BuildConfig.APPLICATION_ID + ".helper"
 
     /**
      * One use of the old prefix that is not this app's identity, and the test that says so.

@@ -76,6 +76,14 @@ android {
     namespace = "dev.busung.s25uroot"
     compileSdk = 37
 
+    sourceSets {
+        // The launcher icon lives outside this module because two APKs ship it: this app and the
+        // `:dfr` helper that gets installed as a system app. A copy in each module is an icon that
+        // drifts without anyone noticing, which is what `StageTwoIdentityTest` holds this and the
+        // helper's build file to.
+        getByName("main").res.srcDir(rootProject.file("launcher-icon"))
+    }
+
     defaultConfig {
         // This fork installs as its own app, beside the one it came from rather than over it: the two
         // are signed with different keys, so a shared id could never upgrade the other install, and a

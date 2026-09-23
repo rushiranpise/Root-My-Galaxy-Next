@@ -22,10 +22,20 @@ android {
     namespace = "dev.busung.s25uroot.dfr.stage2"
     compileSdk = 37
 
+    sourceSets {
+        // The same launcher icon the app draws, from the same files: the two APKs are one product and
+        // a user sees them side by side in a launcher. Read from the repository root rather than
+        // copied into this module, so a change to the icon cannot land on one of them only.
+        getByName("main").res.srcDir(rootProject.file("launcher-icon"))
+    }
+
     defaultConfig {
-        // Its own id, deliberately not the app's with a suffix: the two installs are different apps on
-        // the phone and no build value of one is meaningful to the other.
-        applicationId = "dev.rushiranpise.rmg.stage2"
+        // The app's own id with `.helper` on it: the two are different apps to Package Manager - this
+        // one declares `android.uid.system` as its shared user and the app does not - but they are one
+        // product, and a user who installs this by mistake can tell from the id where it came from.
+        // The name has to match `DfrInstall.STAGE_TWO_PACKAGE`, which is what `pm install` and the
+        // uninstall name; `StageTwoIdentityTest` holds the two together.
+        applicationId = "dev.rushiranpise.rmgnext.helper"
         minSdk = 33
         targetSdk = 36
         versionCode = 1

@@ -29,7 +29,7 @@ class DfrProbeTest {
     @Test
     fun `an installed package reports its uid, and the system uid is read as one`() {
         // The shape the device printed for a package running as android.uid.system.
-        val probe = DfrProbe.parse(output("package:dev.rushiranpise.rmg.stage2 uid:1000"))
+        val probe = DfrProbe.parse(output("package:dev.rushiranpise.rmgnext.helper uid:1000"))
         assertEquals(DfrProbe(installed = true, isSystemUid = true, armed = false), probe)
     }
 

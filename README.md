@@ -85,7 +85,14 @@ Output:
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 app/build/outputs/apk/release/app-release.apk
+dfr/build/outputs/apk/debug/dfr-debug.apk      # the helper the system-uid flow installs
 ```
+
+The `:dfr` module builds the helper APK that **Settings → System Management → System UID install**
+injects a certificate for and then installs as a system app. `:app` stages that artifact into its own
+assets when it is built, so the helper is always the one from the same commit; a helper built on its own
+reaches a phone only by building the app. Both modules read the launcher icon from `launcher-icon/` at
+the repository root — two APKs sitting in one launcher draw one icon, from one set of files.
 
 ## The app's screens
 

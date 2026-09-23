@@ -227,7 +227,7 @@ class Stage2Activity : Activity() {
         }
         column.addView(
             TextView(this).apply {
-                text = "Root My Galaxy - stage 2"
+                text = "RMG-NEXT helper"
                 textSize = 20f
             },
         )

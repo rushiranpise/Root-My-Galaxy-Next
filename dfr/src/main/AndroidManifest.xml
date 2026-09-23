@@ -12,12 +12,17 @@
   From there the exploit cannot run where it is - system_server may neither dlopen a library out of
   /data nor map executable memory - so the code hops to com.android.networkstack, which may do both,
   and that hop is why the receiver below exists.
+
+  The icon is named here the same way the app names it, and both modules read the one copy of it under
+  `launcher-icon/` at the repository root. Two APKs sitting in one launcher should not need two icons.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:sharedUserId="android.uid.system">
 
     <application
-        android:label="RMG Stage 2"
+        android:label="RMG-NEXT helper"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:process="system"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
