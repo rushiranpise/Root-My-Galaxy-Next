@@ -130,7 +130,6 @@ class TargetProfileTest {
             mapOf("EXPLOIT_ATTEMPTS" to "1", "P0_MIN_BOOT_UPTIME_SEC" to "120"),
             InstallViewModel.exploitEnvironment(
                 freshProfile.requiresFreshP0Session,
-                "0x1a0000",
                 payloadQuietWindowSec = BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS,
             ),
         )
