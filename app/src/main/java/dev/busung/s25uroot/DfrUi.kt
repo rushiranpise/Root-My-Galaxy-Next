@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import dev.busung.s25uroot.dfr.DfrApk
+import dev.busung.s25uroot.dfr.DfrCleanUpOutcome
 import dev.busung.s25uroot.dfr.DfrFlow
 import dev.busung.s25uroot.dfr.DfrHelperAvailability
 import dev.busung.s25uroot.dfr.DfrInstall
@@ -176,10 +177,16 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // packages.xml and the staged copy a failed rename swap writes - are deliberately not touched
         // here. Deleting them is what the residue screen is for, where they are listed with everything
         // else the app left behind and can be removed one at a time or together.
+        //
+        // Each record is cleared by its own half of the undo and by nothing else - see
+        // [DfrCleanUpOutcome]. A half that did not land, including both halves on a phone with no root
+        // shell, leaves its record, so the next reading of this screen shows that step rather than the
+        // first one.
         val removed = DfrInstall.run(context, DfrMode.Uninstall)
-        DfrInstall.runAction(DfrInstall.uninstallCommand())
-        AppPreferences.setDfrInjectedAt(context, null)
-        AppPreferences.setDfrInstalledAt(context, null)
+        val helper = DfrInstall.runAction(DfrInstall.uninstallCommand())
+        val outcome = DfrCleanUpOutcome.of(removed, helper)
+        if (outcome.keyGone) AppPreferences.setDfrInjectedAt(context, null)
+        if (outcome.helperGone) AppPreferences.setDfrInstalledAt(context, null)
         removed?.log ?: context.getString(R.string.dfr_no_root)
     }
 

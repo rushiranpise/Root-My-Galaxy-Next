@@ -61,9 +61,45 @@ internal data class DfrResult(
     val allInjected: Boolean?
         get() = Regex("all_injected=(\\w+)").find(log)?.groupValues?.get(1)?.let { it == "true" }
 
+    /**
+     * Whether `--uninstall` reported our key as gone, which is the only thing that makes a clean-up real.
+     *
+     * Two lines can say so, and they mean the same thing to this app: the injector removed the certs and
+     * its own re-read of the bytes it wrote confirms they are absent, or the key was never there. Anything
+     * else is not evidence - a refusal, a failed verification, a mode that does not uninstall at all - and
+     * the app's record of having injected is kept until there is some. The record is what the next reading
+     * of this screen starts from, and "nothing was ever injected" must not be reachable by a clean-up that
+     * did not run: a stale stamp is what made the flow skip its own reboot step twice before.
+     */
+    val uninstalled: Boolean
+        get() = mode == DfrMode.Uninstall && ok &&
+            (log.contains(PackagesXml.KEY_ABSENT) || log.contains("${PackagesXml.KEY_REMOVED}: true"))
+
     /** One line for the app log. */
     fun summary(): String = "dfr ${mode.name.lowercase()}: ${if (ok) "ok" else "failed"}" +
         log.lineSequence().lastOrNull { it.startsWith("[x]") }?.let { " - $it" }.orEmpty()
+}
+
+/**
+ * Which records a clean-up is entitled to clear, given what its two halves reported.
+ *
+ * The flow keeps two instants - when it injected, and when it installed the stage two - and both are
+ * read back as evidence that a reboot must have happened since. A record cleared by a clean-up that did
+ * not run is therefore not a tidy-up but a false reading: "this phone was never injected" for a phone
+ * whose packages.xml still carries our key. So each half of the undo clears its own record and only
+ * when it landed - the key removal by the injector's own re-read of the bytes it wrote, the helper
+ * removal by Package Manager's word. Neither asks the other.
+ *
+ * [uninstall] is null exactly when no root shell answered, which is the case that has no evidence at
+ * all, and both halves are then kept.
+ */
+internal data class DfrCleanUpOutcome(val keyGone: Boolean, val helperGone: Boolean) {
+    companion object {
+        fun of(uninstall: DfrResult?, helper: DfrAction?): DfrCleanUpOutcome = DfrCleanUpOutcome(
+            keyGone = uninstall?.uninstalled == true,
+            helperGone = helper?.ok == true,
+        )
+    }
 }
 
 /**

@@ -65,6 +65,33 @@ object PackagesXml {
     /** The staged copy a rename swap writes before replacing packages.xml with it. */
     const val TEMP_SUFFIX = ".new-rmgnext"
 
+    /**
+     * The two things the uninstall prints about our key, named here because the app reads them back.
+     *
+     * `--uninstall` is the only half of an undo that changes a file the phone boots from, so whether it
+     * happened is not something to guess at from an exit code: the app clears its own record of having
+     * injected only when one of these two lines says the key is gone. Both sides use these constants -
+     * the log lines that print them and the reading that matches on them - because a reader that typed
+     * the sentence out again would go on quietly answering "not done" after any rewording of the line it
+     * was written against.
+     */
+    const val KEY_ABSENT = "our key not present"
+
+    /** Printed once per target by the uninstall's own re-read; a `false` here aborts the process. */
+    const val KEY_REMOVED = "our key removed"
+
+    /**
+     * The two lines above, as the uninstall actually prints them.
+     *
+     * Formatted here rather than inline so the app's reading of them is testable against the same
+     * producer: a test can hand the reader a log built by these functions, which is the closest thing to
+     * the injector's real output that a JVM test can produce - the write itself needs a device.
+     */
+    fun keyAbsentLine(): String = "[*] $KEY_ABSENT: already clean, nothing to write"
+
+    /** One verify line, printed after the uninstall re-read the bytes it wrote. */
+    fun keyRemovedLine(target: String, gone: Boolean): String = "[verify] $target $KEY_REMOVED: $gone"
+
     const val FLAG_SHARED_USER_ID = "2"
 
     /** Parse either ABX or text into DOM. Returns doc; throws with reason. */
@@ -400,7 +427,7 @@ object PackagesXml {
         structuralChecks(doc, targets, log)
         Abx.guardDecimalAttrs(doc)
         if (!removeOurKeys(doc, targets, key, log)) {
-            log.appendLine("[*] our key not present: already clean, nothing to write")
+            log.appendLine(keyAbsentLine())
             return raw.size
         }
         val out = ByteArrayOutputStream()
@@ -418,7 +445,7 @@ object PackagesXml {
         val log = StringBuilder()
         for (t in targets) {
             val gone = !isInjected(doc, t, ourKeyHex)
-            log.appendLine("[verify] $t our key removed: $gone")
+            log.appendLine(keyRemovedLine(t, gone))
             if (!gone) throw RuntimeException("verify FAILED for $t (key still present)")
         }
         return log.toString()
