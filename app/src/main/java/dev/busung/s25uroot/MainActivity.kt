@@ -3619,11 +3619,9 @@ private fun SettingsPage(
     }
     var showPayloadSourcesSheet by remember { mutableStateOf(false) }
     var showLocalPayloadDialog by remember { mutableStateOf(false) }
-    var showPermissiveModule by remember { mutableStateOf(false) }
     var showDfrInstall by remember { mutableStateOf(false) }
     var showRunPlanDialog by remember { mutableStateOf(false) }
     var localPayloadName by remember { mutableStateOf(LocalPayload.displayName(context)) }
-    var permissiveModuleName by remember { mutableStateOf(LocalModule.displayName(context)) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
     var colorMenuTop by remember { mutableStateOf(32.dp) }
     var bootSettleMenuTop by remember { mutableStateOf(32.dp) }
@@ -3705,14 +3703,6 @@ private fun SettingsPage(
             initialName = localPayloadName,
             onDismiss = { showLocalPayloadDialog = false },
             onNameChanged = { name -> localPayloadName = name },
-        )
-    }
-
-    if (showPermissiveModule) {
-        PermissiveModuleDialog(
-            initialName = permissiveModuleName,
-            onDismiss = { showPermissiveModule = false },
-            onNameChanged = { name -> permissiveModuleName = name },
         )
     }
 
@@ -4930,10 +4920,9 @@ private fun SettingsPage(
                         onRestartAfterRootChanged(enabled)
                     },
                 )
-                // The two records an install can leave behind that are not a setting at all: a
-                // system-uid APK accepted by Package Manager, and a kernel module loaded on demand.
-                // Both are one-off actions with their own screens, which is why they sit here rather
-                // than anywhere a run reads its configuration from.
+                // The one record an install can leave behind that is not a setting at all: a system-uid
+                // APK accepted by Package Manager. It is a one-off action with its own screen, which is
+                // why it sits here rather than anywhere a run reads its configuration from.
                 SettingsCard(
                     icon = Icons.Rounded.VerifiedUser,
                     title = stringResource(R.string.dfr_title),
@@ -4942,17 +4931,6 @@ private fun SettingsPage(
                     onClick = {
                         clickHaptic(view)
                         showDfrInstall = true
-                    },
-                )
-                SettingsCard(
-                    icon = Icons.Rounded.LockOpen,
-                    title = stringResource(R.string.permissive_module),
-                    description = stringResource(R.string.permissive_module_description),
-                    value = permissiveModuleName ?: stringResource(R.string.permissive_module_none),
-                    position = SettingsCardPosition.Middle,
-                    onClick = {
-                        clickHaptic(view)
-                        showPermissiveModule = true
                     },
                 )
                 SettingsCard(

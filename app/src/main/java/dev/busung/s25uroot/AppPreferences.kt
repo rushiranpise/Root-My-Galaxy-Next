@@ -66,7 +66,6 @@ object AppPreferences {
     private const val PAYLOAD_MODE = "payload_mode"
     private const val BATTERY_PROMPT_SHOWN = "battery_prompt_shown"
     private const val LOCAL_PAYLOAD_NAME = "local_payload_name"
-    private const val LOCAL_MODULE_NAME = "local_module_name"
 
     // When this app performed the two steps of the system-uid flow. Ordering only: each step's own tool
     // is what says whether it is done, and these are read to answer "and has it rebooted since?".
@@ -669,16 +668,6 @@ object AppPreferences {
     fun setLocalPayloadName(context: Context, name: String?) {
         val editor = prefs(context).edit()
         if (name == null) editor.remove(LOCAL_PAYLOAD_NAME) else editor.putString(LOCAL_PAYLOAD_NAME, name)
-        editor.apply()
-    }
-
-    /** Name of the imported kernel module, kept for display only; the file itself is in app storage. */
-    fun localModuleName(context: Context): String? =
-        prefs(context).getString(LOCAL_MODULE_NAME, null)
-
-    fun setLocalModuleName(context: Context, name: String?) {
-        val editor = prefs(context).edit()
-        if (name == null) editor.remove(LOCAL_MODULE_NAME) else editor.putString(LOCAL_MODULE_NAME, name)
         editor.apply()
     }
 
