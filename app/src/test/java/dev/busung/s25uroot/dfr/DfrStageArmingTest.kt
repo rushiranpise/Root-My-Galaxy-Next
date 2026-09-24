@@ -37,6 +37,88 @@ class DfrStageArmingTest {
     }
 
     @Test
+    fun `each marker is its own answer, because what to do about each one differs`() {
+        assertEquals(DfrStageReading.Armed, DfrInstall.stageReadingOf("RMG-stage=armed"))
+        assertEquals(DfrStageReading.Absent, DfrInstall.stageReadingOf("RMG-stage=absent"))
+        assertEquals(DfrStageReading.Different, DfrInstall.stageReadingOf("RMG-stage=different"))
+        assertEquals(DfrStageReading.Uncompared, DfrInstall.stageReadingOf("RMG-stage=uncompared"))
+    }
+
+    @Test
+    fun `an answer nobody could place is never reported as armed`() {
+        // The one direction of that mistake the next boot cannot recover from on its own: the file the
+        // late-load needs is not there and the row says it is, so the restart nothing explains is the one
+        // nobody looks into.
+        assertEquals(DfrStageReading.Unreadable, DfrInstall.stageReadingOf(null))
+        assertEquals(DfrStageReading.Unreadable, DfrInstall.stageReadingOf(""))
+        assertEquals(
+            DfrStageReading.Unreadable,
+            DfrInstall.stageReadingOf("sh: /data/local/tmp/.ksud-stage: not found"),
+        )
+    }
+
+    @Test
+    fun `the row and the arming decision read the same answer the same way`() {
+        // One is the boolean the staging branches on and the other is what a screen shows. A marker that
+        // meant different things to the two would either copy five megabytes over a file that is already
+        // in place or show a row that contradicts what the write just did.
+        listOf(
+            "RMG-stage=armed",
+            "RMG-stage=absent",
+            "RMG-stage=different",
+            "RMG-stage=uncompared",
+            null,
+            "",
+        ).forEach { output ->
+            assertEquals(
+                "$output: the arming decision and the settings row disagree about it",
+                DfrInstall.stageArmed(output),
+                DfrInstall.stageReadingOf(output) == DfrStageReading.Armed,
+            )
+        }
+    }
+
+    @Test
+    fun `the reading is taken on whichever shell the phone has, and asks the running version`() {
+        val body = declaration(installSource(), "fun readDaemonStage(")
+        assertTrue(
+            "the stage file is read through root only, so the phone this reading is for - a boot with no " +
+                "root - is the one that cannot be told whether its next restart has a daemon to load",
+            body.contains("runOnEitherShell("),
+        )
+        assertTrue(
+            "the reading no longer asks for the running daemon's version, so any copy at that path is " +
+                "called armed - including another flavour's, whose interface the module in the kernel does " +
+                "not match",
+            body.contains("runningDaemonVersion(context)"),
+        )
+        assertTrue(
+            "the reading no longer asks the question the arming asks, so what the row says and what the " +
+                "next write does can come apart",
+            body.contains("stageArmedCommand("),
+        )
+    }
+
+    @Test
+    fun `the settings row shows the reading, and the reason it is not armed`() {
+        val shell = shellSource()
+        assertTrue(
+            "no settings row reads the stage file, so nothing on the screen says whether a restart would " +
+                "have a daemon to late-load",
+            shell.contains("DfrInstall.readDaemonStage(context)"),
+        )
+        assertTrue(
+            "the row no longer shows the reading's own value",
+            shell.contains("daemonStage?.let { stringResource(it.label) }"),
+        )
+        assertTrue(
+            "the row no longer says why it is not armed, which is the half of the answer that has an action " +
+                "behind it",
+            shell.contains("?.takeIf { it != DfrStageReading.Armed }"),
+        )
+    }
+
+    @Test
     fun `the check reads the file the late-load renames and copies nothing`() {
         val command = DfrInstall.stageArmedCommand(expectedVersion = "ksud 3.4.0 (uapi: 4)")
         assertTrue(

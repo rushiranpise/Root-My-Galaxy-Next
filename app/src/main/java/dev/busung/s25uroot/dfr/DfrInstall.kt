@@ -3,6 +3,8 @@ package dev.busung.s25uroot.dfr
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.SystemClock
+import androidx.annotation.StringRes
+import dev.busung.s25uroot.R
 import dev.busung.s25uroot.AppLog
 import dev.busung.s25uroot.AppLogTags
 import dev.busung.s25uroot.KernelSuRuntime
@@ -233,6 +235,41 @@ internal enum class DfrStageArming {
 
     /** Root was live and the file is still not in place: a restart would find nothing to late-load. */
     Failed,
+}
+
+/**
+ * The daemon stage file, as the device described it - the five answers a settings row can show.
+ *
+ * Four of them are the check's own markers, and the fifth is the silence: no shell answered, so nothing was
+ * read. They are separate answers rather than one "not armed", because what the reader does about it
+ * differs - nothing, stage it again, stage the *right* daemon, or start Shizuku - and a row that said "not
+ * armed" for all four would send every one of them the same way.
+ *
+ * [DfrStageArming] next door is the other half of the same file and not the same question: that one is what
+ * came of trying to *write* it, and it is answered where root is known to be live. This one is what is
+ * there now, asked of whichever shell the phone has - which is the question a screen can ask on a phone
+ * that has not been rerooted yet.
+ */
+internal enum class DfrStageReading(
+    /** The value the row shows. */
+    @StringRes val label: Int,
+    /** One line saying what that means, or why it is not armed. */
+    @StringRes val detail: Int,
+) {
+    /** In place, and it is the daemon this device is running. */
+    Armed(R.string.dfr_stage_armed, R.string.dfr_stage_armed_detail),
+
+    /** Nothing there: the next boot would find no daemon to late-load. */
+    Absent(R.string.dfr_stage_absent, R.string.dfr_stage_absent_detail),
+
+    /** Something there, and it is another build's daemon. */
+    Different(R.string.dfr_stage_different, R.string.dfr_stage_different_detail),
+
+    /** There, and the running daemon could not be read, so nothing was compared. */
+    Uncompared(R.string.dfr_stage_uncompared, R.string.dfr_stage_uncompared_detail),
+
+    /** No shell answered, so this is an absence of a reading rather than a reading. */
+    Unreadable(R.string.dfr_stage_unreadable, R.string.dfr_stage_unreadable_detail),
 }
 
 internal object DfrInstall {
@@ -615,6 +652,44 @@ internal object DfrInstall {
      * "the file was written again" without them is a line that cannot say why it had to be.
      */
     internal fun stageArmed(output: String?): Boolean = output?.contains(STAGE_ARMED) == true
+
+    /**
+     * The same answer as one of the five states a row can show.
+     *
+     * Read as its own function so the four markers and the two silences can be held apart without a device:
+     * the failure this exists to prevent is a row that reads "armed" for a file nobody could see, which is
+     * the one direction of that mistake the next boot cannot recover from on its own.
+     */
+    internal fun stageReadingOf(output: String?): DfrStageReading = when {
+        output == null -> DfrStageReading.Unreadable
+        output.contains(STAGE_ARMED) -> DfrStageReading.Armed
+        output.contains(STAGE_ABSENT) -> DfrStageReading.Absent
+        output.contains(STAGE_DIFFERENT) -> DfrStageReading.Different
+        output.contains(STAGE_UNCOMPARED) -> DfrStageReading.Uncompared
+        // A shell that answered with something other than these four is a reading this app cannot place,
+        // and the safe place to leave it is with the silences.
+        else -> DfrStageReading.Unreadable
+    }
+
+    /**
+     * Reads the stage file, on whichever shell this phone has.
+     *
+     * The check itself needs no root - `test -s` and executing the staged daemon with `-V` are things the
+     * `shell` user may do, and the file is mode 0755 in the one directory it owns - so a phone that has just
+     * rebooted into no root can still be told whether its next restart would have a daemon to load. That is
+     * the state this reading is asked about most often, and the reason it is not taken through
+     * [armStageForNextBoot], which needs root to write what it re-stages.
+     *
+     * The running daemon's version comes from the same probe the staging and the re-arming use, so "a
+     * different build is in there" means the same thing to this row as it does to the write that follows it.
+     * A version that could not be read is [DfrStageReading.Uncompared] rather than a guess.
+     */
+    fun readDaemonStage(context: Context): DfrStageReading = stageReadingOf(
+        runOnEitherShell(
+            stageArmedCommand(expectedVersion = runningDaemonVersion(context)),
+            TIMEOUT_SECONDS,
+        )?.output,
+    )
 
     /**
      * Makes sure the daemon a late-load reads is in place for the next boot, if this boot has root.

@@ -214,6 +214,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.busung.s25uroot.dfr.DfrInstall
 import dev.busung.s25uroot.dfr.DfrStageArming
+import dev.busung.s25uroot.dfr.DfrStageReading
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -4768,6 +4769,32 @@ private fun SettingsPage(
                     // It is a readout, so it takes no tap. The only thing one could do here is open the
                     // sheet where a payload is picked, and that is a choice about the *next* run: it is
                     // made where that run is started rather than under the value it would change.
+                )
+                // The other half of what the flavour decides, next to it because it is the same subject:
+                // which daemon the next boot's late-load will find. That file is *consumed* by every run -
+                // a payload's late-load and the system-uid helper's both rename it away - so a phone that
+                // has just run something has nothing armed until the next thing holding root writes it
+                // back, and the reboot that follows is the boot this row is about. Read through a shell
+                // and off the main thread, on the same terms as the readings card above.
+                var daemonStage by remember { mutableStateOf<DfrStageReading?>(null) }
+                LaunchedEffect(kernelsuFlavor, resumeTick) {
+                    daemonStage = withContext(Dispatchers.IO) { DfrInstall.readDaemonStage(context) }
+                }
+                SettingsCard(
+                    icon = Icons.Rounded.Autorenew,
+                    title = stringResource(R.string.settings_dfr_stage),
+                    description = stringResource(R.string.settings_dfr_stage_summary),
+                    value = daemonStage?.let { stringResource(it.label) }
+                        ?: stringResource(R.string.settings_dfr_stage_reading),
+                    // The reason it is not armed, in the one shape this screen has for a line of state
+                    // rather than a paragraph. Armed is the quiet answer and adds nothing.
+                    notice = daemonStage
+                        ?.takeIf { it != DfrStageReading.Armed }
+                        ?.let { stringResource(it.detail) },
+                    position = SettingsCardPosition.Middle,
+                    // A readout, like the flavour above it: what writes this file is a run, and a row here
+                    // that armed it would be a second place for that write to happen - one that no run's
+                    // own transport is holding.
                 )
                 // The version this app offers, which is the KernelSU the payload for this device loads
                 // when the user has named nothing - so a manager installed from this row is the one

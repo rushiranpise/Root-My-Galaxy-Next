@@ -125,29 +125,28 @@ class SettingsCardGroupTest {
     }
 
     @Test
-    fun `the only row that takes no tap is the one that says it is a readout`() {
+    fun `the only rows that take no tap are the ones that say they are readouts`() {
         // `onClick` has a default now, so a row that forgot it is a dead card instead of a compile error:
         // it draws exactly like the rows around it and nothing happens when it is tapped, which is the
-        // failure this test exists for. One row is meant to be like that - the KernelSU flavour, whose
-        // value comes from the payload - and its own description is what says so.
+        // failure this test exists for. The rows meant to be like that are the ones whose value comes from
+        // somewhere else - the KernelSU flavour, which comes from the payload, and the daemon stage file,
+        // which comes from the device - and each one's own description is what says so.
         val readouts = sourceRoot()
             .walkTopDown()
             .filter { file -> file.isFile && file.extension == "kt" }
-            .flatMap { file -> cardCalls(file.readText()).map { call -> file.name to call } }
-            .filterNot { (_, call) -> call.contains("onClick") }
-            .map { (_, call) ->
-                if (call.contains("R.string.settings_ksu_flavor")) {
-                    "the flavour readout"
-                } else {
-                    "a row that does nothing: ${call.lineSequence().first().trim()}"
-                }
+            .flatMap { file -> cardCalls(file.readText()) }
+            .filterNot { call -> call.contains("onClick") }
+            .map { call ->
+                READOUTS.entries.firstOrNull { (_, marker) -> call.contains(marker) }?.key
+                    ?: "a row that does nothing: ${call.lineSequence().first().trim()}"
             }
+            .sorted()
             .toList()
 
         assertEquals(
-            "a settings row takes no tap, and the only row that is supposed to be like that is the one " +
+            "a settings row takes no tap, and the rows that are supposed to be like that are the ones " +
                 "whose value something else decides",
-            listOf("the flavour readout"),
+            READOUTS.keys.sorted(),
             readouts,
         )
     }
@@ -201,6 +200,18 @@ class SettingsCardGroupTest {
     }
 
     private companion object {
+        /**
+         * The rows that are readouts rather than settings, each found by the title that says so.
+         *
+         * Recognised by their own title because that is what tells a reader - and this test - that the
+         * value was decided somewhere else. Adding a readout means adding it here, which is the point: the
+         * failure being caught is a row nobody meant to be dead, not a row somebody meant to add.
+         */
+        val READOUTS = linkedMapOf(
+            "the flavour readout" to "R.string.settings_ksu_flavor",
+            "the stage-file readout" to "R.string.settings_dfr_stage",
+        )
+
         /** The assignment, so a comparison in the shape helper is not read as a card. */
         val CARD_POSITION = Regex("""position = SettingsCardPosition\.(\w+)""")
 

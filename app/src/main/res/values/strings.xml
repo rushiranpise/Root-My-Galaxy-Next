@@ -707,6 +707,18 @@
     <!-- One shell or the other, for the commands both of them can run: see DfrInstall.installStageTwo. -->
     <string name="dfr_no_shell">Neither a root shell nor Shizuku\'s answered.</string>
     <string name="dfr_stage_no_root">The daemon was not staged: that step needs root, because the file has to end up owned by the system. The install below does not.</string>
+
+    <!-- The daemon stage file as the device describes it: four markers and the silence. -->
+    <string name="dfr_stage_armed">Armed for the next boot</string>
+    <string name="dfr_stage_armed_detail">The file is there, and it is the daemon this device is running.</string>
+    <string name="dfr_stage_absent">Nothing is there</string>
+    <string name="dfr_stage_absent_detail">The file the next boot\'s late-load renames is missing, so a restart with no root would find nothing to load - and the helper reports that as the exploit having failed.</string>
+    <string name="dfr_stage_different">Another build\'s daemon</string>
+    <string name="dfr_stage_different_detail">The file is there and it is a different daemon from the one this device is running, so a boot would load a version whose interface does not match the module in the kernel.</string>
+    <string name="dfr_stage_uncompared">Not compared</string>
+    <string name="dfr_stage_uncompared_detail">The file is there and the daemon this device is running could not be read, so nothing says whether the two are the same build.</string>
+    <string name="dfr_stage_unreadable">Not read</string>
+    <string name="dfr_stage_unreadable_detail">No shell answered, so nothing was read. Give this app root, or start Shizuku, then come back to this screen.</string>
     <string name="dfr_no_helper">This build carries no helper APK, so there is nothing to inject. Nothing was written to the device.</string>
     <string name="dfr_helper_unwritable">The helper APK this build carries could not be unpacked to the app\'s own storage, which usually means there is no room. Nothing was written to the device.</string>
 
@@ -842,6 +854,9 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="error_no_root_shell">No root shell is available yet</string>
     <string name="settings_ksu_flavor">KernelSU flavour</string>
     <string name="settings_ksu_flavor_from_payload">Set by the payload you pick for this device.</string>
+    <string name="settings_dfr_stage">Daemon stage file</string>
+    <string name="settings_dfr_stage_summary">What the next boot\'s KernelSU late-load reads. Every run consumes it, so each one writes it back.</string>
+    <string name="settings_dfr_stage_reading">Reading…</string>
     <string name="settings_ksu_flavor_pending">Restart to apply · this boot loaded %1$s</string>
     <string name="settings_manager">Manager</string>
     <string name="settings_manager_summary">Install %1$s</string>
