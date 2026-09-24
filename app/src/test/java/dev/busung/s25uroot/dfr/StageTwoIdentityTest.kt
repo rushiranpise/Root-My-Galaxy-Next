@@ -138,6 +138,39 @@ class StageTwoIdentityTest {
     }
 
     @Test
+    fun `the extra the helper sets when root lands is the one the app reads`() {
+        // The restart a finished run needs is KernelSU's own soft reboot, and the helper cannot ask for it -
+        // that is the installed daemon run as root, and this helper is the system uid inside system_server.
+        // So the load is inert until the app restarts, and the only thing carrying that request across is
+        // this extra: spelled differently on the two sides, a run finished by hand would sit there loaded
+        // and doing nothing, which is exactly the symptom it is meant to fix.
+        assertEquals(
+            "the helper tells the app that root has arrived under an extra the app does not read, so a " +
+                "run finished by hand would leave the load inert until somebody restarted by hand",
+            DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA,
+            constantIn(stageTwoActivity(), "EXTRA_AFTER_ROOT"),
+        )
+        // Set and read, not merely named on both sides: an extra only one of the two spells is one this
+        // test would pass on while the intent carried nothing.
+        assertTrue(
+            "the helper declares the extra but never sets it on the app's launch, so the request never " +
+                "leaves the helper",
+            stageTwoActivity().contains("putExtra(EXTRA_AFTER_ROOT, true)"),
+        )
+        assertTrue(
+            "the app never reads the extra, so the helper's request would stop at the intent",
+            mainActivity().contains("DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA"),
+        )
+        // And only a run a person asked for: the boot's own run is this app's gate, which is already
+        // watching the kernel and would otherwise be raced by a second restart request.
+        assertTrue(
+            "the helper asks for the restart on an auto-run too, which is the boot's own path and the " +
+                "app gate's to finish",
+            stageTwoActivity().contains("if (success && !autorun)"),
+        )
+    }
+
+    @Test
     fun `the app and the helper agree about the extras that start a run`() {
         assertEquals(
             "the app sets an extra the helper does not read, so a boot-time reroot would open the " +
@@ -242,6 +275,7 @@ class StageTwoIdentityTest {
         assertTrue(appBuildFile().contains("res.srcDir"))
         assertTrue(appBuildFile().contains("applicationId"))
         assertTrue(stageTwoActivity().contains("class Stage2Activity"))
+        assertTrue(mainActivity().contains("class MainActivity"))
         assertTrue(helperTheme().contains("Theme.RmgHelper"))
     }
 
@@ -260,6 +294,8 @@ class StageTwoIdentityTest {
 
     private fun stageTwoActivity(): String =
         source("dfr/src/main/java/dev/busung/s25uroot/dfr/stage2/Stage2Activity.kt")
+
+    private fun mainActivity(): String = source("app/src/main/java/dev/busung/s25uroot/MainActivity.kt")
 
     private fun helperTheme(): String = source("dfr/src/main/res/values/themes.xml")
 

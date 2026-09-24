@@ -329,6 +329,22 @@ internal object DfrInstall {
      */
     const val STAGE_TWO_FLAVOR_EXTRA = "rmg.flavor"
 
+    /**
+     * What the helper sets on this app once its run has loaded KernelSU, so the app does the restart.
+     *
+     * The restart the helper's success needs is KernelSU's own soft reboot, and the helper cannot ask for
+     * it: that goes through the installed `ksud` as root, and this helper runs as the system uid inside
+     * `system_server`, which the daemon does not grant a shell. The app can, with a grant the user already
+     * gave it and a script that will not start one twice. So the one thing the helper does is say that root
+     * has arrived, and the app - which holds the setting, the grant and the one-owner-per-boot lock - is the
+     * side that acts on it.
+     *
+     * The helper sets it only for a run a person asked for. A boot's run is the app's own [DfrBootService],
+     * which is already watching this boot's kernel for the load and performs the restart from that side,
+     * unattended and without a screen.
+     */
+    const val STAGE_TWO_AFTER_ROOT_EXTRA = "rmg.afterRoot"
+
     /** The compiled-in marker the exploit's module creates, and the kernel clears it on a hard reboot. */
     const val ARMED_MARKER = "/dev/df"
 

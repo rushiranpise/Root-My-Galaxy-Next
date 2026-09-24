@@ -290,6 +290,23 @@ class DfrBootService : Service() {
                 "Reroot at boot succeeded; the stage file for the next boot was " +
                     if (staged?.ok == true) "written again" else "not written",
             )
+            // And the restart this boot's load needs to take effect, on the terms the app's own run offers
+            // it: opt-in, and asked for only once the things above are written. A boot is the one path the
+            // helper's own message cannot cover - it is started with autorun, so its screen does not ask
+            // this app to restart - and this gate is already here watching this boot's kernel, which makes
+            // it the side holding both the reading and the grant. Best-effort, like the write above: the
+            // phone is already rooted, and a refused reboot is a line rather than a failure to report.
+            if (AppPreferences.restartAfterRoot(this)) {
+                val restart = runRecoveryAction(this, RecoveryTool.SoftReboot)
+                AppLog.info(
+                    AppLogTags.RESTART,
+                    if (restart.accepted) {
+                        "Reroot at boot: KernelSU accepted the soft reboot, so the modules are being applied"
+                    } else {
+                        "Reroot at boot: the soft reboot was refused: ${restart.detail}"
+                    },
+                )
+            }
             finish(getString(R.string.dfr_boot_rerooted))
             return
         }

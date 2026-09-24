@@ -212,6 +212,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import dev.busung.s25uroot.dfr.DfrInstall
 import dev.busung.s25uroot.dfr.DfrStageArming
 import dev.busung.s25uroot.dfr.DfrStageReading
@@ -398,6 +399,7 @@ class MainActivity : ComponentActivity() {
         settingsTarget = SettingsTarget.named(intent?.getStringExtra(SettingsTarget.EXTRA))
         openedRunId = intent?.getStringExtra(EXTRA_RUN_ID)
         restartShortcut = restartShortcutOf(intent?.action)
+        maybeRestartAfterTheHelper(intent)
         batteryUnrestricted = isBatteryUnrestricted()
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
@@ -553,6 +555,70 @@ class MainActivity : ComponentActivity() {
         // The shortcut's own second case: the app is already in the back stack, so the restart is asked for in
         // the window that exists rather than in a second one.
         restartShortcut = restartShortcutOf(intent.action)
+        maybeRestartAfterTheHelper(intent)
+    }
+
+    /**
+     * The restart a helper run leaves owing, asked for by the helper as it finishes.
+     *
+     * What a run through the helper loads is KernelSU, and a loaded KernelSU does nothing until the Android
+     * userspace is built again - which is KernelSU's own soft reboot. The helper cannot ask for it: that is
+     * the installed `ksud` run as root, and the helper is the system uid inside `system_server`, which the
+     * daemon hands no shell to. This app can, with a grant the user already gave it, and the restart has its
+     * own script and its own lock here so two of them cannot start at once. So the helper's whole message is
+     * "root is live" and the decision is this side's.
+     *
+     * Two guards, and neither is a formality. The caller has to be the helper, because this extra names a
+     * reboot and any app on the phone can start an exported activity: a screen that accepted one from
+     * whatever sent it would be a reboot any app could ask for. And the setting has to be on, because that is
+     * exactly what *Auto Soft reboot* means - and a restart is the one action here that cannot be offered and
+     * then taken back.
+     */
+    private fun maybeRestartAfterTheHelper(intent: Intent?) {
+        if (intent?.getBooleanExtra(DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA, false) != true) return
+        if (!launchedByTheHelper()) {
+            AppLog.warn(
+                AppLogTags.RESTART,
+                "The restart-after-root extra arrived from something other than the helper, so it was ignored",
+            )
+            return
+        }
+        if (!AppPreferences.restartAfterRoot(this)) {
+            AppLog.info(
+                AppLogTags.RESTART,
+                "The helper loaded KernelSU; Auto Soft reboot is off, so the restart is the user's to make",
+            )
+            return
+        }
+        AppLog.info(AppLogTags.RESTART, "The helper loaded KernelSU; restarting the userspace to apply it")
+        lifecycleScope.launch {
+            val outcome = runRecoveryAction(this@MainActivity, RecoveryTool.SoftReboot)
+            AppLog.info(
+                AppLogTags.RESTART,
+                if (outcome.accepted) {
+                    "KernelSU accepted the soft reboot the helper's run asked for"
+                } else {
+                    "The soft reboot the helper's run asked for was refused: ${outcome.detail}"
+                },
+            )
+        }
+    }
+
+    /**
+     * Whether the helper started this window, which is the only caller allowed to ask for the restart.
+     *
+     * `getLaunchedFromPackage()` is the accurate accessor and the one this prefers; `callingPackage` answers
+     * the same question on the versions before it and is the only one of the two that exists there.
+     * Two accessors rather than one because the older one is documented not to be the launching app in every
+     * case, and this is a decision about a reboot.
+     */
+    private fun launchedByTheHelper(): Boolean {
+        val from = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            launchedFromPackage
+        } else {
+            callingPackage
+        }
+        return from == DfrInstall.STAGE_TWO_PACKAGE
     }
 
     private fun openInstaller(selectionId: String? = null) {

@@ -218,6 +218,12 @@ class Stage2Activity : Activity() {
                     refreshReadouts()
                 }
                 Log.i(TAG, "run finished with $result")
+                // A run a person asked for, whose last step is the one the phone cannot finish by itself:
+                // what was just loaded is inert until the Android userspace is built again, and the restart
+                // that does it is KernelSU's own soft reboot. This process cannot ask for it - that needs a
+                // root shell - so the app, which has one, is told instead. Not for a boot's run: that one was
+                // started by the app's own gate, which watches this boot's kernel and does the restart there.
+                if (success && !autorun) runOnUiThread { askTheAppToRestart() }
             }
         }
     }
@@ -261,6 +267,40 @@ class Stage2Activity : Activity() {
             reply.recycle()
         }
         return result
+    }
+
+    /**
+     * Tells the app that KernelSU has just arrived, which is the app's cue to do the restart.
+     *
+     * The restart is a soft reboot, which is KernelSU's own command run as root - and this process is the
+     * system uid inside `system_server`, which the daemon does not hand a shell to. The app has one, along
+     * with the setting that says whether to use it and the lock that keeps two reboots from starting at
+     * once, so the whole of this side is the sentence "root is live": the app decides the rest.
+     *
+     * The app is started rather than broadcast to, because its receivers are deliberately not exported and
+     * an extra on an explicit launch is what the two APKs already share. That is also why the app checks
+     * which package started it before acting: this extra names a restart, and a screen any app on the phone
+     * can open is not a place to accept one from.
+     */
+    private fun askTheAppToRestart() {
+        val launch = packageManager.getLaunchIntentForPackage(MAIN_PACKAGE)
+        if (launch == null) {
+            append(
+                "[*] root is loaded, and this is the state a restart applies: $MAIN_PACKAGE is not " +
+                    "installed, so the reboot is yours to do",
+            )
+            return
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        launch.putExtra(EXTRA_AFTER_ROOT, true)
+        val started = runCatching { startActivity(launch) }.isSuccess
+        append(
+            if (started) {
+                "[*] root is loaded, and this is the state a restart applies: asked $MAIN_PACKAGE to do it"
+            } else {
+                "[!] root is loaded, but $MAIN_PACKAGE could not be opened, so the reboot is yours to do"
+            },
+        )
     }
 
     /** Waits for the controller binder, reporting how long is left rather than going quiet. */
@@ -726,6 +766,15 @@ class Stage2Activity : Activity() {
          * manager that is installed and unambiguous.
          */
         const val EXTRA_FLAVOR = "rmg.flavor"
+
+        /**
+         * What this screen sets on the app when a run it started has loaded KernelSU.
+         *
+         * The app's half is `DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA`, and the two are held together by
+         * `StageTwoIdentityTest` - which reads both sources - because they are one name in two APKs that
+         * share no code. See [askTheAppToRestart] for why the app is the side that acts on it.
+         */
+        const val EXTRA_AFTER_ROOT = "rmg.afterRoot"
 
         /**
          * The app, by its application id.
