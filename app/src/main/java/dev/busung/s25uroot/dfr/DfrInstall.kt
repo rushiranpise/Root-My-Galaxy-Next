@@ -372,6 +372,17 @@ internal object DfrInstall {
     )
 
     /**
+     * The copy the daemon's own late-load moves into place, named by its code rather than by this app.
+     *
+     * A late-loaded daemon installs itself: its `late-load` renames this path onto `/data/adb/ksud`,
+     * before it loads anything, and a missing file there fails the whole command with "Failed to stage
+     * ksud". It is the same path `InstallViewModel` writes for a run's own late-load, spelled here
+     * because the DFR flow is a second caller of the same contract - and the rename *consumes* it, so
+     * it has to be written again for every run rather than once per install.
+     */
+    internal const val DAEMON_STAGE_PATH = "/data/local/tmp/.ksud-stage"
+
+    /**
      * Puts the flavour's own daemon where the exploit execs it, as root.
      *
      * This is the hand-off the helper's own documentation assumes, and the reason it matters is that the
@@ -392,11 +403,18 @@ internal object DfrInstall {
      * a coin toss between two different builds presented as one decision. [expectedVersion] is what makes
      * it a decision instead: a source answers `-V` with the version it *is*, and the first one that
      * agrees with the daemon this device is running wins over a source that merely exists first.
+     *
+     * The chosen daemon is left in **two** places, because two different things read it: the path the
+     * exploit execs ([destination]), and [DAEMON_STAGE_PATH] - the copy the daemon's own `late-load`
+     * renames onto `/data/adb/ksud` as its first act. Only the first was written before, so a DFR run
+     * got as far as exec'ing the daemon and no further: without the second file the daemon aborts with
+     * "Failed to stage ksud" and nothing is loaded.
      */
     internal fun stageDaemonCommand(
         sources: List<String> = DAEMON_SOURCES,
         destination: String = STAGED_DAEMON,
         expectedVersion: String? = null,
+        stagePath: String = DAEMON_STAGE_PATH,
     ): String = buildString {
         // Asked with `-V` and then `--version`, the two spellings the daemon has had, and only the first
         // line of whatever it answers: the version is the first thing it says or it is nothing.
@@ -423,6 +441,11 @@ internal object DfrInstall {
         // The identity the module's policy expects: the system, and nothing else.
         append("/system/bin/chown system:system '").append(destination).append("' || exit 5; ")
         append("/system/bin/chmod 700 '").append(destination).append("' || exit 6; ")
+        // The daemon's own copy, mode 0755 like the one it replaces: it renames this onto /data/adb/ksud
+        // and then re-applies root:root 0755 itself, so what matters here is only that the file is
+        // there and readable by the root process doing the rename.
+        append("/system/bin/cp -f \"${'$'}src\" '").append(stagePath).append("' || exit 7; ")
+        append("/system/bin/chmod 755 '").append(stagePath).append("' || exit 8; ")
         append("echo \"[+] staged ").append(destination).append(" from ${'$'}src${'$'}{got:+ (${'$'}got)}\"; ")
         // Said out loud rather than left to a size or a hash nobody reads: what was staged, what version
         // it is, and whether that is the daemon this device is running. A mismatch is reported and the

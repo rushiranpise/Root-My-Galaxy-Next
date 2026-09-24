@@ -171,6 +171,46 @@ class DfrDaemonPathTest {
     }
 
     @Test
+    fun `the shellcode passes the daemon no argument its cli does not declare`() {
+        // The failure this pins, measured on the device: the shellcode exec'd
+        //   late-load --package-name me.weishu.kernelsu --stage-from /data/system/rmgnext-ksud
+        // against a ReSukiSU/Next daemon, which answered
+        //   error: unexpected argument '--stage-from' found
+        // and exited at argument parsing, before loading anything - while the exploit still reported
+        // "Done. Check KSU Manager.", because its success marker only says the daemon was exec'd.
+        // DFReroot's argv works for DFReroot because its shellcode and its daemon are the same fork.
+        val source = exploitSource()
+        assertTrue("the shellcode no longer asks for late-load", source.contains("\"late-load\""))
+        assertTrue(
+            "the shellcode passes --stage-from, which this daemon answers with a usage error",
+            !source.contains("argv_stage_from"),
+        )
+        assertTrue(
+            "the shellcode names a manager package instead of leaving the daemon's own default",
+            !source.contains("argv_ksu"),
+        )
+    }
+
+    @Test
+    fun `the daemon is also left where its own late-load moves it from`() {
+        // A late-loaded daemon installs itself: its late-load renames this path onto /data/adb/ksud
+        // before it loads anything, and a missing file fails the whole command with "Failed to stage
+        // ksud". The rename consumes it, so it is written for every run rather than once per install.
+        val command = DfrInstall.stageDaemonCommand()
+        assertTrue(
+            "the daemon's own staging path is not written: $command",
+            command.contains("'${DfrInstall.DAEMON_STAGE_PATH}'"),
+        )
+        // Held against the path the main install flow writes for its own late-load: one contract, two
+        // callers, and both hand their file to the same daemon code.
+        assertTrue(
+            "InstallViewModel's stage path and DfrInstall's have come apart",
+            source("app/src/main/java/dev/busung/s25uroot/InstallViewModel.kt")
+                .contains("\"${DfrInstall.DAEMON_STAGE_PATH}\""),
+        )
+    }
+
+    @Test
     fun `both sources were really read`() {
         // Every assertion above passes on an empty string, so a moved file would turn this whole class
         // green. The paths are resolved rather than assumed for the same reason.

