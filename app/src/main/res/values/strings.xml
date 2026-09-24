@@ -683,6 +683,16 @@
     <string name="dfr_log">Logs</string>
     <string name="dfr_reading">Reading the device...</string>
     <string name="dfr_measured">Stage 2: %1$s | certificate in list: %2$s | hooks armed: %3$s</string>
+    <!--
+      The panel's own line for the helper's two builds, one per verdict. The numbers are the evidence behind
+      the flow's one judgement about two files rather than about the phone, and the dialog is where somebody
+      arguing with the step it chose reads them - so the four answers are four lines and not only the
+      disagreement, which is the one the step list already explains.
+    -->
+    <string name="dfr_log_build_current">[*] helper build: %1$d on the phone, %2$d in this APK - the same build</string>
+    <string name="dfr_log_build_different">[*] helper build: %1$d on the phone, %2$d in this APK - another build\'s helper</string>
+    <string name="dfr_log_build_absent">[*] helper build: nothing installed on the phone, so there is nothing to compare</string>
+    <string name="dfr_log_build_unreadable">[*] helper build: %1$d on the phone, and the helper APK in this app could not be read</string>
     <string name="dfr_stage_not_installed">not installed</string>
     <string name="dfr_stage_system">installed as a system app</string>
     <string name="dfr_stage_ordinary">installed as an ordinary app</string>
@@ -719,7 +729,6 @@
     <string name="dfr_step_install_detail">Press Install stage 2, which installs the helper APK this app carries. Only now, after the reboot, is it accepted as a system app.</string>
     <string name="dfr_step_stale">Install the stage 2 this app ships</string>
     <string name="dfr_step_stale_detail">The helper on the phone was built by a different version of this app, so it carries that version\'s shellcode: a run it starts is that build\'s run, and what this one fixed is not on the phone yet. Installing replaces it in place - the package keeps the system uid it already has, and the copy in this APK is the only one this app can drive.</string>
-    <string name="dfr_helper_build_stale">The helper on the phone is build %1$d; the one in this APK is build %2$d.</string>
     <string name="dfr_step_reboot_again">Reboot again</string>
     <string name="dfr_step_reboot_again_detail">The helper\'s code runs inside the system process, which is already up, so a restart is what makes it load what was just installed rather than the copy it has in memory. On a first install it is also the boot that puts its system user into effect.</string>
     <string name="dfr_step_open">Open the stage 2</string>

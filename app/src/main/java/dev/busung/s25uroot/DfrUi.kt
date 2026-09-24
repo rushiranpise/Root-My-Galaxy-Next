@@ -355,20 +355,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                 // Only when something was measured: with no helper the flow refuses before it opens a
                 // shell, so a line about the package, the certificate and the hooks would be three claims
                 // nobody made.
-                // The evidence behind the one conclusion here that is about two files rather than about
-                // the phone, and only when they actually disagree: a line that always said "these two
-                // match" would be a line nobody reads by the time it says they do not.
-                reading?.build?.takeIf { it.verdict == StageTwoBuild.Different }?.let { build ->
-                    Text(
-                        stringResource(
-                            R.string.dfr_helper_build_stale,
-                            build.installed ?: 0L,
-                            build.bundled ?: 0L,
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // The helper's two builds used to be a line of their own here, and only when they
+                // disagreed. They are in the panel now, all four answers of them, next to the output that
+                // acted on them - one place for the numbers rather than a sentence here and a reading
+                // there, which is also the difference between a person seeing "nothing is installed to
+                // compare" and having to infer it from a line that is not there.
                 reading?.probe?.let { probe ->
                     Text(
                         stringResource(
@@ -406,7 +397,45 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                log?.let { output ->
+                // The panel holds the flow's evidence rather than only the last command's output. The
+                // helper's two build numbers are the ground the step list stands on - the one judgement here
+                // that is about two files rather than about the phone - and they were written down nowhere
+                // but the app log, so a screen arguing about the step it chose could not be read against the
+                // numbers it chose it from.
+                //
+                // One line per verdict rather than only the disagreement: "the helper is this build",
+                // "nothing is installed to compare" and "the APK in this app could not be read" are
+                // different answers that all leave the step list looking the same, and the numbers are
+                // printed only where the verdict guarantees them - an absent helper has no code on the
+                // phone, and an unreadable APK none in this app.
+                val helperBuild = reading?.build?.let { build ->
+                    when (build.verdict) {
+                        // Both codes are non-null in these two by the comparison itself: it answers Absent
+                        // on a missing installed build and Unreadable on a missing bundled one before it
+                        // compares anything, so a code that is read here is a code that was read there.
+                        StageTwoBuild.Current -> stringResource(
+                            R.string.dfr_log_build_current,
+                            build.installed ?: 0L,
+                            build.bundled ?: 0L,
+                        )
+                        StageTwoBuild.Different -> stringResource(
+                            R.string.dfr_log_build_different,
+                            build.installed ?: 0L,
+                            build.bundled ?: 0L,
+                        )
+                        StageTwoBuild.Absent -> stringResource(R.string.dfr_log_build_absent)
+                        StageTwoBuild.Unreadable -> stringResource(
+                            R.string.dfr_log_build_unreadable,
+                            build.installed ?: 0L,
+                        )
+                    }
+                }
+                // The action's own output after the reading it acted on, in the order they happened, and
+                // the panel is shown when there is either: what a press printed is not the only evidence
+                // this screen has, and waiting for one before saying what the helper is would hide the
+                // reading behind an action nobody has taken yet.
+                val panel = listOfNotNull(helperBuild, log).joinToString("\n")
+                if (panel.isNotEmpty()) {
                     Text(
                         stringResource(R.string.dfr_log),
                         style = MaterialTheme.typography.labelMedium,
@@ -426,7 +455,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ) {
                         Text(
-                            text = output,
+                            text = panel,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .verticalScroll(rememberScrollState())
