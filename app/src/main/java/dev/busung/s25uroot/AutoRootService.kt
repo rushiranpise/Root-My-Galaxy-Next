@@ -260,22 +260,25 @@ class AutoRootService : Service() {
     }
 
     /**
-     * Waits out this path's own boot-settle floor, reporting the countdown.
+     * Waits out the boot-settle floor, reporting the countdown.
      *
-     * It is a separate setting from the manual one because the two are waiting out different amounts.
-     * By the time this service is running, `BOOT_COMPLETED` has already passed, so part of the boot is
-     * spent and the remaining wait is shorter; a person who tunes the automatic floor is deciding how
-     * much unattended risk to take, not how long a manual run pauses. Reading one setting for both
-     * would make the second decision silently rewrite the first.
+     * The floor is the shared one - see [BootSettle.GATE_DEFAULT_SECONDS] - and so is the loop that
+     * waits it out: Reroot at boot waits the same clock from the same `BOOT_COMPLETED`, and two copies
+     * of "how settled is settled enough" is how the two of them come to disagree. The countdown is
+     * this gate's own, though, because the notification it draws on is.
+     *
+     * A withdrawal of the setting is not passed through as `stillWanted`: what this gate does about it
+     * is checked once the wait is over, by the `require` that follows, which is what turns it into the
+     * one account of a boot that got no automatic install rather than into a silence.
      */
     private suspend fun awaitSettledFloor() {
-        val required = AppPreferences.autoRootSettleSeconds(this)
-        while (true) {
-            val left = BootSettle.remainingMillis(required, BootSettle.elapsedMillis())
-            if (left <= 0L) return
-            notifyOngoing(getString(R.string.status_boot_settle, BootSettle.formatRemaining(left)))
-            delay(SETTLE_TICK_MILLIS)
-        }
+        val required = AppPreferences.bootGateSettleSeconds(this)
+        BootSettle.awaitFloor(
+            requiredSeconds = required,
+            onWaiting = { left ->
+                notifyOngoing(getString(R.string.status_boot_settle, BootSettle.formatRemaining(left)))
+            },
+        )
     }
 
     /**
@@ -520,8 +523,8 @@ class AutoRootService : Service() {
                     }
             }
             notifyOngoing(getString(R.string.autoroot_shizuku_waiting, BootSettle.formatRemaining(left)))
-            delay(SETTLE_TICK_MILLIS)
-            spentMillis += SETTLE_TICK_MILLIS
+            delay(BootSettle.TICK_MILLIS)
+            spentMillis += BootSettle.TICK_MILLIS
         }
     }
 
@@ -789,7 +792,6 @@ class AutoRootService : Service() {
 
         /** The most attempts that can be said to be different attempts at the same thing. */
         private const val SHIZUKU_START_ATTEMPTS = 3
-        private const val SETTLE_TICK_MILLIS = 1_000L
         private const val MAX_NOTIFICATION_DETAIL = 120
 
         /**

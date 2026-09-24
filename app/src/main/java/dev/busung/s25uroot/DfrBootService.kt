@@ -44,6 +44,14 @@ import kotlinx.coroutines.withContext
  * time, and a reroot refused because the shell was two seconds behind its own starter would be a feature that
  * never works.
  *
+ * **It waits for the same boot-settle floor Root on boot waits for.** The helper's run is an exploit attempt on
+ * a boot that is still settling, which is the state the floor exists for, and it is the same decision about the
+ * same kind of boot - so it is the same setting, read through [AppPreferences.bootGateSettleSeconds] and waited
+ * out by [BootSettle.awaitFloor]. The wait is on the device's uptime, so it overlaps the payload's own window
+ * over the same boot instead of stacking on top of it, and the decision is asked again once it is over: a
+ * settle is a minute in which a run started by hand can root the phone, and starting the exploit on a phone
+ * that is already rooted is the one thing this gate must never do.
+ *
  * **It waits, it does not start Shizuku itself.** Starting the server is [ShizukuBootService]'s job, decided
  * by the user's own setting and run by the boot receiver; a second starter racing it would be two servers
  * asked for, and the routes that work are the ones that service already knows about.
@@ -113,6 +121,22 @@ class DfrBootService : Service() {
                 DfrInstall.helperStanding(this@DfrBootService, DfrApk.bundled(this@DfrBootService).file)
             }
             var decision = decide(bootToken, helper)
+            if (decision.startsTheHelper()) {
+                // The settle, before anything is launched and after the decision that says there is
+                // something to launch: a boot that is going to be told to sit this one out is not made to
+                // sit through a wait first. A withdrawal during it is the setting being turned off while
+                // the gate waits, which is the one ending that is not a failure and not worth a
+                // notification: nothing was asked for any more.
+                if (awaitSettledFloor() == BootSettleWait.Abandoned) {
+                    AppLog.info(
+                        AppLogTags.BOOT,
+                        "Reroot at boot stood down during the settle: the setting was turned off",
+                    )
+                    stopWithoutResult()
+                    return
+                }
+                decision = decide(bootToken, helper)
+            }
             if (decision == DfrBootDecision.NoShell && awaitShell()) {
                 // Asked again rather than assumed: a wait of two minutes is long enough for the shell to
                 // arrive, for Shizuku to be switched off, and for a run started by hand to root the phone in
@@ -161,6 +185,26 @@ class DfrBootService : Service() {
         // The marker, through the shell that would do the launching: null is "no shell to ask", which is
         // both the reading this cannot make and the means this does not have.
         armed = DfrInstall.probeWithoutRoot()?.armed,
+    )
+
+    /**
+     * Waits out the boot-settle floor - the shared one, on the shared loop.
+     *
+     * See [BootSettle.GATE_DEFAULT_SECONDS] for why both boot gates read one value, and
+     * [DfrBootService]'s own note for why this gate waits at all.
+     *
+     * [BootSettleWait.Abandoned] is passed through to the caller rather than answered here, because what
+     * to do about a withdrawn setting is the gate's decision: for this one it is to stop quietly, since
+     * a boot nobody asked to have rerooted is not a failure to report.
+     */
+    private suspend fun awaitSettledFloor(): BootSettleWait = BootSettle.awaitFloor(
+        requiredSeconds = AppPreferences.bootGateSettleSeconds(this),
+        onWaiting = { left ->
+            notifyOngoing(getString(R.string.status_boot_settle, BootSettle.formatRemaining(left)))
+        },
+        // Checked on every pass for the reason awaitShell checks it: this wait is minutes in which the
+        // setting can be turned off, and waiting for something no longer wanted is only a delay.
+        stillWanted = { AppPreferences.rerootAtBoot(this) },
     )
 
     /**
@@ -455,8 +499,16 @@ class DfrBootService : Service() {
         /** The tick for both waits: the countdown's step and how often the two readings are taken. */
         private const val SHELL_TICK_MILLIS = 2_000L
 
-        /** The wake lock's own ceiling, above the two waits together. */
-        private const val GATE_LIMIT_MILLIS = (SHELL_WAIT_MILLIS + REROOT_WATCH_MILLIS + 30_000L)
+        /**
+         * The wake lock's own ceiling, above everything the gate waits for.
+         *
+         * The settle is in here through [BootSettle.GATE_CEILING_MILLIS], the longest the setting can
+         * ask for, rather than through the value in force at this boot: a budget that followed the
+         * setting would expire on a phone whose owner had asked for a long wait and report it as the
+         * gate giving up.
+         */
+        private val GATE_LIMIT_MILLIS =
+            (BootSettle.GATE_CEILING_MILLIS + SHELL_WAIT_MILLIS + REROOT_WATCH_MILLIS + 30_000L)
     }
 }
 

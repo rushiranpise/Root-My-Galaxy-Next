@@ -56,6 +56,8 @@ object AppPreferences {
     private const val EXPLOIT_OVERRIDE_ATTEMPTS = "exploit_override_attempts"
     private const val EXPLOIT_OVERRIDE_ATTEMPT_TIMEOUT = "exploit_override_attempt_timeout"
     private const val EXPLOIT_OVERRIDE_SLIDE_ROUTE = "exploit_override_slide_route"
+    // Both boot gates' floor. The key predates the second gate and keeps its name on purpose: see
+    // [bootGateSettleSeconds].
     private const val AUTO_ROOT_SETTLE_SECONDS = "auto_root_settle_seconds"
     private const val DFR_REROOT_AT_BOOT = "dfr_reroot_at_boot"
     private const val SHIZUKU_AUTOMATION_TOKEN = "shizuku_automation_token"
@@ -591,17 +593,22 @@ object AppPreferences {
     }
 
     /**
-     * The same floor for the automatic install, stored separately on purpose.
+     * The shared floor for both unattended gates, stored under the name it has always had.
      *
-     * See [BootSettle.AUTO_ROOT_DEFAULT_SECONDS]: an automatic run has already waited out the boot
-     * before it can act, so it needs a shorter floor than a manual one - and someone tuning it must not
-     * be changing the wait a manual run does.
+     * See [BootSettle.GATE_DEFAULT_SECONDS]: Root on boot and Reroot at boot read this one value, so
+     * the two of them cannot come to disagree about how settled a device has to be before either acts
+     * with nobody at the screen - and a person tuning it must not be changing the wait a manual run
+     * does, which is why it is not [bootSettleSeconds].
+     *
+     * The stored key keeps the name it was first written under rather than following the accessors.
+     * A preference key is a fact about phones in the field, not a name in this code: renaming it would
+     * silently reset everyone who has ever chosen a value back to the default.
      */
-    fun autoRootSettleSeconds(context: Context): Int = BootSettle.normalize(
-        prefs(context).getInt(AUTO_ROOT_SETTLE_SECONDS, BootSettle.AUTO_ROOT_DEFAULT_SECONDS),
+    fun bootGateSettleSeconds(context: Context): Int = BootSettle.normalize(
+        prefs(context).getInt(AUTO_ROOT_SETTLE_SECONDS, BootSettle.GATE_DEFAULT_SECONDS),
     )
 
-    fun setAutoRootSettleSeconds(context: Context, seconds: Int) {
+    fun setBootGateSettleSeconds(context: Context, seconds: Int) {
         prefs(context).edit()
             .putInt(AUTO_ROOT_SETTLE_SECONDS, BootSettle.normalize(seconds))
             .apply()

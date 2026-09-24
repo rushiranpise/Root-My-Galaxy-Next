@@ -284,7 +284,7 @@ class MainActivity : ComponentActivity() {
     private var restartAfterRoot by mutableStateOf(false)
     private var shizukuBootMode by mutableStateOf(false)
     private var bootSettleSeconds by mutableStateOf(BootSettle.DEFAULT_SECONDS)
-    private var autoRootSettleSeconds by mutableStateOf(BootSettle.AUTO_ROOT_DEFAULT_SECONDS)
+    private var bootGateSettleSeconds by mutableStateOf(BootSettle.GATE_DEFAULT_SECONDS)
     private var runLimits by mutableStateOf(
         RunLimitsSettings(
             totalSeconds = RunLimits.DEFAULT_TOTAL_SECONDS,
@@ -389,7 +389,7 @@ class MainActivity : ComponentActivity() {
         restartAfterRoot = AppPreferences.restartAfterRoot(this)
         shizukuBootMode = AppPreferences.shizukuBootMode(this)
         bootSettleSeconds = AppPreferences.bootSettleSeconds(this)
-        autoRootSettleSeconds = AppPreferences.autoRootSettleSeconds(this)
+        bootGateSettleSeconds = AppPreferences.bootGateSettleSeconds(this)
         runLimits = AppPreferences.runLimits(this)
         exploitOverride = AppPreferences.exploitOverride(this)
         shizukuToken = AppPreferences.shizukuAutomationToken(this)
@@ -418,7 +418,7 @@ class MainActivity : ComponentActivity() {
                     restartAfterRoot = restartAfterRoot,
                     shizukuBootMode = shizukuBootMode,
                     bootSettleSeconds = bootSettleSeconds,
-                    autoRootSettleSeconds = autoRootSettleSeconds,
+                    bootGateSettleSeconds = bootGateSettleSeconds,
                     runLimits = runLimits,
                     exploitOverride = exploitOverride,
                     shizukuToken = shizukuToken,
@@ -490,9 +490,9 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setBootSettleSeconds(this, seconds)
                         bootSettleSeconds = seconds
                     },
-                    onAutoRootSettleChanged = { seconds ->
-                        AppPreferences.setAutoRootSettleSeconds(this, seconds)
-                        autoRootSettleSeconds = seconds
+                    onBootGateSettleChanged = { seconds ->
+                        AppPreferences.setBootGateSettleSeconds(this, seconds)
+                        bootGateSettleSeconds = seconds
                     },
                     onRunLimitChanged = { limit, seconds ->
                         AppPreferences.setRunLimit(this, limit, seconds)
@@ -680,7 +680,7 @@ private fun RootApp(
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
     bootSettleSeconds: Int,
-    autoRootSettleSeconds: Int,
+    bootGateSettleSeconds: Int,
     runLimits: RunLimitsSettings,
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
@@ -702,7 +702,7 @@ private fun RootApp(
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
-    onAutoRootSettleChanged: (Int) -> Unit,
+    onBootGateSettleChanged: (Int) -> Unit,
     onRunLimitChanged: (RunLimit, Int) -> Unit,
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
@@ -1369,7 +1369,7 @@ private fun RootApp(
                             restartAfterRoot = restartAfterRoot,
                             shizukuBootMode = shizukuBootMode,
                             bootSettleSeconds = bootSettleSeconds,
-                            autoRootSettleSeconds = autoRootSettleSeconds,
+                            bootGateSettleSeconds = bootGateSettleSeconds,
                             runLimits = runLimits,
                             exploitOverride = exploitOverride,
                             shizukuToken = shizukuToken,
@@ -1390,7 +1390,7 @@ private fun RootApp(
                             onRestartAfterRootChanged = onRestartAfterRootChanged,
                             onShizukuBootModeChanged = onShizukuBootModeChanged,
                             onBootSettleChanged = onBootSettleChanged,
-                            onAutoRootSettleChanged = onAutoRootSettleChanged,
+                            onBootGateSettleChanged = onBootGateSettleChanged,
                             onRunLimitChanged = onRunLimitChanged,
                             onExploitOverrideChanged = onExploitOverrideChanged,
                             onShizukuTokenChanged = onShizukuTokenChanged,
@@ -3682,7 +3682,7 @@ private fun SettingsPage(
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
     bootSettleSeconds: Int,
-    autoRootSettleSeconds: Int,
+    bootGateSettleSeconds: Int,
     runLimits: RunLimitsSettings,
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
@@ -3711,7 +3711,7 @@ private fun SettingsPage(
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
-    onAutoRootSettleChanged: (Int) -> Unit,
+    onBootGateSettleChanged: (Int) -> Unit,
     onRunLimitChanged: (RunLimit, Int) -> Unit,
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
@@ -3798,8 +3798,8 @@ private fun SettingsPage(
     var bootSettleMenuTop by remember { mutableStateOf(32.dp) }
     var showBootSettleDialog by remember { mutableStateOf(false) }
     var showRunLimitsDialog by remember { mutableStateOf(false) }
-    var autoRootSettleMenuTop by remember { mutableStateOf(32.dp) }
-    var showAutoRootSettleDialog by remember { mutableStateOf(false) }
+    var bootGateSettleMenuTop by remember { mutableStateOf(32.dp) }
+    var showBootGateSettleDialog by remember { mutableStateOf(false) }
     var showShizukuTokenDialog by remember { mutableStateOf(false) }
     var tokenDraft by remember { mutableStateOf("") }
     var showWirelessAdbDialog by remember { mutableStateOf(false) }
@@ -4143,17 +4143,17 @@ private fun SettingsPage(
         )
     }
 
-    if (showAutoRootSettleDialog) {
+    if (showBootGateSettleDialog) {
         val settled = BootSettle.allowedSeconds
         SideChoiceMenu(
             choices = settled.map { BootSettle.label(it) },
-            selectedIndex = settled.indexOf(autoRootSettleSeconds).coerceAtLeast(0),
-            topOffset = autoRootSettleMenuTop,
+            selectedIndex = settled.indexOf(bootGateSettleSeconds).coerceAtLeast(0),
+            topOffset = bootGateSettleMenuTop,
             onSelected = { index ->
-                showAutoRootSettleDialog = false
-                onAutoRootSettleChanged(settled[index])
+                showBootGateSettleDialog = false
+                onBootGateSettleChanged(settled[index])
             },
-            onDismiss = { showAutoRootSettleDialog = false },
+            onDismiss = { showBootGateSettleDialog = false },
         )
     }
 
@@ -5155,20 +5155,23 @@ private fun SettingsPage(
                         onRerootAtBootChanged(enabled)
                     },
                 )
+                // Below both toggles rather than beside either, because it is one value behind both of
+                // them: Root on boot and Reroot at boot wait the same clock from the same boot, and a row
+                // drawn twice would be the same setting pretending to be two.
                 SettingsCard(
                     modifier = Modifier.onGloballyPositioned { coordinates ->
-                        autoRootSettleMenuTop =
+                        bootGateSettleMenuTop =
                             with(density) { coordinates.positionInWindow().y.toDp() }
                     },
                     icon = Icons.Rounded.HourglassEmpty,
-                    title = stringResource(R.string.settings_autoroot_settle),
-                    description = stringResource(R.string.settings_autoroot_settle_summary),
-                    value = BootSettle.label(autoRootSettleSeconds),
+                    title = stringResource(R.string.settings_boot_gate_settle),
+                    description = stringResource(R.string.settings_boot_gate_settle_summary),
+                    value = BootSettle.label(bootGateSettleSeconds),
                     position = SettingsCardPosition.Bottom,
                     enabled = loadKernelSu,
                     onClick = {
                         clickHaptic(view)
-                        showAutoRootSettleDialog = true
+                        showBootGateSettleDialog = true
                     },
                 )
             }

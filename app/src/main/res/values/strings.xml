@@ -274,8 +274,8 @@
     <string name="shizuku_token_dialog_title">Shizuku start token</string>
     <string name="shizuku_token_dialog_label">Token</string>
     <string name="shizuku_token_dialog_help">Paste the token provided by your Shizuku build.</string>
-    <string name="settings_autoroot_settle">Root on boot Delay</string>
-    <string name="settings_autoroot_settle_summary">How long Root on boot waits after reboot before starting.</string>
+    <string name="settings_boot_gate_settle">Boot automation wait</string>
+    <string name="settings_boot_gate_settle_summary">How long Root on boot and Reroot at boot wait after a reboot before acting. Measured from the boot, so a boot that is already this old waits not at all.</string>
     <string name="settings_boot_settle">Boot settle time</string>
     <string name="settings_boot_settle_summary">How long a new run waits after a reboot before starting.</string>
     <string name="status_boot_settle">Waiting for the device to settle: %1$s</string>
