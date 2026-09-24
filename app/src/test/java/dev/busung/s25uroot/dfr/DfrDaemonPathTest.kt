@@ -109,6 +109,68 @@ class DfrDaemonPathTest {
     }
 
     @Test
+    fun `a source that answers with the running version wins over one that merely exists`() {
+        // Measured on this device: both sources exist, both answer `ksud 3.4.0 (uapi: 4)`, and they are
+        // 5,518,544 and 4,230,992 bytes - two different builds. Choosing by "is it there" is a coin toss
+        // presented as a decision, so the choice is made by asking each source what version it is.
+        val command = DfrInstall.stageDaemonCommand(expectedVersion = "3.4.0")
+        assertTrue("the expected version is not carried into the command: $command", command.contains("want='3.4.0'"))
+        assertTrue("no source is asked for its version", command.contains("-V 2>/dev/null"))
+        assertTrue("the version read comes after the staging", command.indexOf("-V 2>/dev/null") < command.indexOf("cp -f"))
+        assertTrue(
+            "a source is not matched against the running version",
+            command.contains("case \"${'$'}v\" in *\"${'$'}want\"*"),
+        )
+        // The first source that exists is kept, but as the fallback and not as the answer: a device whose
+        // installed daemon is a stale flavour must still be able to stage the one that matches.
+        assertTrue("there is no fallback to the first source that exists", command.contains("alt='"))
+        assertTrue(
+            "the fallback is not used when nothing matched",
+            command.indexOf("src=\"${'$'}alt\"") > command.indexOf("case \"${'$'}v\" in"),
+        )
+    }
+
+    @Test
+    fun `what was staged is reported with its version and whether it is the running one`() {
+        val command = DfrInstall.stageDaemonCommand(expectedVersion = "3.4.0")
+        assertTrue("the staged version is not named", command.contains("${'$'}{got:+ (${'$'}got)}"))
+        assertTrue("a matching daemon is not said to match", command.contains("that is the daemon this device is running"))
+        assertTrue("a mismatched daemon is not warned about", command.contains("a different version"))
+    }
+
+    @Test
+    fun `an unreadable running daemon is never reported as a match`() {
+        // A device whose version could not be read is the case where a false "matches" would be worst:
+        // the run would exec a daemon nothing had compared, and the log would say it had been checked.
+        val unknown = DfrInstall.stageDaemonCommand(expectedVersion = null)
+        assertTrue("an empty expectation still claims a comparison", unknown.contains("cannot be compared"))
+        // Guarded at runtime rather than only in wording: with nothing to match on, the command takes the
+        // "not read" branch, and the comparison branches below it are never reached on the device.
+        val guard = "if [ -z \"${'$'}want\" ]; then echo '[?]"
+        assertTrue("the comparison is not guarded by the empty expectation", unknown.contains(guard))
+        assertTrue(
+            "the guard does not come before the match it is there to prevent",
+            unknown.indexOf(guard) < unknown.indexOf("that is the daemon this device is running"),
+        )
+
+        // With nothing to match on, no source can be picked by version - so the order is the old one and
+        // the report says the question was never answered.
+        val blank = DfrInstall.stageDaemonCommand(expectedVersion = "  ")
+        assertTrue(blank.contains("want=''"))
+    }
+
+    @Test
+    fun `the staging command the app runs asks for the running daemon's version`() {
+        // The rule has to be wired to the reading, or it is a parameter nobody passes: the app's own
+        // staging call is the only caller, and it asks the probe that reads this boot's KernelSU.
+        val source = source("app/src/main/java/dev/busung/s25uroot/dfr/DfrInstall.kt")
+        assertTrue(
+            "stageDaemon does not pass the running version",
+            source.contains("KernelSuVersionProbe.read(context).daemon"),
+        )
+    }
+
+    @Test
     fun `both sources were really read`() {
         // Every assertion above passes on an empty string, so a moved file would turn this whole class
         // green. The paths are resolved rather than assumed for the same reason.

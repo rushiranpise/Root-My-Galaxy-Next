@@ -3,6 +3,7 @@ package dev.busung.s25uroot.dfr
 import android.content.Context
 import android.os.SystemClock
 import dev.busung.s25uroot.KernelSuRuntime
+import dev.busung.s25uroot.KernelSuVersionProbe
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
 import java.io.File
 
@@ -384,16 +385,37 @@ internal object DfrInstall {
      * Written on every call rather than only when absent, which is the other half of the fix: an existing
      * copy may be a previous flavour's, and the helper keeps whatever it finds. Rewriting it is cheap
      * next to the run it enables, and it is what makes a flavour change safe.
+     *
+     * **A size is not a version.** Measured on this device once the staging worked, the two sources are
+     * both `ksud 3.4.0 (uapi: 4)` and still 1.2 MB apart - 5,518,544 bytes for the installed daemon,
+     * 4,230,992 for this app's own pair build - so "both files are there, take the first" would have been
+     * a coin toss between two different builds presented as one decision. [expectedVersion] is what makes
+     * it a decision instead: a source answers `-V` with the version it *is*, and the first one that
+     * agrees with the daemon this device is running wins over a source that merely exists first.
      */
     internal fun stageDaemonCommand(
         sources: List<String> = DAEMON_SOURCES,
         destination: String = STAGED_DAEMON,
+        expectedVersion: String? = null,
     ): String = buildString {
-        append("src=''; ")
+        // Asked with `-V` and then `--version`, the two spellings the daemon has had, and only the first
+        // line of whatever it answers: the version is the first thing it says or it is nothing.
+        fun versionOf(source: String): String =
+            "${'$'}({ '" + source + "' -V 2>/dev/null || '" + source + "' --version 2>/dev/null; } | " +
+                "head -1)"
+
+        append("want='").append(expectedVersion?.trim().orEmpty()).append("'; src=''; got=''; alt=''; altgot=''; ")
         sources.forEach { source ->
-            append("if [ -z \"${'$'}src\" ] && [ -s '").append(source).append("' ]; then src='")
-                .append(source).append("'; fi; ")
+            append("if [ -s '").append(source).append("' ]; then v=").append(versionOf(source)).append("; ")
+            // The first source that exists is remembered, but only as a fallback: a source that answers
+            // with the right version is preferred however late in the list it is.
+            append("if [ -z \"${'$'}alt\" ]; then alt='").append(source)
+                .append("'; altgot=\"${'$'}v\"; fi; ")
+            append("if [ -z \"${'$'}src\" ] && [ -n \"${'$'}want\" ]; then case \"${'$'}v\" in ")
+                .append("*\"${'$'}want\"*) src='").append(source)
+                .append("'; got=\"${'$'}v\";; esac; fi; fi; ")
         }
+        append("if [ -z \"${'$'}src\" ]; then src=\"${'$'}alt\"; got=\"${'$'}altgot\"; fi; ")
         // Named and refused rather than guessed: staging *a* daemon would be worse than staging none,
         // because the exploit would exec it and fail somewhere that looks like the exploit's fault.
         append("if [ -z \"${'$'}src\" ]; then echo '[x] no daemon to stage'").append("; exit 3; fi; ")
@@ -401,12 +423,30 @@ internal object DfrInstall {
         // The identity the module's policy expects: the system, and nothing else.
         append("/system/bin/chown system:system '").append(destination).append("' || exit 5; ")
         append("/system/bin/chmod 700 '").append(destination).append("' || exit 6; ")
-        append("echo \"[+] staged ").append(destination).append(" from ${'$'}src\"")
+        append("echo \"[+] staged ").append(destination).append(" from ${'$'}src${'$'}{got:+ (${'$'}got)}\"; ")
+        // Said out loud rather than left to a size or a hash nobody reads: what was staged, what version
+        // it is, and whether that is the daemon this device is running. A mismatch is reported and the
+        // staging still stands - a device whose daemon cannot be read is not a reason to refuse - but it
+        // is said before the run, and not discovered by the run failing.
+        append("if [ -z \"${'$'}want\" ]; then echo '[?] the running daemon was not read, so the staged one cannot be compared to it'; ")
+            .append("elif case \"${'$'}got\" in *\"${'$'}want\"*) true;; *) false;; esac; then ")
+            .append("echo \"[*] that is the daemon this device is running (${'$'}want)\"; ")
+            .append("else echo \"[!] the daemon this device is running is ${'$'}want: the staged one is a different version\"; fi")
     }
 
-    /** Runs [stageDaemonCommand] as root, or null when no root shell answered. */
+    /**
+     * Runs [stageDaemonCommand] as root, or null when no root shell answered.
+     *
+     * The running daemon's version is read first and passed in, because it is the only reading that can
+     * say whether a candidate is the right build - and it is read from the same daemon the app already
+     * asks after every boot, so this costs a cached lookup rather than a new probe.
+     */
     fun stageDaemon(context: Context): DfrAction? =
-        runAction(stageDaemonCommand())
+        runAction(
+            stageDaemonCommand(
+                expectedVersion = runCatching { KernelSuVersionProbe.read(context).daemon }.getOrNull(),
+            ),
+        )
 
     /**
      * Removes the stage two, which is the only way past an install that landed as an ordinary app:
