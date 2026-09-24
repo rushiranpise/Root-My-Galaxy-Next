@@ -1,6 +1,8 @@
 package dev.busung.s25uroot
 
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -84,10 +86,75 @@ class ActionRowsTest {
     }
 
     @Test
+    fun `an answer is not working unless it says so`() {
+        // The slot has to be off by default, or every dialog that already exists grows a spinner it never
+        // asked for - and "is it working" is a claim only the caller can make.
+        val quiet = AppAction(R.string.action_cancel) {}
+        assertFalse(quiet.progress)
+        assertTrue(quiet.enabled)
+        assertEquals(AppActionRole.Standard, quiet.role)
+    }
+
+    @Test
+    fun `an answer that is working is still one answer in the same row`() {
+        // The spinner is per answer, not per row: the set a screen asks with keeps its shape while one of
+        // its answers is in flight, so the remaining answers do not jump to a new place mid-press.
+        val actions = listOf(
+            AppAction(R.string.action_cancel, progress = false) {},
+            AppAction(R.string.action_cancel, role = AppActionRole.Priority, progress = true) {},
+            AppAction(R.string.action_cancel) {},
+            AppAction(R.string.action_cancel) {},
+        )
+        assertEquals(listOf(2, 2), actionRows(actions).map { it.size })
+        assertEquals(listOf(false, true, false, false), actionRows(actions).flatten().map { it.progress })
+    }
+
+    @Test
+    fun `the shared button draws the spinner only for an answer that is working`() {
+        val source = source("DialogActions.kt")
+        assertTrue(
+            "the spinner is drawn unconditionally, so every answer in the app is busy",
+            source.contains("if (action.progress)"),
+        )
+        assertTrue("no spinner in the shared answer button", source.contains("LoadingIndicator("))
+    }
+
+    @Test
+    fun `the shizuku start prompt asks with the shared set instead of its own button`() {
+        // The special case the slot exists for: this dialog built its own pressable answer, spinner and
+        // all, which is how one screen came to have buttons that did not match the other twenty.
+        val body = bodyOf(source("InstallActivity.kt"), "private fun ShizukuHoldDialog")
+        assertTrue("the prompt does not ask with the shared set", body.contains("AppDialogActions("))
+        assertTrue("the prompt does not mark the answer it is waiting on", body.contains("progress = prompt.starting"))
+        assertFalse("the prompt still hand-builds an answer", body.contains("TextButton"))
+    }
+
+    @Test
     fun `every answer lands in exactly one row`() {
         // The bug this catches is an off-by-one in the slicing, which shows up as a dropped answer - and a
         // dropped answer here is a button that is never drawn, not a layout that looks wrong.
         val answers = (1..11).toList()
         assertEquals(answers, actionRows(answers).flatten())
+    }
+
+    /** One of this package's sources, wherever the test JVM was started from. */
+    private fun source(fileName: String): String =
+        listOf(
+            File("src/main/java/dev/busung/s25uroot/$fileName"),
+            File("app/src/main/java/dev/busung/s25uroot/$fileName"),
+        ).firstOrNull(File::isFile)?.readText()
+            ?: error("$fileName was not found from ${File(".").absolutePath}")
+
+    /**
+     * One declaration's body, up to the next declaration at the same indentation.
+     *
+     * Scoped rather than searched file-wide because the file holds a dozen of these: "does the prompt
+     * still build its own button" has to be asked of this prompt, not of some other screen's.
+     */
+    private fun bodyOf(text: String, declaration: String): String {
+        val start = text.indexOf(declaration)
+        assertTrue("no `$declaration` in the source", start >= 0)
+        val next = text.indexOf("\nprivate fun ", start + declaration.length)
+        return text.substring(start, if (next < 0) text.length else next)
     }
 }

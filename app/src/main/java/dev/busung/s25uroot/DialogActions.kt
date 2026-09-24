@@ -5,10 +5,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +50,12 @@ import androidx.compose.ui.unit.dp
  * **The answers are always the same height and never sized by their own label.** These labels are the flow's
  * own words; a button that grew to fit "Install stage 2" and shrank for "Cancel" would make one set of
  * answers look like two.
+ *
+ * **An answer that is working says so itself.** A press that starts something slow has to answer "is it
+ * doing anything" before the thing it started has anything to say, and the answer belongs in the button
+ * that was pressed rather than beside it - see [AppAction.progress]. It replaced a hand-made button that
+ * carried its own spinner, which meant the one screen with a slow answer was also the one screen whose
+ * buttons did not match the rest of the app's.
  */
 internal enum class AppActionRole {
     /** The answer this screen recommends: the filled one, and only one per set. */
@@ -58,7 +69,7 @@ internal enum class AppActionRole {
 }
 
 /**
- * One answer: what it says, how loud it is, and what it does.
+ * One answer: what it says, how loud it is, whether it is working, and what it does.
  *
  * A label rather than a string, because every one of these is a resource and the caller should not be the
  * place that decides how to resolve it.
@@ -67,6 +78,17 @@ internal class AppAction(
     @StringRes val label: Int,
     val role: AppActionRole = AppActionRole.Standard,
     val enabled: Boolean = true,
+    /**
+     * Whether this answer is working, rather than merely available.
+     *
+     * Deliberately separate from [enabled], because the two are not the same statement and the screens
+     * that need this need them apart: the answer that started a slow attempt is both working and
+     * unpressedable, while the answer *beside* it - "run it without that, then" - is still live and not
+     * working at all. What this adds is the spinner, drawn in the button's own content colour so it reads
+     * on any of the three fills, and it is the caller's vocabulary rather than its own: the label it sits
+     * beside is still the caller's, which is how one action can say "Start" and then "Starting…".
+     */
+    val progress: Boolean = false,
     val onClick: () -> Unit,
 )
 
@@ -150,6 +172,16 @@ internal fun AppActionButton(action: AppAction, modifier: Modifier = Modifier) {
             )
         },
     ) {
+        // Before the label rather than after it, so the words keep the same place whether or not this
+        // answer is working: a spinner that pushed the label across would make the button jump at the
+        // moment it was pressed.
+        if (action.progress) {
+            LoadingIndicator(
+                modifier = Modifier.size(ACTION_PROGRESS_SIZE),
+                color = LocalContentColor.current,
+            )
+            Spacer(Modifier.width(ACTION_PROGRESS_GAP))
+        }
         Text(
             stringResource(action.label),
             style = MaterialTheme.typography.labelMedium,
@@ -172,6 +204,17 @@ private val ACTION_SPACING = 6.dp
  * an answer in a row of three has a third of it, and that padding comes straight out of the words.
  */
 private val ACTION_PADDING = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+
+/**
+ * The spinner an in-flight answer carries.
+ *
+ * Small on purpose: it has to fit beside a label inside [ACTION_HEIGHT] without making the button taller
+ * than the answers next to it, and at this size it still reads as motion in the corner of the eye.
+ */
+private val ACTION_PROGRESS_SIZE = 16.dp
+
+/** The gap between that spinner and the label it belongs to. */
+private val ACTION_PROGRESS_GAP = 8.dp
 
 /** The most answers read across in one row. */
 private const val ACTIONS_PER_ROW = 3

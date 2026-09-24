@@ -1132,40 +1132,44 @@ private fun ShizukuHoldDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = !prompt.starting,
-                onClick = {
-                    clickHaptic(view)
-                    onStartShizuku()
-                },
-            ) {
-                if (prompt.starting) {
-                    LoadingIndicator(modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    stringResource(
-                        if (prompt.starting) R.string.status_shizuku_starting else R.string.settings_shizuku_start,
-                    ),
-                )
-            }
+            // The same set shape every other screen asks with. This dialog is where the set grew its
+            // progress slot: its first answer starts something that can take a minute, and the spinner
+            // saying so used to be hand-built here - which is why this was the one question in the app
+            // whose buttons did not look like the app's.
+            AppDialogActions(
+                listOf(
+                    AppAction(
+                        label = if (prompt.starting) {
+                            R.string.status_shizuku_starting
+                        } else {
+                            R.string.settings_shizuku_start
+                        },
+                        // The recommended answer, because the run was set up to use Shizuku and this is
+                        // the one that keeps it that way.
+                        role = AppActionRole.Priority,
+                        enabled = !prompt.starting,
+                        progress = prompt.starting,
+                    ) {
+                        clickHaptic(view)
+                        onStartShizuku()
+                    },
+                    AppAction(
+                        label = R.string.action_run_without_shizuku,
+                        // Deliberately live while a start is in flight. An attempt can take a minute on a
+                        // device where it has several routes to try, and disabling the other answer for
+                        // that minute is how this question turns into a screen with nothing to press -
+                        // which is what it looked like when the start was the only thing on offer. The
+                        // view model drops a start that lands after this answer was taken, so changing
+                        // your mind mid-attempt cannot start two runs.
+                        enabled = true,
+                    ) {
+                        clickHaptic(view)
+                        onRunWithoutShizuku()
+                    },
+                ),
+            )
         },
-        dismissButton = {
-            // Deliberately live while a start is in flight. An attempt can take a minute on a device
-            // where it has several routes to try, and disabling the other answer for that minute is how
-            // this question turns into a screen with nothing to press - which is what it looked like
-            // when the start was the only thing on offer. The view model drops a start that lands after
-            // this answer was taken, so changing your mind mid-attempt cannot start two runs.
-            TextButton(
-                enabled = true,
-                onClick = {
-                    clickHaptic(view)
-                    onRunWithoutShizuku()
-                },
-            ) {
-                Text(stringResource(R.string.action_run_without_shizuku))
-            }
-        },
+        dismissButton = null,
     )
 }
 
