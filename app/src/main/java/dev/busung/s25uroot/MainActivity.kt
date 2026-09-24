@@ -5484,27 +5484,29 @@ private fun StagedResidueDialog(
                 }
             }
         },
+        // Two answers, in the order they are useful: Copy while the list is in front of you, Close once
+        // it is not. Close is the filled one because it is the answer that ends the screen - Copy is an
+        // affordance on the reading, which is why it is the quiet one here even though it is the first.
         confirmButton = {
-            TextButton(
-                enabled = reading != null && (present.isNotEmpty() || extras.isNotEmpty()),
-                onClick = {
-                    clickHaptic(view)
-                    val lines = present.map { finding ->
-                        val at = finding.reading as ResidueReading.Present
-                        "${finding.staged.name}\t${StagedResidue.sizeLabel(at.sizeBytes)}\t" +
-                            StagedResidue.ageLabelOf(at.modifiedAtMillis)
-                    } + extras.map { entry -> tempEntryLine(context, entry) }
-                    copyLogToClipboard(context, lines.joinToString("\n"))
-                },
-            ) {
-                Text(stringResource(R.string.residue_copy))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(
+                        label = R.string.residue_copy,
+                        enabled = reading != null && (present.isNotEmpty() || extras.isNotEmpty()),
+                    ) {
+                        clickHaptic(view)
+                        val lines = present.map { finding ->
+                            val at = finding.reading as ResidueReading.Present
+                            "${finding.staged.name}\t${StagedResidue.sizeLabel(at.sizeBytes)}\t" +
+                                StagedResidue.ageLabelOf(at.modifiedAtMillis)
+                        } + extras.map { entry -> tempEntryLine(context, entry) }
+                        copyLogToClipboard(context, lines.joinToString("\n"))
+                    },
+                    AppAction(R.string.action_close, AppActionRole.Priority) { onDismiss() },
+                ),
+            )
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_close))
-            }
-        },
+        dismissButton = null,
     )
 
     if (confirmingClear) {
@@ -5516,23 +5518,25 @@ private fun StagedResidueDialog(
             // is wider than this app's own residue - so it is said in the sentence that is agreed to.
             text = { Text(stringResource(R.string.residue_clear_body, extras.size, reading?.deletablePaths?.size ?: 0)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmingClear = false
-                    deleteOutcome = null
-                    deleteAll()
-                }) {
-                    Text(stringResource(R.string.residue_clear_confirm))
-                }
+                // The widest deletion this app performs - it takes files it cannot account for, which
+                // may belong to another install - so it is the error colour and not the recommendation,
+                // however deliberately it was arrived at.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            confirmingClear = false
+                            deleteOutcome = null
+                            deleteAll()
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            confirmingClear = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmingClear = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -5546,22 +5550,21 @@ private fun StagedResidueDialog(
             // names this app cannot account for and the other names paths it can.
             text = { Text(stringResource(pending.body.res, *pending.body.args.toTypedArray())) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingFolderClear = null
-                    clearFolder(pending)
-                }) {
-                    Text(stringResource(R.string.residue_clear_confirm))
-                }
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            pendingFolderClear = null
+                            clearFolder(pending)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            pendingFolderClear = null
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingFolderClear = null
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -5574,22 +5577,25 @@ private fun StagedResidueDialog(
             // directory both hold files from elsewhere.
             text = { Text(stringResource(pending.warning)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingDelete = null
-                    deleteNow(pending)
-                }) {
-                    Text(stringResource(R.string.residue_clear_confirm))
-                }
+                // Destructive rather than dominant: this is the confirmation that exists because the
+                // file may not be this app's - either a copy of the packages.xml the phone boots from,
+                // or another install's daemon - and a deletion that needs a confirmation is not one a
+                // screen should recommend.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            pendingDelete = null
+                            deleteNow(pending)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            pendingDelete = null
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingDelete = null
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 }
