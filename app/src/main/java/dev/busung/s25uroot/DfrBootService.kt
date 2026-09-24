@@ -1,6 +1,5 @@
 package dev.busung.s25uroot
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -63,7 +62,7 @@ class DfrBootService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
+        BootServiceStart.ensureChannel(this, CHANNEL)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -358,7 +357,7 @@ class DfrBootService : Service() {
         ongoing: Boolean,
         offerStartNow: Boolean = false,
     ) = NotificationCompat
-        .Builder(this, CHANNEL_ID)
+        .Builder(this, CHANNEL.id)
         .setSmallIcon(android.R.drawable.stat_sys_warning)
         .setContentTitle(getString(R.string.dfr_boot_title))
         .setContentText(message)
@@ -387,16 +386,6 @@ class DfrBootService : Service() {
         }
         .build()
 
-    private fun createChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.dfr_boot_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply { description = getString(R.string.dfr_boot_channel_description) },
-        )
-    }
-
     @Suppress("DEPRECATION")
     private fun stopForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -408,19 +397,23 @@ class DfrBootService : Service() {
     }
 
     companion object {
-        /** Starts the gate, which decides for itself whether this boot gets a reroot. */
+        /**
+         * Starts the gate, which decides for itself whether this boot gets a reroot.
+         *
+         * A boot broadcast is one of the places Android may refuse the start outright - the background-start
+         * rules, or the app sitting in a restricted bucket - and [BootServiceStart] answers that with a
+         * notification rather than a log line, because a phone that reboots unrooted with nothing in the
+         * shade is what the feature being switched off looks like from the outside.
+         */
         fun start(context: Context) {
-            val intent = Intent(context, DfrBootService::class.java)
-            runCatching { context.startForegroundService(intent) }
-                .onFailure { error ->
-                    // A boot broadcast can be refused the start on a device that has put the app in a
-                    // restricted bucket. Said rather than swallowed: the symptom otherwise is a phone that
-                    // reboots unrooted with nothing anywhere explaining it.
-                    AppLog.warn(
-                        AppLogTags.BOOT,
-                        "The reroot gate could not be started (${error.javaClass.simpleName}: ${error.message})",
-                    )
-                }
+            BootServiceStart.start(
+                context = context,
+                service = DfrBootService::class.java,
+                channel = CHANNEL,
+                notificationId = NOTIFICATION_ID,
+                titleRes = R.string.dfr_boot_not_started_title,
+                textRes = R.string.dfr_boot_not_started,
+            )
         }
 
         /**
@@ -436,7 +429,15 @@ class DfrBootService : Service() {
             context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         }
 
-        private const val CHANNEL_ID = "dfr_boot"
+        /**
+         * The channel the gate reports on, and the one a refused start is reported on: see
+         * [BootServiceStart.ensureChannel] for why the second case can make it itself.
+         */
+        private val CHANNEL = BootServiceStart.Channel(
+            id = "dfr_boot",
+            nameRes = R.string.dfr_boot_channel_name,
+            descriptionRes = R.string.dfr_boot_channel_description,
+        )
 
         /** Its own id, so a reroot result and an install result do not replace each other in the shade. */
         private const val NOTIFICATION_ID = 0x44465242

@@ -1,6 +1,5 @@
 package dev.busung.s25uroot
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -63,7 +62,7 @@ class AutoRootService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
+        BootServiceStart.ensureChannel(this, CHANNEL)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -662,7 +661,7 @@ class AutoRootService : Service() {
         offerSoftReboot: Boolean = false,
         answers: ShizukuRefusalActions? = null,
     ) = NotificationCompat
-        .Builder(this, CHANNEL_ID)
+        .Builder(this, CHANNEL.id)
         .setSmallIcon(android.R.drawable.stat_sys_warning)
         .setContentTitle(
             getString(
@@ -749,17 +748,6 @@ class AutoRootService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    private fun createChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.autoroot_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply { description = getString(R.string.autoroot_channel_description) },
-        )
-    }
-
-    @Suppress("DEPRECATION")
     private fun stopForegroundCompat() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_DETACH)
@@ -772,7 +760,16 @@ class AutoRootService : Service() {
     companion object {
         const val ACTION_CANCEL = "dev.busung.s25uroot.action.CANCEL_AUTO_ROOT"
 
-        private const val CHANNEL_ID = "auto_root"
+        /**
+         * The channel the gate reports on, and the one a refused start is reported on: see
+         * [BootServiceStart.ensureChannel] for why the second case can make it itself.
+         */
+        private val CHANNEL = BootServiceStart.Channel(
+            id = "auto_root",
+            nameRes = R.string.autoroot_channel_name,
+            descriptionRes = R.string.autoroot_channel_description,
+        )
+
         /** Also read by the notification's own action, so the offer can clear the result it acted on. */
         internal const val NOTIFICATION_ID = 0x42554f55
 
@@ -795,13 +792,22 @@ class AutoRootService : Service() {
         private const val SETTLE_TICK_MILLIS = 1_000L
         private const val MAX_NOTIFICATION_DETAIL = 120
 
+        /**
+         * Starts the gate, which decides for itself whether this boot gets an automatic install.
+         *
+         * A boot broadcast is one of the places Android may refuse the start outright, and
+         * [BootServiceStart] answers that with a notification: a phone that reboots with an unrooted kernel and
+         * nothing in the shade is what the setting being switched off looks like from the outside.
+         */
         fun start(context: Context) {
-            val intent = Intent(context, AutoRootService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            BootServiceStart.start(
+                context = context,
+                service = AutoRootService::class.java,
+                channel = CHANNEL,
+                notificationId = NOTIFICATION_ID,
+                titleRes = R.string.autoroot_not_started_title,
+                textRes = R.string.autoroot_not_started,
+            )
         }
 
         fun stop(context: Context) {

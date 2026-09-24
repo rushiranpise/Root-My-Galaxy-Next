@@ -1,12 +1,10 @@
 package dev.busung.s25uroot
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -35,12 +33,11 @@ import kotlinx.coroutines.launch
 class ShizukuBootService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val notificationId = 0x53484b5a
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
-        startForeground(notificationId, buildNotification(getString(R.string.status_shizuku_starting)))
+        BootServiceStart.ensureChannel(this, CHANNEL)
+        startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.status_shizuku_starting)))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -108,11 +105,11 @@ class ShizukuBootService : Service() {
 
     private fun notify(title: String, text: String = "") {
         getSystemService(NotificationManager::class.java)
-            .notify(notificationId, buildNotification(title, text))
+            .notify(NOTIFICATION_ID, buildNotification(title, text))
     }
 
     private fun buildNotification(title: String, text: String = "") =
-        NotificationCompat.Builder(this, CHANNEL_ID)
+        NotificationCompat.Builder(this, CHANNEL.id)
             .setSmallIcon(android.R.drawable.stat_sys_warning)
             .setContentTitle(title)
             .setContentText(text)
@@ -131,35 +128,43 @@ class ShizukuBootService : Service() {
         )
     }
 
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.notification_channel_shizuku),
-                NotificationManager.IMPORTANCE_LOW,
-            )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-    }
-
     private fun stopForegroundCompat() {
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     companion object {
         private const val TAG = "RootMyGalaxyShizuku"
-        private const val CHANNEL_ID = "shizuku_boot"
+        /**
+         * The channel this service reports on, and the one a refused start is reported on: see
+         * [BootServiceStart.ensureChannel] for why the second case can make it itself.
+         */
+        private val CHANNEL = BootServiceStart.Channel(
+            id = "shizuku_boot",
+            nameRes = R.string.notification_channel_shizuku,
+        )
+
+        /** One id, so the outcome of a start replaces the line that announced it. */
+        private const val NOTIFICATION_ID = 0x53484b5a
         private const val SETTLE_DELAY_MILLIS = 20_000L
         private const val RETRY_DELAY_MILLIS = 15_000L
         private const val START_ATTEMPTS = 3
 
+        /**
+         * Starts the service, which brings Shizuku up by whichever route this device has.
+         *
+         * Started from the boot broadcast and from two places that follow one, and refused by Android in the
+         * same conditions either way; [BootServiceStart] turns that refusal into a notification, because a
+         * phone that comes back with no Shizuku and no explanation is what the setting being off looks like.
+         */
         fun start(context: Context) {
-            val intent = Intent(context, ShizukuBootService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            BootServiceStart.start(
+                context = context,
+                service = ShizukuBootService::class.java,
+                channel = CHANNEL,
+                notificationId = NOTIFICATION_ID,
+                titleRes = R.string.shizuku_not_started_title,
+                textRes = R.string.shizuku_not_started,
+            )
         }
     }
 }

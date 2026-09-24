@@ -184,6 +184,8 @@
     <string name="autoroot_prior_install_required">Root on boot requires cached payload.</string>
     <string name="autoroot_failed">Installation failed: %1$s</string>
     <string name="autoroot_failed_at">Installation failed at %1$s: %2$s</string>
+    <string name="autoroot_not_started_title">Root on boot did not start</string>
+    <string name="autoroot_not_started">Android refused to run it in the background after the reboot, so this boot was left as it was. Open the app to install now.</string>
     <string name="autoroot_succeeded">Root Succeeded</string>
     <string name="autoroot_succeeded_without_shell">Root Succeeded. Shizuku was not running, but this payload does not need a shell.</string>
     <string name="autoroot_boot_changed">The kernel changed before installation started</string>
@@ -210,6 +212,8 @@
     <string name="dfr_boot_no_root">The helper ran, but KernelSU is not loaded in this boot. Open the flow to see what it reported.</string>
     <string name="dfr_boot_start_refused">The helper could not be started: %1$s</string>
     <string name="dfr_boot_failed">The reroot failed: %1$s</string>
+    <string name="dfr_boot_not_started_title">Reroot at boot did not start</string>
+    <string name="dfr_boot_not_started">Android refused to run it in the background after the reboot, so this boot is unrooted. Open the app to reroot now.</string>
     <string name="dfr_boot_armed">Not rerooted: the exploit\u2019s hooks are already in this kernel. A hard reboot clears them.</string>
     <string name="dfr_boot_no_helper">Not rerooted: the stage-two helper is not installed. Open the system-uid flow to set it up.</string>
     <string name="dfr_boot_ordinary_helper">Not rerooted: the helper is installed as an ordinary app, so the exploit cannot run where it has to. Open the flow to reinstall it.</string>
@@ -894,6 +898,8 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="settings_battery_summary_allowed">Unrestricted. Runs keep network access while the screen is off.</string>
     <string name="settings_battery_allow">Allow</string>
     <string name="settings_battery_allowed">Allowed</string>
+    <string name="shizuku_not_started_title">Shizuku was not started</string>
+    <string name="shizuku_not_started">Android refused to run it in the background. Open the app to start Shizuku now.</string>
     <string name="shizuku_not_running_title">Shizuku is not running</string>
     <string name="shizuku_not_running_body">Start Shizuku with ADB or root, grant this app permission, then enable this option.</string>
     <string name="action_download_shizuku">Download Shizuku</string>
