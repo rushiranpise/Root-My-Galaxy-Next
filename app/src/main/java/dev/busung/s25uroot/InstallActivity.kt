@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -654,12 +655,15 @@ private fun InstallScreen(
                 title = { Text(stringResource(R.string.retry_armed_title)) },
                 text = { Text(stringResource(R.string.retry_armed_body)) },
                 confirmButton = {
-                    TextButton(onClick = {
-                        clickHaptic(view)
-                        retryNotice = null
-                    }) {
-                        Text(stringResource(R.string.action_close))
-                    }
+                    // One answer, so it is the filled one: see [AppDialogActions].
+                    AppDialogActions(
+                        listOf(
+                            AppAction(R.string.action_close, AppActionRole.Priority) {
+                                clickHaptic(view)
+                                retryNotice = null
+                            },
+                        ),
+                    )
                 },
             )
         }
@@ -754,11 +758,20 @@ internal fun RetryOption(
         ) {
             body()
         }
-        RetryOptionEmphasis.Secondary -> FilledTonalButton(
+        // The shared set's quiet fill, so an answer that is not the recommended one looks the same here
+        // as it does in every other dialog - see [AppDialogActions]. The third tier under this one is
+        // this screen's own: [RetryOptionEmphasis.Quiet] is outlined, a step quieter than the set's floor,
+        // because these three answers are the one place in the app where a third level says something a
+        // second one cannot.
+        RetryOptionEmphasis.Secondary -> Button(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             enabled = enabled,
             contentPadding = padding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
         ) {
             body()
         }
