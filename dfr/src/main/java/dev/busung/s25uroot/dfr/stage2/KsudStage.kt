@@ -159,4 +159,17 @@ internal object KsudStage {
 
     /** Whether a daemon is already at [DEST]. */
     fun staged(): Boolean = File(DEST).isFile
+
+    /**
+     * Which of the three managers this phone has, for the screen that reports it.
+     *
+     * The same list the refusal above names, read for a different reason: a run whose last step fails
+     * is most often a daemon built for a different KernelSU than the module in the kernel, and the
+     * manager that is installed is the one thing on the device that says which flavour this phone is
+     * meant to run. Exposed rather than repeated so the two readings cannot disagree about which
+     * packages count as a manager.
+     */
+    fun installedManagers(context: Context): List<String> = MANAGER_PACKAGES.filter { packageName ->
+        runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.isSuccess
+    }
 }

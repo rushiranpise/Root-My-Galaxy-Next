@@ -15,6 +15,10 @@
 
   The icon is named here the same way the app names it, and both modules read the one copy of it under
   `launcher-icon/` at the repository root. Two APKs sitting in one launcher should not need two icons.
+
+  The theme is the helper's own file rather than a platform style, and the one thing it adds is that the
+  screen follows the phone's light/dark setting - which is what lets its colours be resolved from the theme
+  at runtime instead of written down a second time beside the app's.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:sharedUserId="android.uid.system">
@@ -25,7 +29,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:process="system"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:theme="@style/Theme.RmgHelper">
 
         <activity
             android:name=".Stage2Activity"

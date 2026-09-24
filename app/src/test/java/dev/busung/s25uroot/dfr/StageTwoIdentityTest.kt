@@ -68,6 +68,69 @@ class StageTwoIdentityTest {
     }
 
     @Test
+    fun `the app's own id is the id the helper names back`() {
+        // The helper's boot row offers the way to the setting that decides all of this, and the setting
+        // is the app's - so the one name the two APKs share in that direction is this one.
+        assertEquals(
+            "the helper would open an application id the app is not built under, which is a button " +
+                "that opens nothing",
+            applicationIdIn(appBuildFile()),
+            mainPackageIn(stageTwoActivity()),
+        )
+    }
+
+    @Test
+    fun `the app and the helper agree about the extras that start a run`() {
+        assertEquals(
+            "the app sets an extra the helper does not read, so a boot-time reroot would open the " +
+                "screen and wait for a press nobody is there to make",
+            DfrInstall.STAGE_TWO_AUTORUN_EXTRA,
+            constantIn(stageTwoActivity(), "EXTRA_AUTORUN"),
+        )
+        assertEquals(
+            "the app reports its reroot-at-boot setting under an extra the helper does not read, so " +
+                "the helper's boot row would always answer that the app did not say",
+            DfrInstall.STAGE_TWO_REROOT_EXTRA,
+            constantIn(stageTwoActivity(), "EXTRA_REROOT_AT_BOOT"),
+        )
+        // Declared *and* read: an extra that is only named is one this test would pass on while the
+        // helper ignored it, which is the failure the two assertions above exist to catch.
+        assertTrue(
+            "the helper declares the auto-run extra but never asks the intent for it",
+            stageTwoActivity().contains("getBooleanExtra(EXTRA_AUTORUN"),
+        )
+    }
+
+    @Test
+    fun `the app asks for the run on the same command it already used to open the screen`() {
+        // The two calls are one command with an extra, which is what makes the boot path the flow that
+        // already works rather than a second way into the helper: no new component, no new permission.
+        val plain = DfrInstall.launchCommand()
+        val autorun = DfrInstall.launchCommand(autorun = true, rerootAtBoot = true)
+        assertTrue("the plain launch no longer starts the helper", plain.startsWith("/system/bin/am start -n '"))
+        assertEquals("opening the helper by hand now asks for a run", plain, DfrInstall.launchCommand(rerootAtBoot = null))
+        assertTrue("the auto-run launch does not carry the extra", autorun.contains("--ez rmg.autorun true"))
+        assertTrue("the boot setting is not carried", autorun.contains("--ez rmg.rerootAtBoot true"))
+    }
+
+    @Test
+    fun `the helper's screen follows the phone's own theme`() {
+        // The palette on that screen is resolved from the theme it is drawn in, so a theme that stops
+        // following the phone's dark setting is a screen that says one thing to the phone and another to
+        // everybody looking at it - and nothing else in this project would notice.
+        assertEquals(
+            "the helper's manifest names a theme that is not the helper's own",
+            "@style/Theme.RmgHelper",
+            themeIn(helperManifest()),
+        )
+        assertTrue(
+            "the helper's theme no longer switches with the phone's light/dark setting, so its whole " +
+                "palette is resolved against the wrong window",
+            helperTheme().contains("@android:style/Theme.DeviceDefault.DayNight"),
+        )
+    }
+
+    @Test
     fun `the helper draws the same icon as the app`() {
         // The two APKs are one product and a launcher shows them together, so the icon is one set of
         // files. A manifest naming an icon the module cannot resolve is a build failure rather than a
@@ -101,6 +164,9 @@ class StageTwoIdentityTest {
         assertTrue(stageTwoSource().contains("object KsudStage"))
         assertTrue(appManifest().contains("android:icon"))
         assertTrue(appBuildFile().contains("res.srcDir"))
+        assertTrue(appBuildFile().contains("applicationId"))
+        assertTrue(stageTwoActivity().contains("class Stage2Activity"))
+        assertTrue(helperTheme().contains("Theme.RmgHelper"))
     }
 
     private fun helperBuildFile(): String = source("dfr/build.gradle.kts")
@@ -116,6 +182,11 @@ class StageTwoIdentityTest {
     private fun stageTwoSource(): String =
         source("dfr/src/main/java/dev/busung/s25uroot/dfr/stage2/KsudStage.kt")
 
+    private fun stageTwoActivity(): String =
+        source("dfr/src/main/java/dev/busung/s25uroot/dfr/stage2/Stage2Activity.kt")
+
+    private fun helperTheme(): String = source("dfr/src/main/res/values/themes.xml")
+
     private fun applicationIdIn(text: String): String =
         Regex("""applicationId = "([^"]+)"""").find(text)?.groupValues?.get(1)
             ?: error("no applicationId in the helper's build file")
@@ -128,6 +199,25 @@ class StageTwoIdentityTest {
     private fun iconIn(text: String): String =
         Regex("""android:icon="([^"]+)"""").find(text)?.groupValues?.get(1)
             ?: error("no android:icon in the manifest")
+
+    /** The theme a manifest names for the whole application. */
+    private fun themeIn(text: String): String =
+        Regex("""android:theme="([^"]+)"""").find(text)?.groupValues?.get(1)
+            ?: error("no android:theme in the manifest")
+
+    /** The application id the helper names back, read from its screen's own constants. */
+    private fun mainPackageIn(text: String): String = constantIn(text, "MAIN_PACKAGE")
+
+    /**
+     * One `const val NAME = "value"` out of a source file.
+     *
+     * Read as a constant rather than as the first quoted string in the file, because these values are
+     * also spelled in the prose around them: a search that took the first match would pass on a constant
+     * that had been emptied while its name stayed in a comment.
+     */
+    private fun constantIn(text: String, name: String): String =
+        Regex("""const val $name = "([^"]+)"""").find(text)?.groupValues?.get(1)
+            ?: error("no `const val $name` in the source")
 
     /** The resource directory a build file adds from the repository root, or an error naming the file. */
     private fun sharedIconDirectoryIn(text: String): String =

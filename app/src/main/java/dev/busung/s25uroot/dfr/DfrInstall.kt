@@ -231,6 +231,26 @@ internal object DfrInstall {
     const val STAGE_TWO_PACKAGE = "dev.rushiranpise.rmgnext.helper"
     const val STAGE_TWO_ACTIVITY = "dev.busung.s25uroot.dfr.stage2.Stage2Activity"
 
+    /**
+     * How this app asks the helper for a run without anybody pressing anything.
+     *
+     * The helper's own screen waits for its own button, which is the right thing for a screen somebody
+     * opened - and the wrong thing for a boot, where the whole point is that nobody is looking yet. So
+     * the run is requested as an extra on the same `am start` the app already performs, and the helper
+     * reads it there. A boolean extra rather than an action or a second component, because the two calls
+     * differ in one thing only: whether the run is wanted before anyone is watching.
+     */
+    const val STAGE_TWO_AUTORUN_EXTRA = "rmg.autorun"
+
+    /**
+     * What this app's own reroot-at-boot setting is, so the helper's boot row can say it.
+     *
+     * The setting is this app's - it is the half holding the boot receipt and the once-per-boot rule - so
+     * the helper is told rather than asked, and told *only* when there is something to say: an absent
+     * extra is how that screen says "the app did not start me", which is a different answer from "off".
+     */
+    const val STAGE_TWO_REROOT_EXTRA = "rmg.rerootAtBoot"
+
     /** The compiled-in marker the exploit's module creates, and the kernel clears it on a hard reboot. */
     const val ARMED_MARKER = "/dev/df"
 
@@ -478,11 +498,24 @@ internal object DfrInstall {
     internal fun uninstallCommand(packageName: String = STAGE_TWO_PACKAGE): String =
         "/system/bin/pm uninstall --user 0 '" + packageName + "'"
 
-    /** Starts the stage two's own screen, where the run button is. */
+    /**
+     * Starts the stage two's own screen, where the run button is - or, with [autorun], starts the run.
+     *
+     * [rerootAtBoot] is passed only when this app has a value to give, so that the helper can tell "the
+     * app says off" from "the app did not say", which is the same distinction the extra itself makes.
+     */
     internal fun launchCommand(
         packageName: String = STAGE_TWO_PACKAGE,
         activity: String = STAGE_TWO_ACTIVITY,
-    ): String = "/system/bin/am start -n '" + packageName + "/" + activity + "'"
+        autorun: Boolean = false,
+        rerootAtBoot: Boolean? = null,
+    ): String = buildString {
+        append("/system/bin/am start -n '").append(packageName).append("/").append(activity).append('\'')
+        if (autorun) append(" --ez ").append(STAGE_TWO_AUTORUN_EXTRA).append(" true")
+        if (rerootAtBoot != null) {
+            append(" --ez ").append(STAGE_TWO_REROOT_EXTRA).append(' ').append(rerootAtBoot)
+        }
+    }
 
     /**
      * How long this boot has been up.
