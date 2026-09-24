@@ -81,6 +81,16 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
     /** A zero-byte or timestamp-only file a staged script coordinates through. */
     Marker(R.string.residue_role_marker),
 
+    /**
+     * A staged script's own account of what it did, written for the app to read and left behind if the
+     * app never got to it.
+     *
+     * Its own role rather than a log: a log is a script talking to whoever reads it later, and this is
+     * the one file in this directory the app itself is waiting for - the difference between "the wipe
+     * ran and left these behind" and a wipe nobody can ask about.
+     */
+    Report(R.string.residue_role_report),
+
     /** A socket the staged daemon leaves open. */
     Socket(R.string.residue_role_socket),
 }
@@ -373,6 +383,7 @@ internal object StagedResidue {
         StagedPath("/data/local/tmp/rmgnext-reboot.sh", ResidueRole.Script),
         StagedPath("/data/local/tmp/rmgnext-reboot.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/.rmgnext-reboot-accepted", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/.rmgnext-reboot-wipe", ResidueRole.Report),
         StagedPath("/data/local/tmp/rmgnext-reload-modules.sh", ResidueRole.Script),
         StagedPath("/data/local/tmp/rmgnext-reload-modules.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/rmgnext-reload-modules-ksud.log", ResidueRole.Log),

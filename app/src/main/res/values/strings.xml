@@ -108,6 +108,7 @@
     <string name="residue_role_log">script log</string>
     <string name="residue_role_marker">marker</string>
     <string name="residue_role_socket">socket</string>
+    <string name="residue_role_report">the script\'s report</string>
     <string name="residue_log_clean_listed">Staging: %2$s was listed and holds none of the %1$d paths this app writes, and nothing else either</string>
     <string name="residue_log_clean_by_name">Staging: no shell answered, so %2$s could only be checked by name: none of the %1$d paths this app writes is on the device</string>
     <string name="residue_log_present">Staging: %1$d file(s), %2$s left in /data/local/tmp: %3$s</string>
@@ -707,7 +708,7 @@
     <string name="settings_recovery">Recovery Management</string>
     <string name="recovery_confirm_restart_zygote">Restart the Android runtime?</string>
     <string name="recovery_confirm_soft_reboot">Let KernelSU restart userspace?</string>
-    <string name="recovery_confirm_reboot_unroot">Turn off Root on boot and restart the phone?</string>
+    <string name="recovery_confirm_reboot_unroot">Turn off Root on boot, delete everything in /data/adb (KernelSU\'s modules, superuser grants and daemon) and in /data/local/tmp, then restart the phone?</string>
     <string name="recovery_confirm_reload_modules">Run KernelSU\'s module setup again?</string>
     <string name="recovery_action_reload_modules">Reload modules</string>
     <string name="recovery_reload_modules">Reload modules</string>
@@ -721,7 +722,7 @@
     <string name="recovery_soft_reboot">Soft reboot</string>
     <string name="recovery_soft_reboot_summary">This helps KSU modules to load properly.</string>
     <string name="recovery_reboot_unroot">Reboot and unroot</string>
-    <string name="recovery_reboot_unroot_summary">Turn off Root on boot, then restart.</string>
+    <string name="recovery_reboot_unroot_summary">Turn off Root on boot, wipe /data/adb and /data/local/tmp, then restart.</string>
     <string name="recovery_root_required">KernelSU is not loaded in this boot, so root is not available for this action. Load KernelSU first, or run the installation again.</string>
     <string name="reboot_sheet_title">Restart the phone</string>
     <!-- The launcher's short label for the restart shortcut: what fits beside an icon, where the sheet's own
@@ -752,6 +753,9 @@ Hold Power and Volume Down together for 7 seconds to restart it from there.</str
     <string name="recovery_shizuku_needs_root">Shizuku is running, but this action requires root. A Shizuku shell is not root. Load KernelSU first, or run the installation again.</string>
     <string name="recovery_scheduled">Scheduled. The Android runtime will restart shortly.</string>
     <string name="recovery_reboot_scheduled">Scheduled. The phone will restart without root.</string>
+    <string name="recovery_wipe_complete">Scheduled. Root on boot is off, %1$d entries in /data/adb and %2$d in /data/local/tmp were removed, and the phone will restart without root.</string>
+    <string name="recovery_wipe_incomplete">Scheduled. Root on boot is off, %1$d of %2$d entries in /data/adb and %3$d of %4$d in /data/local/tmp were removed, and the phone will restart without root. Still there (in use, immutable, or out of reach of a shell that is not root): %5$s.</string>
+    <string name="recovery_wipe_more">and %1$d more</string>
     <string name="recovery_needs_kernel_su">Needs KernelSU</string>
     <string name="framework_restart_title">Framework restart</string>
     <string name="framework_restart_came_back">The Android runtime restarted and came back after about %1$d s with a new framework (Zygote %2$s, system_server %3$s).</string>

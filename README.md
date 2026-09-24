@@ -137,7 +137,7 @@ starts open, so the page a fresh install shows is the whole page.
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start token, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
 | Root Management | KernelSU flavour (a readout of the payload), install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
-| Recovery Management | reload modules, restart Zygote, KernelSU soft reboot, reboot and unroot — each confirms first |
+| Recovery Management | reload modules, restart Zygote, KernelSU soft reboot, reboot and unroot (which also empties /data/adb and /data/local/tmp) — each confirms first |
 | System Management | the battery-optimisation exemption a run with the screen off depends on, and what the app has left in `/data/local/tmp` |
 
 The two boot-time settings are filed under their own subsystem rather than together: *auto start Shizuku
@@ -1035,7 +1035,18 @@ name, which is the point.
   comes from KernelSU rather than from us.
 - **Reboot and unroot** clears *root on boot* first and then reboots, because a reboot that happened
   first would come back rooted; if the request is refused, the setting is put back and the screen
-  follows the stored value rather than the value it hoped for.
+  follows the stored value rather than the value it hoped for. The reboot is only half of it: KernelSU
+  lives in the running kernel and its *modules*, *superuser grants* and *daemon* live in `/data/adb`,
+  and every root solution on the phone writes into the shared `/data/local/tmp`, so both directories
+  are **emptied** — contents only, since KernelSU and init created them with modes the platform relies
+  on — in the same action, while there is still a root shell to do it with. That is the last chance:
+  after the restart nothing here can be deleted any more. The wipe runs first, then the account of it
+  is published and read, and only then does the child restart, so an accepted outcome is never a
+  promise about work that has not happened. Entries that survive — a file in use, an immutable
+  attribute, or anything out of reach of a shell that is not root — are **named in the report** rather
+  than treated as a failure: a restart with one busy file left behind is still the unroot that was
+  asked for. The one thing the wipe will not do is delete *through* a mount: a leftover bind mount from
+  a run is detached lazily first, and if it is still mounted it is reported instead of removed.
 
 Three of them need a root shell, and there are two ways to get one: through Shizuku when it is running
 and has granted this app, and otherwise by asking KernelSU's own `su` directly, which needs nothing else

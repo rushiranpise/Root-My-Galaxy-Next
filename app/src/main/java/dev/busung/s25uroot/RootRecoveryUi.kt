@@ -1,5 +1,6 @@
 package dev.busung.s25uroot
 
+import android.content.Context
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -77,9 +78,7 @@ internal fun RootRecoverySection(
     fun report(tool: RecoveryTool, outcome: RecoveryOutcome) {
         message = RecoveryMessage(
             title = context.getString(tool.titleRes()),
-            // What was accepted differs between the actions: two of them restart the Android runtime
-            // and one restarts the phone, so the accepted message is the action's own.
-            detail = if (outcome.accepted) context.getString(tool.acceptedRes()) else outcome.detail,
+            detail = recoveryOutcomeMessage(context, tool, outcome),
             failure = !outcome.accepted,
             readOnlyWall = outcome.readOnlyWall,
         )
@@ -252,11 +251,7 @@ internal fun RecoveryActionButton(
                         }
                         message = RecoveryMessage(
                             title = context.getString(tool.titleRes()),
-                            detail = if (outcome.accepted) {
-                                context.getString(tool.acceptedRes())
-                            } else {
-                                outcome.detail
-                            },
+                            detail = recoveryOutcomeMessage(context, tool, outcome),
                             failure = !outcome.accepted,
                             readOnlyWall = outcome.readOnlyWall,
                         )
@@ -308,6 +303,79 @@ internal fun RecoveryActionButton(
         )
     }
 }
+
+/**
+ * What to say about an outcome, in one place for the two screens that report one.
+ *
+ * A refusal is the child's words already explained, and an acceptance is the action's own sentence -
+ * except for the one action that brings an account of what it did with it. A reboot-and-unroot leaves
+ * the wipe report in the acknowledgement's detail, so the accepted message is built from *that* rather
+ * than from a fixed sentence: "the phone is restarting" is the least interesting half of what happened,
+ * and what the user asked to be told is what was actually removed.
+ */
+internal fun recoveryOutcomeMessage(
+    context: Context,
+    tool: RecoveryTool,
+    outcome: RecoveryOutcome,
+): String = wipeReportFor(outcome, tool)?.let { report -> wipeOutcomeMessage(context, report) }
+    ?: if (outcome.accepted) context.getString(tool.acceptedRes()) else outcome.detail
+
+/**
+ * The wipe report an outcome carries, or null when there is none to read.
+ *
+ * The decision, split from the sentence it produces so it can be tested without a device: which action
+ * reads a report out of its acceptance, and when a detail simply is not one. A refusal never carries a
+ * report - nothing was wiped to report on - and no other action publishes one, so a detail that happens
+ * to parse is only ever read out for the action that owns it.
+ */
+internal fun wipeReportFor(outcome: RecoveryOutcome, tool: RecoveryTool): WipeReport? =
+    if (outcome.accepted && tool == RecoveryTool.RebootAndUnroot) {
+        parseWipeReport(outcome.detail)
+    } else {
+        null
+    }
+
+/**
+ * The wipe's account as a sentence: what went, and what is still there.
+ *
+ * The leftovers are named rather than counted because a name is what makes them actionable - someone can
+ * look at the file - but only a few are: on a shell that is not root every single entry is left behind,
+ * and a dialog that prints a module store is a dialog nobody reads to the end of.
+ */
+internal fun wipeOutcomeMessage(context: Context, report: WipeReport, named: Int = 3): String {
+    val adb = report.forDirectory(WIPE_DIRECTORIES[0])
+    val tmp = report.forDirectory(WIPE_DIRECTORIES[1])
+    if (report.complete) {
+        return context.getString(
+            R.string.recovery_wipe_complete,
+            adb?.removed ?: 0,
+            tmp?.removed ?: 0,
+        )
+    }
+    val split = splitLeftovers(report.leftovers, named)
+    val names = if (split.more > 0) {
+        split.named.joinToString(", ") + ", " + context.getString(R.string.recovery_wipe_more, split.more)
+    } else {
+        split.named.joinToString(", ")
+    }
+    return context.getString(
+        R.string.recovery_wipe_incomplete,
+        adb?.removed ?: 0,
+        adb?.total ?: 0,
+        tmp?.removed ?: 0,
+        tmp?.total ?: 0,
+        names,
+    )
+}
+
+/** Which leftovers a sentence can hold, and how many are left to a count. */
+internal data class LeftoverNames(val named: List<String>, val more: Int)
+
+/** The first [limit] leftovers by name, and how many more there were. */
+internal fun splitLeftovers(leftovers: List<String>, limit: Int): LeftoverNames = LeftoverNames(
+    named = leftovers.take(limit),
+    more = (leftovers.size - limit).coerceAtLeast(0),
+)
 
 private fun RecoveryTool.icon(): ImageVector = when (this) {
     RecoveryTool.ReloadModules -> Icons.Rounded.Refresh

@@ -210,10 +210,39 @@ internal object RootRecovery {
     internal val reloadModulesAcceptPollAttempts: Int
         get() = acceptPollAttemptsFor(reloadModulesChildDeadlineSeconds)
 
-    /** A detached child's own words, read back from the acknowledgement. */
+    /**
+     * The window the reboot is launched with, and the one child whose cost cannot be derived.
+     *
+     * Every other action waits on a bounded loop of its own, so its window is a function of that loop.
+     * This one waits on nothing: it deletes whatever two directories happen to hold, which on a phone
+     * with a full module store is seconds of I/O and on an empty one is none. So the app is given two
+     * minutes instead - and the failure this buys off is the worst one this action has. The child
+     * publishes its acknowledgement *after* the wipe and waits for the app to read it before it
+     * restarts, so an app that had already given up on an accepted-looking window would leave a phone
+     * that had been emptied and not restarted, with the user told it was on its way.
+     */
+    internal const val REBOOT_WIPE_ACCEPT_POLL_ATTEMPTS = 1200
+
+    /**
+     * A detached child's own words, read back from the acknowledgement.
+     *
+     * The marker is the *first* line and not merely somewhere in the output, which is also what the
+     * launcher requires before it exits zero: a shell prints the acknowledgement file whole, and the two
+     * have to agree about where in it the answer starts.
+     *
+     * Anything after the marker is the child's own account of what it did - one action leaves its
+     * account of the wipe there - and it becomes this outcome's detail, because the accepted line is the
+     * only channel the protocol has. An accepted outcome with an empty detail keeps its own sentence from
+     * the screen, which is what every action other than the wipe does.
+     */
     internal fun parseHandoff(output: String): RecoveryOutcome {
         val lines = output.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
-        if (lines.any { it == ACCEPTED_MARKER }) return RecoveryOutcome(accepted = true, detail = "")
+        if (lines.firstOrNull() == ACCEPTED_MARKER) {
+            return RecoveryOutcome(
+                accepted = true,
+                detail = lines.drop(1).joinToString("\n"),
+            )
+        }
         val childError = lines.firstOrNull { it.startsWith("error:") }?.removePrefix("error:")
         return RecoveryOutcome(
             accepted = false,
@@ -393,10 +422,19 @@ internal object RootRecovery {
     }
 
     /**
-     * Restarts the phone with root switched off, which is what removes root: KernelSU is loaded into
-     * the running kernel, so nothing about it survives a reboot by itself - what brings it back is
-     * this app's own root-on-boot setting. The setting is cleared *before* the reboot is requested,
-     * because a reboot that happened first would come back rooted.
+     * Restarts the phone with root switched off and everything that says it was rooted removed.
+     *
+     * KernelSU is loaded into the running kernel, so nothing about it survives a reboot by itself - what
+     * brings it back is this app's own root-on-boot setting, which is cleared *before* the reboot is
+     * requested because a reboot that happened first would come back rooted. That alone is an unroot, and
+     * it leaves the *evidence*: KernelSU's own directory, whose module store, superuser grants and daemon
+     * all live in `/data/adb`, and the shared temp directory every root solution and every tool on the
+     * phone writes into. Those go with it, in the same action, while there is still a root shell to
+     * remove them with - which is the last chance: after the restart nothing here can be deleted any more.
+     *
+     * Both directories are emptied, not removed: they are created by KernelSU and by init with modes the
+     * platform relies on. What could not be removed is reported rather than treated as a failure - a
+     * restart with one busy file left behind is still the unroot that was asked for.
      */
     suspend fun rebootAndUnroot(
         shell: (String) -> ShizukuController.ShellResult,
@@ -410,8 +448,11 @@ internal object RootRecovery {
         script = rebootScript(
             bootToken = bootToken,
             acceptedPath = "/data/local/tmp/.rmgnext-reboot-accepted",
+            summaryPath = "/data/local/tmp/.rmgnext-reboot-wipe",
             requiresRoot = requiresRoot,
         ),
+        acceptPollAttempts = REBOOT_WIPE_ACCEPT_POLL_ATTEMPTS,
+        summaryPath = "/data/local/tmp/.rmgnext-reboot-wipe",
     )
 
     private suspend fun runDetached(
@@ -421,6 +462,7 @@ internal object RootRecovery {
         acceptedPath: String,
         script: String,
         acceptPollAttempts: Int = ACCEPT_POLL_ATTEMPTS,
+        summaryPath: String? = null,
     ): RecoveryOutcome {
         val command = detachedLaunchCommand(
             script = script,
@@ -428,6 +470,7 @@ internal object RootRecovery {
             logPath = logPath,
             acceptedPath = acceptedPath,
             acceptPollAttempts = acceptPollAttempts,
+            summaryPath = summaryPath,
         )
         val launch = runCatching { shell(command) }.getOrElse { error ->
             return RecoveryOutcome(
@@ -457,10 +500,19 @@ internal object RootRecovery {
         logPath: String,
         acceptedPath: String,
         acceptPollAttempts: Int = ACCEPT_POLL_ATTEMPTS,
+        /**
+         * A second file an action may leave beside its acknowledgement, printed to the app once the
+         * acknowledgement has been read.
+         *
+         * Fixed-prefix rather than free-form: `cat`-ing it then removing it is the whole protocol, and
+         * the app turns what it contains into words. Null for every action that has nothing to add.
+         */
+        summaryPath: String? = null,
     ): String = buildString {
         append("set -eu\n")
         append("script=${shellQuote(scriptPath)}\n")
         append("accepted=${shellQuote(acceptedPath)}\n")
+        append("summary=${shellQuote(summaryPath ?: "")}\n")
         append("tmp=\"\$script.tmp.\$\$\"\n")
         append("cat > \"\$tmp\" <<'RMG_RECOVERY_EOF'\n")
         append(script)
@@ -478,8 +530,15 @@ internal object RootRecovery {
         append("    ack=\"\$(cat \"\$accepted\" 2>/dev/null || true)\"\n")
         append("    rm -f -- \"\$accepted\"\n")
         append("    printf '%s\\n' \"\$ack\"\n")
-        append("    [ \"\$ack\" = '$ACCEPTED_MARKER' ] && exit 0\n")
-        append("    exit 78\n")
+        append("    [ \"\$ack\" = '$ACCEPTED_MARKER' ] || exit 78\n")
+        // Read after the acknowledgement, because that is the order the child writes them in: what it
+        // reports is what it has already done. Removed as it is read, so nothing is left for the next
+        // launch to mistake for this one's.
+        append("    if [ -n \"\$summary\" ] && [ -s \"\$summary\" ]; then\n")
+        append("      cat \"\$summary\"\n")
+        append("      rm -f -- \"\$summary\"\n")
+        append("    fi\n")
+        append("    exit 0\n")
         append("  fi\n")
         append("  i=\$((i + 1))\n")
         append("  sleep $ACCEPT_POLL_INTERVAL_SEC\n")
@@ -848,6 +907,7 @@ internal object RootRecovery {
     internal fun rebootScript(
         bootToken: String,
         acceptedPath: String,
+        summaryPath: String,
         requiresRoot: Boolean = true,
     ): String {
         val privilegeCheck = if (requiresRoot) {
@@ -860,10 +920,12 @@ internal object RootRecovery {
         } else {
             "/system/bin/svc power reboot 2>/dev/null || /system/bin/reboot"
         }
+        val lastMile = rebootLastMile(reboot)
         return """
         #!/system/bin/sh
         EXPECTED_BOOT=${shellQuote(bootToken)}
         ACCEPTED=${shellQuote(acceptedPath)}
+        SUMMARY=${shellQuote(summaryPath)}
         ACCEPTED_VALUE='$ACCEPTED_MARKER'
         current_boot() { cat /proc/sys/kernel/random/boot_id 2>/dev/null; }
         publish_handoff() {
@@ -881,17 +943,102 @@ internal object RootRecovery {
         [ "${'$'}(current_boot)" = "${'$'}EXPECTED_BOOT" ] || reject_handoff 'boot-changed'
         [ -x /system/bin/reboot ] || reject_handoff 'reboot-command-missing'
 
+        # `sync` first, so what the app persisted before the reboot is on disk when it happens - and the
+        # wipe below makes that matter more, not less: the removal itself has to have reached the disk it
+        # is removing things from.
         sync
+        """.trimIndent() + "\n" + "\nRMG_LAST_MILE='" + lastMile + "'\n\neval \"${'$'}RMG_LAST_MILE\"\n"
+    }
+
+    /**
+     * Everything after the point of no return: the wipe, the account of it, and the restart.
+     *
+     * It travels as one string that the script has already read into a variable, because it empties
+     * `/data/local/tmp` - the directory the script itself lives in. A shell reads a script as it goes, so
+     * a line after that point is a line that may no longer be there: assembled here and evaluated at the
+     * end, everything this does is in memory before the first entry is removed.
+     *
+     * The order is the whole design. The wipe runs first, then the acknowledgement is published with the
+     * report beside it, and only then does the child wait to be heard and restart - so an accepted outcome
+     * is never a promise about work that has not happened yet, and a phone whose files are already gone is
+     * never restarted by a child nobody is listening to.
+     *
+     * Assigned single-quoted by [rebootScript], so its text cannot contain a single quote; the `require`
+     * is what makes that a build-time certainty instead of a shell syntax error on a user's phone.
+     */
+    internal fun rebootLastMile(reboot: String): String {
+        val body = """
+        rmg_report=""
+        rmg_left() {
+            rmg_report="${'$'}rmg_report${'$'}(printf "left %s\n" "${'$'}1")"
+        }
+        # Whether a path is itself a mount point, read from the kernel rather than asked of a tool that
+        # may not be on the phone. Evaluated on absolute paths, so the escapes /proc/mounts uses for
+        # spaces cannot reach here: nothing this wipe walks is allow to be a mount to begin with.
+        rmg_is_mount() {
+            while read -r rmg_dev rmg_mnt rmg_rest; do
+                [ "${'$'}rmg_mnt" = "${'$'}1" ] && return 0
+            done < /proc/mounts
+            return 1
+        }
+        rmg_wipe_dir() {
+            rmg_dir="${'$'}1"
+            rmg_removed=0
+            rmg_total=0
+            if [ -d "${'$'}rmg_dir" ] && [ ! -L "${'$'}rmg_dir" ]; then
+                # Contents only, and one entry at a time: the directories themselves are created by
+                # KernelSU and by init with modes the platform relies on.
+                for rmg_entry in "${'$'}rmg_dir"/* "${'$'}rmg_dir"/.[!.]* "${'$'}rmg_dir"/..?*; do
+                    [ -e "${'$'}rmg_entry" ] || [ -L "${'$'}rmg_entry" ] || continue
+                    rmg_total=${'$'}((rmg_total + 1))
+                    # A mount is detached before anything is removed from it, and never removed through:
+                    # rm -rf follows a mount point into the filesystem mounted on it, which would empty
+                    # somebody else tree through an entry that happens to sit in one of these directories.
+                    if rmg_is_mount "${'$'}rmg_entry"; then
+                        umount -l "${'$'}rmg_entry" 2>/dev/null
+                        if rmg_is_mount "${'$'}rmg_entry"; then
+                            rmg_left "${'$'}rmg_entry"
+                            continue
+                        fi
+                    fi
+                    rm -rf -- "${'$'}rmg_entry" 2>/dev/null
+                    if [ -e "${'$'}rmg_entry" ] || [ -L "${'$'}rmg_entry" ]; then
+                        rmg_left "${'$'}rmg_entry"
+                    else
+                        rmg_removed=${'$'}((rmg_removed + 1))
+                    fi
+                done
+            fi
+            rmg_report="${'$'}rmg_report${'$'}(printf "wipe %s removed=%s total=%s\n" "${'$'}rmg_dir" "${'$'}rmg_removed" "${'$'}rmg_total")"
+        }
+        rmg_wipe_dir /data/adb
+        rmg_wipe_dir /data/local/tmp
+
+        # The report is written before the acknowledgement, and read after it: what the app is told has
+        # already happened by the time it is told.
+        : > "${'$'}SUMMARY" 2>/dev/null || true
+        chmod 0666 "${'$'}SUMMARY" 2>/dev/null || true
+        [ -n "${'$'}rmg_report" ] && printf "%s" "${'$'}rmg_report" > "${'$'}SUMMARY"
+
         publish_handoff "${'$'}ACCEPTED_VALUE"
-        # The same rule the other two actions follow: a reboot nobody read is not a reboot to perform.
+        # Being heard is not the same as being acknowledged: the app removes the acknowledgement as it
+        # reads it, so one still sitting there means the app is gone - and an action the user has already
+        # been told failed must not go on to restart the phone under them. The report goes with it, since
+        # nobody is left to read that either.
         rmg_handoff_consumed || {
-            rm -f -- "${'$'}0"
+            rm -f -- "${'$'}0" "${'$'}SUMMARY"
             exit 0
         }
 
         sleep 0.75
         rm -f -- "${'$'}0"
         $reboot
-    """.trimIndent() + "\n"
+        """.trimIndent() + "\n"
+        require(!body.contains('\'')) {
+            "the last mile is assigned single-quoted, so a single quote in it would end the assignment " +
+                "early - and this is the one script whose failure mode is a phone that is emptied and not " +
+                "restarted"
+        }
+        return body
     }
 }
