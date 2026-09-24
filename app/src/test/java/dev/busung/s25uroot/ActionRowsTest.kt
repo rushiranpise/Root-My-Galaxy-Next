@@ -137,6 +137,62 @@ class ActionRowsTest {
         assertEquals(answers, actionRows(answers).flatten())
     }
 
+    @Test
+    fun `no screen in the app lays its own answers out`() {
+        // The rule this pins is the reason the shared set exists: every question in this app is asked with
+        // it, and the way that stops being true is one new dialog - a Row of buttons by hand, which is how
+        // the same question came to look like six different questions in the first place. Checked by
+        // reading the line after each confirm slot, so the slot's own comment can be anything.
+        // The slot's whole body, not just its first statement: a slot is allowed to work out which
+        // answers it has before it passes them - the DFR clean-up builds its list from the reading - and
+        // what must never be there is a button of its own.
+        val handBuilt = """\b(TextButton|FilledTonalButton|FilledButton|OutlinedButton)\(""".toRegex()
+        val screens = screens()
+        // Every assertion below passes on an empty file list, so the read is checked first.
+        assertTrue("no screen was read, so this proves nothing", screens.size >= 5)
+        val offenders = screens.flatMap { file ->
+            val lines = file.readLines()
+            lines.mapIndexedNotNull { index, line ->
+                if (!line.contains("confirmButton = {")) return@mapIndexedNotNull null
+                val body = slotBody(lines, index)
+                val problem = when {
+                    !body.contains("AppDialogActions(") -> "does not ask with the shared set"
+                    handBuilt.containsMatchIn(body) -> "builds a button of its own"
+                    else -> null
+                }
+                problem?.let { "${file.name}:${index + 1} $it" }
+            }
+        }
+        assertTrue("a dialog lays its own answers out - $offenders", offenders.isEmpty())
+    }
+
+    /** A slot's body: from the line after it to its own closing brace, or the one line it was written on. */
+    private fun slotBody(lines: List<String>, startIndex: Int): String {
+        val line = lines[startIndex]
+        if (line.endsWith("},") && line.indexOf('}') > line.indexOf('{')) {
+            return line.substringAfter('{').substringBeforeLast('}')
+        }
+        val indent = line.takeWhile { it == ' ' }.length
+        val body = StringBuilder()
+        for (index in startIndex + 1 until lines.size) {
+            val next = lines[index]
+            if (next.takeWhile { it == ' ' }.length == indent && next.trim() == "},") break
+            body.appendLine(next)
+        }
+        return body.toString()
+    }
+
+    @Test
+    fun `no dialog answers from a second slot`() {
+        // Every set carries its own dismissal answer, so a dismiss slot is a dialog whose answers are
+        // split across two places again - which is the shape that orphaned Cancel on its own line under
+        // the buttons it belongs beside.
+        val offenders = screens()
+            .filter { file -> file.readText().contains("dismissButton = {") }
+            .map { it.name }
+        assertTrue("a dialog answers from the dismiss slot: $offenders", offenders.isEmpty())
+    }
+
     /** One of this package's sources, wherever the test JVM was started from. */
     private fun source(fileName: String): String =
         listOf(
@@ -144,6 +200,19 @@ class ActionRowsTest {
             File("app/src/main/java/dev/busung/s25uroot/$fileName"),
         ).firstOrNull(File::isFile)?.readText()
             ?: error("$fileName was not found from ${File(".").absolutePath}")
+
+    /** Every screen of this app: the composables that ask a question are all in this package. */
+    private fun screens(): List<File> {
+        val directory = listOf(
+            File("src/main/java/dev/busung/s25uroot"),
+            File("app/src/main/java/dev/busung/s25uroot"),
+        ).firstOrNull(File::isDirectory)
+            ?: error("the source directory was not found from ${File(".").absolutePath}")
+        return directory.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filter { it.readText().contains("confirmButton") }
+            .toList()
+    }
 
     /**
      * One declaration's body, up to the next declaration at the same indentation.

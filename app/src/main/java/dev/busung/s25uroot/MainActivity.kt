@@ -6328,26 +6328,28 @@ private fun CachedPayloadDialog(
                 }
             }
         },
+        // Close is filled because it is the way out of a dialog that exists to be read; Forget is the
+        // one answer here that discards something the app is holding, so it wears the error colours and
+        // is offered only when there is something to discard.
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOfNotNull(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    if (cached != null) {
+                        AppAction(R.string.cached_payload_forget, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            onForget()
+                        }
+                    } else {
+                        null
+                    },
+                ),
+            )
         },
-        dismissButton = if (cached == null) {
-            null
-        } else {
-            {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onForget()
-                }) {
-                    Text(stringResource(R.string.cached_payload_forget))
-                }
-            }
-        },
+        dismissButton = null,
     )
 }
 
@@ -6506,13 +6508,16 @@ private fun RunPlanDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 
@@ -6583,24 +6588,25 @@ private fun RunLimitsDialog(
                 )
             }
         },
+        // Close leads and Reset follows it. Reset is the "other" action - not the way out of the
+        // dialog, and the one thing here that changes more than the value just tapped - but it is not
+        // destructive: it puts the three ceilings back to their defaults, and every one of them is a tap
+        // away from being moved again.
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    AppAction(R.string.run_limits_reset) {
+                        clickHaptic(view)
+                        onReset()
+                    },
+                ),
+            )
         },
-        // In the dismiss slot, which is where the "other" action belongs: it is not the way out of the
-        // dialog, and it is the one thing here that changes more than the value just tapped.
-        dismissButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onReset()
-            }) {
-                Text(stringResource(R.string.run_limits_reset))
-            }
-        },
+        dismissButton = null,
     )
 }
 
@@ -6881,44 +6887,48 @@ private fun LocalPayloadDialog(
                 }
             }
         },
+        // Choosing is the recommended answer even though it does not close the dialog - the picker is
+        // launched and the result comes back here - because the question this dialog asks is which file
+        // to use, and picking one is the answer to it. Remove is the one answer that discards something
+        // this app holds, so it wears the error colours and is offered only when there is a file to
+        // remove.
         confirmButton = {
-            FilledTonalButton(onClick = {
-                clickHaptic(view)
-                // Some providers report .so files as octet-stream and others as nothing usable, so
-                // the picker is left unfiltered and the import validates what comes back.
-                picker.launch(
-                    arrayOf("application/octet-stream", "application/x-sharedlib", "*/*"),
-                )
-            }) {
-                Text(
-                    stringResource(
-                        if (current == null) R.string.local_payload_choose
-                        else R.string.local_payload_replace,
-                    ),
-                )
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (current != null) {
-                    TextButton(onClick = {
+            AppDialogActions(
+                listOfNotNull(
+                    AppAction(
+                        label = if (current == null) {
+                            R.string.local_payload_choose
+                        } else {
+                            R.string.local_payload_replace
+                        },
+                        role = AppActionRole.Priority,
+                    ) {
                         clickHaptic(view)
-                        LocalPayload.clear(context)
-                        name = null
-                        error = null
-                        onNameChanged(null)
-                    }) {
-                        Text(stringResource(R.string.local_payload_remove))
-                    }
-                }
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onDismiss()
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            }
+                        // Some providers report .so files as octet-stream and others as nothing usable, so
+                        // the picker is left unfiltered and the import validates what comes back.
+                        picker.launch(
+                            arrayOf("application/octet-stream", "application/x-sharedlib", "*/*"),
+                        )
+                    },
+                    AppAction(R.string.action_cancel) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    if (current != null) {
+                        AppAction(R.string.local_payload_remove, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            LocalPayload.clear(context)
+                            name = null
+                            error = null
+                            onNameChanged(null)
+                        }
+                    } else {
+                        null
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 
@@ -8635,13 +8645,16 @@ private fun AboutDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 

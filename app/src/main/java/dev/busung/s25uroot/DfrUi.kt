@@ -487,6 +487,26 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             keyInjected = reading?.injected,
             helperInstalled = reading?.probe?.installed == true,
         )
+        val cleanUpAnswers = if (removals.isEmpty()) {
+            listOf(
+                AppAction(R.string.dfr_clean_up_close, AppActionRole.Priority) {
+                    confirmCleanUp = false
+                },
+            )
+        } else {
+            listOf(
+                AppAction(
+                    label = R.string.dfr_clean_up_confirm,
+                    role = AppActionRole.Destructive,
+                    enabled = !busy,
+                ) {
+                    clickHaptic(view)
+                    confirmCleanUp = false
+                    cleanUp()
+                },
+                AppAction(R.string.action_cancel) { confirmCleanUp = false },
+            )
+        }
         AlertDialog(
             onDismissRequest = { confirmCleanUp = false },
             title = { Text(stringResource(R.string.dfr_clean_up_confirm_title)) },
@@ -509,34 +529,14 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     )
                 }
             },
-            confirmButton = {
-                if (removals.isEmpty()) {
-                    TextButton(onClick = { confirmCleanUp = false }) {
-                        Text(stringResource(R.string.dfr_clean_up_close))
-                    }
-                } else {
-                    TextButton(
-                        enabled = !busy,
-                        onClick = {
-                            clickHaptic(view)
-                            confirmCleanUp = false
-                            cleanUp()
-                        },
-                    ) {
-                        Text(stringResource(R.string.dfr_clean_up_confirm))
-                    }
-                }
-            },
-            // One button when there is nothing to remove: a Close beside a Cancel is the same press twice.
-            dismissButton = if (removals.isEmpty()) {
-                null
-            } else {
-                {
-                    TextButton(onClick = { confirmCleanUp = false }) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                }
-            },
+            // Built as one set rather than branched inside the slot, because the two shapes are the same
+            // question: with nothing to remove there is a single answer and it is the filled one, and with
+            // something to remove there are two - the clean-up itself, which takes the helper and the key
+            // off the phone and therefore wears the error colours, beside a cancel that is deliberately
+            // live while a clean-up runs, so a slow one can still be abandoned.
+            confirmButton = { AppDialogActions(cleanUpAnswers) },
+            // One answer when there is nothing to remove: a Close beside a Cancel is the same press twice.
+            dismissButton = null,
         )
     }
 }
