@@ -653,6 +653,7 @@
     <string name="dfr_apk_bundled">Using the helper APK this app ships with.</string>
     <string name="dfr_inject">Inject</string>
     <string name="dfr_clean_up">Clean up</string>
+    <string name="dfr_log">Logs</string>
     <string name="dfr_reading">Reading the device...</string>
     <string name="dfr_measured">Stage 2: %1$s | certificate in list: %2$s | hooks armed: %3$s</string>
     <string name="dfr_stage_not_installed">not installed</string>

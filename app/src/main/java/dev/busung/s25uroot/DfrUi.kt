@@ -1,15 +1,20 @@
 package dev.busung.s25uroot
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,7 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.busung.s25uroot.dfr.DfrApk
 import dev.busung.s25uroot.dfr.DfrCleanUpOutcome
 import dev.busung.s25uroot.dfr.DfrFlow
@@ -246,7 +254,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         text = {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 520.dp)
+                    .heightIn(max = DFR_TEXT_HEIGHT)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -334,77 +342,134 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                log?.let {
+                log?.let { output ->
                     Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
+                        stringResource(R.string.dfr_log),
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // A fixed height with its own scroll, which is what the install screen's log panel
+                    // does and for the same reason: what the injector prints is a report of arbitrary
+                    // length - its whole transform, then a verify line per target - and as plain text in
+                    // this dialog it grew the screen until the step list and the actions were below the
+                    // fold. The screen's job is to say which step the phone is on, so the log may not be
+                    // what decides how tall it is.
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(DFR_LOG_HEIGHT),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ) {
+                        Text(
+                            text = output,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(8.dp),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val enabled = !busy
-                    when (step) {
-                        DfrStep.Inject -> FilledTonalButton(enabled = enabled, onClick = { inject() }) {
-                            Text(stringResource(R.string.dfr_inject))
-                        }
-                        // The same action as the two reboot steps: applying a removal is a restart, and the
-                        // screen's own word for that is the one the other two use.
-                        DfrStep.Reboot, DfrStep.RebootAgain, DfrStep.ApplyRemoval -> FilledTonalButton(
-                            enabled = enabled,
-                            onClick = { reboot() },
-                        ) {
-                            Text(stringResource(R.string.dfr_action_reboot))
-                        }
-                        DfrStep.RemoveStageTwo -> FilledTonalButton(
-                            enabled = enabled,
-                            onClick = { removeStageTwo() },
-                        ) {
-                            Text(stringResource(R.string.dfr_action_remove_stage2))
-                        }
-                        // No condition on the helper here any more: a build without one never reaches this
-                        // step, because the flow refuses before it - see [DfrStep.NoHelper].
-                        DfrStep.InstallStageTwo -> FilledTonalButton(
-                            enabled = enabled,
-                            onClick = { install() },
-                        ) {
-                            Text(stringResource(R.string.dfr_action_install_stage2))
-                        }
-                        DfrStep.OpenStageTwo -> FilledTonalButton(enabled = enabled, onClick = { open() }) {
-                            Text(stringResource(R.string.dfr_action_open_stage2))
-                        }
-                        // Nothing to press when the work is done, and nothing to press when nothing could
-                        // be read - reading again is the action for that, and it is below.
-                        DfrStep.Ready -> Unit
-                        else -> Unit
-                    }
-                    // Not offered on the refusal: nothing on the phone decides whether this build has a
-                    // helper in its assets, so reading again can only produce the same answer. A button
-                    // that cannot change anything is how a refusal starts to look like a step.
-                    if (step != DfrStep.NoHelper) {
-                        TextButton(enabled = !busy, onClick = { refresh() }) {
-                            Text(stringResource(R.string.dfr_action_read_state))
-                        }
-                    }
+            // Stacked, full width, one action per row, in the order the flow performs them: this is the
+            // list of what the screen can do rather than a row to hunt through, and all of it is here at
+            // once - which of them is next is the step list's answer above, not something this stack hides
+            // by showing one button at a time. The fills alternate so two neighbours are never the same
+            // shape, and the only fill that means anything is the red one.
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(DFR_ACTION_SPACING),
+            ) {
+                val enabled = !busy
+                val full = Modifier.fillMaxWidth()
+                // First because it is the one that changes nothing: every other button acts on what this
+                // one reads. Not offered on a refusal, where the answer cannot change - nothing on the
+                // phone decides whether this build carries a helper.
+                if (step != DfrStep.NoHelper) {
+                    DfrActionButton(
+                        label = R.string.dfr_action_read_state,
+                        enabled = enabled,
+                        kind = DfrActionKind.Dark,
+                        modifier = full,
+                        onClick = { refresh() },
+                    )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(enabled = !busy, onClick = { confirmCleanUp = true }) {
-                        Text(stringResource(R.string.dfr_clean_up))
-                    }
+                // Disabled while the reading says the key is already in the list, which is a measurement
+                // rather than a guess: an inject refuses in that state, so the button could only print a
+                // refusal. It is not hidden, because "there is nothing to inject" is worth seeing.
+                DfrActionButton(
+                    label = R.string.dfr_inject,
+                    enabled = enabled && reading?.injected != true,
+                    kind = DfrActionKind.Light,
+                    modifier = full,
+                    onClick = { inject() },
+                )
+                // This one covers three steps - both restarts and the removal a restart applies - because
+                // they are one action with one word in this screen: [DfrStep.ApplyRemoval] is a restart.
+                DfrActionButton(
+                    label = R.string.dfr_action_reboot,
+                    enabled = enabled,
+                    kind = DfrActionKind.Dark,
+                    modifier = full,
+                    onClick = { reboot() },
+                )
+                // The stage-two actions share a slot rather than getting a button each: no reading can
+                // have two of them true at once, and three buttons for one slot would leave the stack a
+                // different height at every step.
+                when (step) {
+                    DfrStep.RemoveStageTwo -> DfrActionButton(
+                        label = R.string.dfr_action_remove_stage2,
+                        enabled = enabled,
+                        kind = DfrActionKind.Light,
+                        modifier = full,
+                        onClick = { removeStageTwo() },
+                    )
+                    // No condition on the helper here: a build without one never reaches this step,
+                    // because the flow refuses before it - see [DfrStep.NoHelper].
+                    DfrStep.InstallStageTwo -> DfrActionButton(
+                        label = R.string.dfr_action_install_stage2,
+                        enabled = enabled,
+                        kind = DfrActionKind.Light,
+                        modifier = full,
+                        onClick = { install() },
+                    )
+                    DfrStep.OpenStageTwo -> DfrActionButton(
+                        label = R.string.dfr_action_open_stage2,
+                        enabled = enabled,
+                        kind = DfrActionKind.Light,
+                        modifier = full,
+                        onClick = { open() },
+                    )
+                    else -> Unit
                 }
+                DfrActionButton(
+                    label = R.string.dfr_clean_up,
+                    enabled = enabled,
+                    kind = DfrActionKind.Destructive,
+                    modifier = full,
+                    onClick = { confirmCleanUp = true },
+                )
+                DfrActionButton(
+                    label = R.string.action_cancel,
+                    enabled = true,
+                    kind = DfrActionKind.Dark,
+                    modifier = full,
+                    onClick = {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                )
             }
         },
-        dismissButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
+        // Cancel is in the stack with everything else, so a second dismissal here would be the same press
+        // twice.
+        dismissButton = null,
     )
 
     if (confirmCleanUp) {
@@ -465,6 +530,93 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     }
                 }
             },
+        )
+    }
+}
+
+/**
+ * How tall a button in the flow's stack is, and why they are all the same height.
+ *
+ * [MaterialTheme.typography.labelLarge] in one line, plus a couple of dp of room: the number is really a
+ * budget, because six of these plus their spacing have to leave the step list and the log a dialog's worth
+ * of room on a 780 dp-tall screen - see [DFR_TEXT_HEIGHT] and [DFR_LOG_HEIGHT], which are the two values
+ * this one is balanced against. A button that grew to fit "Read again" and shrank for "Inject" would make
+ * the stack ragged for no reason a reader can see.
+ */
+private val DFR_ACTION_HEIGHT = 44.dp
+
+/**
+ * The gap between two actions, which is also what stops a red button reading as part of its neighbour.
+ */
+private val DFR_ACTION_SPACING = 6.dp
+
+/**
+ * How tall the dialog's own content may be before it scrolls.
+ *
+ * A cap rather than "whatever is left", because the actions are not in this area at all: they are the
+ * AlertDialog's own, laid out below everything here. 320 dp is what is left for the step list, the
+ * measurement and the log once six actions, a title and the platform's padding have taken their share of
+ * the 780 dp screen this was written against.
+ */
+private val DFR_TEXT_HEIGHT = 320.dp
+
+/**
+ * How much of the dialog the process log may take.
+ *
+ * Fixed rather than a maximum, because the log is the one field here whose length nothing bounds: an
+ * injector run prints its whole transform and a verify line per target, and the clean-up prints two files'
+ * worth of it. See the panel in the dialog for what it looked like as plain text.
+ */
+private val DFR_LOG_HEIGHT = 140.dp
+
+/**
+ * How an action in the stack is filled.
+ *
+ * Two fills, alternating down the stack, so two neighbours are never the same shape and one action is told
+ * from the next without reading a label: [Light] is the theme's primary - the pale fill with dark text -
+ * and [Dark] is `secondaryContainer`, the darker pair this app's other screens use. [Destructive] is the
+ * third and the only fill that means something rather than decorating: the clean-up, which is the one
+ * action here that takes the flow off the phone, and the reason it is in the error colours instead of in
+ * the alternation.
+ */
+private enum class DfrActionKind { Light, Dark, Destructive }
+
+/**
+ * One action of the flow, one per row under the step list.
+ *
+ * Full width and as tall as [DFR_ACTION_HEIGHT] and not a dp more, so nothing about it is sized by its own
+ * label - these are the flow's own words, and a label that decided the button's geometry is how a stack of
+ * six comes to look like six different things.
+ */
+@Composable
+private fun DfrActionButton(
+    @StringRes label: Int,
+    enabled: Boolean,
+    kind: DfrActionKind,
+    modifier: Modifier,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(DFR_ACTION_HEIGHT),
+        enabled = enabled,
+        colors = when (kind) {
+            DfrActionKind.Dark -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            DfrActionKind.Destructive -> ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            // The default fill, which is the theme's primary - the pale one.
+            else -> ButtonDefaults.buttonColors()
+        },
+    ) {
+        Text(
+            stringResource(label),
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center,
         )
     }
 }
