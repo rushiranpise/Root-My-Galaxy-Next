@@ -112,6 +112,17 @@ class AdbPairingService : Service() {
         var text: String
         if (success) {
             AppPreferences.setAdbPaired(this, true)
+            // The moment the authorization exists is the only moment it can be made to last: Android
+            // revokes a host's key a week after it was accepted, which would turn this one pairing into
+            // a code the user types every week.
+            if (AdbPairing.authorizeDebugging(this)) {
+                AppLog.info(AppLogTags.WIRELESS_ADB, "The paired authorization does not expire")
+            } else {
+                AppLog.warn(
+                    AppLogTags.WIRELESS_ADB,
+                    "The paired authorization will still expire; keep it with ${AdbPairing.GRANT_COMMAND}",
+                )
+            }
             title = getString(R.string.adb_pair_success_title)
             text = getString(R.string.adb_pair_success_text)
             // A device that already has KernelSU can use the transport this pairing just created, so

@@ -45,8 +45,12 @@ internal object TemporaryWirelessAdb {
      * here is the difference between "the app could not turn it on, do it in Developer options" and a
      * silent wait for a listener nobody started.
      */
-    fun begin(context: Context, onLog: (String) -> Unit = {}): Boolean =
-        when (AdbPairing.tryEnableWirelessAdb(context)) {
+    fun begin(context: Context, onLog: (String) -> Unit = {}): Boolean {
+        // Before the transport, because it is the same transaction from the user's side: the transport is
+        // asked for on a run, and an authorization that expires a week later turns that run into a
+        // request to pair again.
+        makeAuthorizationPermanent(context, onLog)
+        return when (AdbPairing.tryEnableWirelessAdb(context)) {
             WirelessAdbEnableResult.AlreadyOn -> {
                 cancelGraceDisable()
                 armCleanup(context)
@@ -97,6 +101,38 @@ internal object TemporaryWirelessAdb {
                 false
             }
         }
+    }
+
+    /**
+     * Makes the device's ADB authorization permanent, on the run that needs the transport.
+     *
+     * Done here rather than once at pairing time because this is the single funnel every run opens its
+     * transport through: a device whose authorization was never written to, or was revoked, gets the
+     * chance to have it fixed on the run that needs it instead of a week after the pairing that set it
+     * up. The outcome is logged rather than enforced - a device that refuses is still worth connecting
+     * to, it will simply ask for the code again when the week is up.
+     */
+    private fun makeAuthorizationPermanent(context: Context, onLog: (String) -> Unit) {
+        when (AdbPairing.tryAuthorizeDebugging(context)) {
+            DebugAuthorizationResult.AlreadyPermanent ->
+                onLog("[*] This device's ADB authorization already does not expire")
+
+            DebugAuthorizationResult.MadePermanent ->
+                onLog("[+] ADB authorization made permanent; this device will not ask to pair again")
+
+            DebugAuthorizationResult.Refused ->
+                onLog("[!] The device refused to keep the authorization: it will expire again")
+
+            DebugAuthorizationResult.Unavailable ->
+                onLog(
+                    "[!] Neither the app nor root may change this device's authorization timeout; " +
+                        "it expires after a week",
+                )
+
+            DebugAuthorizationResult.Unknown ->
+                onLog("[!] The authorization timeout could not be read; it may still be expiring")
+        }
+    }
 
     /** Runs [block] with wireless debugging on, and schedules it off again afterwards. */
     suspend fun <T> use(

@@ -115,6 +115,54 @@ internal fun wirelessAdbUsable(
 ): Boolean = wirelessDebuggingEnabled ||
     wirelessAdbEnableRoute(permissionGranted, rootAvailable) != WirelessAdbEnableRoute.Unavailable
 
+/** What making this device's ADB authorization permanent actually did. */
+internal enum class DebugAuthorizationResult {
+    /** The timeout already read as zero, so nothing was written. */
+    AlreadyPermanent,
+
+    /** Written, and read back as permanent. */
+    MadePermanent,
+
+    /** The write did not take, or the device refused it: the authorization will still expire. */
+    Refused,
+
+    /** Neither `WRITE_SECURE_SETTINGS` nor root, so only the user can change it. */
+    Unavailable,
+
+    /** The setting could not be read afterwards, so what it is now cannot be said. */
+    Unknown,
+}
+
+/**
+ * Android's own default for how long an ADB authorization lasts, in milliseconds.
+ *
+ * Not a number this app chose: it is the framework's, and it is why a device that was paired once asks
+ * to be paired again a week later.
+ */
+internal const val ADB_DEFAULT_AUTHORIZATION_TIMEOUT_MILLIS = 7L * 24 * 60 * 60 * 1_000
+
+/** Whether a reading of the authorization timeout says the authorization never expires. */
+internal fun authorizationNeverExpires(millis: Long?): Boolean = millis == 0L
+
+/**
+ * What a write to the authorization timeout did, from the readings around it.
+ *
+ * Pure, so the cases that matter can be checked without a device: a write that returns without
+ * throwing proves nothing, an unreadable setting is not an expiring one, and a device with no route to
+ * the setting is a different answer from one that refused the change.
+ */
+internal fun debugAuthorizationResult(
+    before: Long?,
+    route: WirelessAdbEnableRoute,
+    after: Long?,
+): DebugAuthorizationResult = when {
+    before == 0L -> DebugAuthorizationResult.AlreadyPermanent
+    after == 0L -> DebugAuthorizationResult.MadePermanent
+    route == WirelessAdbEnableRoute.Unavailable -> DebugAuthorizationResult.Unavailable
+    after == null -> DebugAuthorizationResult.Unknown
+    else -> DebugAuthorizationResult.Refused
+}
+
 /**
  * Wireless debugging's state, and the loopback port adbd is listening on.
  *
@@ -136,9 +184,18 @@ object AdbPairing {
     val GRANT_COMMAND: String =
         "pm grant ${BuildConfig.APPLICATION_ID} android.permission.WRITE_SECURE_SETTINGS"
 
-    private const val ENABLE_SETTING_COMMAND = "settings put global $ADB_WIFI_ENABLED_SETTING 1"
-    private const val DISABLE_SETTING_COMMAND = "settings put global $ADB_WIFI_ENABLED_SETTING 0"
-    private const val READ_SETTING_COMMAND = "settings get global $ADB_WIFI_ENABLED_SETTING"
+    /** The switch that has to be on before any host - a cable session included - can be authorized. */
+    private const val ADB_ENABLED_SETTING = "adb_enabled"
+
+    /**
+     * How long an ADB authorization lasts before the device throws the host's key away.
+     *
+     * Zero is the framework's "never"; [ADB_DEFAULT_AUTHORIZATION_TIMEOUT_MILLIS] is what a device that
+     * was never written to uses, and it is the reason a pairing the user performed once is asked for
+     * again a week later.
+     */
+    private const val ADB_ALLOWED_CONNECTION_TIME_SETTING = "adb_allowed_connection_time"
+
     private const val ADB_TLS_PORT_PROPERTY = "service.adb.tls.port"
     private const val PROPERTY_READ_TIMEOUT_MS = 750L
     private const val PROPERTY_POLL_INTERVAL_MS = 1_000L
@@ -215,16 +272,43 @@ object AdbPairing {
      * change would leave the transport waiting for a port that will never exist.
      */
     private fun writeWirelessAdbThroughRoot(enabled: Boolean): Boolean {
-        val command = if (enabled) ENABLE_SETTING_COMMAND else DISABLE_SETTING_COMMAND
-        val result = runCatching { KernelSuRuntime.rootShell(command) }.getOrNull() ?: return false
-        if (result.exitCode != 0) {
-            AppLog.warn(
-                AppLogTags.WIRELESS_ADB,
-                "Wireless debugging could not be changed through root: ${result.output.take(120)}",
-            )
+        if (!writeSettingThroughRoot(ADB_WIFI_ENABLED_SETTING, if (enabled) "1" else "0")) {
             return false
         }
         return readWirelessAdbState() == enabled
+    }
+
+    /**
+     * A `Settings.Global` value through a root shell, which is the route a rooted device without
+     * `WRITE_SECURE_SETTINGS` has.
+     *
+     * `null` for "could not be read", and for an absent setting: every caller here is asking a question
+     * whose wrong answer has a consequence, and an empty reading is not a zero.
+     */
+    private fun readSettingThroughRoot(name: String): String? {
+        val result = runCatching { KernelSuRuntime.rootShell("settings get global $name") }.getOrNull()
+            ?: return null
+        if (result.exitCode != 0) return null
+        return result.output.trim().takeIf { it.isNotEmpty() && it != "null" }
+    }
+
+    /**
+     * The same write through a root shell.
+     *
+     * The exit code is checked because a failed `settings put` is worth a log line, but it is not the
+     * answer: callers read the setting back, since a command that exits zero is not a value that took.
+     */
+    private fun writeSettingThroughRoot(name: String, value: String): Boolean {
+        val result = runCatching { KernelSuRuntime.rootShell("settings put global $name $value") }
+            .getOrNull() ?: return false
+        if (result.exitCode != 0) {
+            AppLog.warn(
+                AppLogTags.WIRELESS_ADB,
+                "Global setting $name could not be changed through root: ${result.output.take(120)}",
+            )
+            return false
+        }
+        return true
     }
 
     /**
@@ -279,15 +363,89 @@ object AdbPairing {
         return wirelessAdbEnableResult(before, route, wirelessAdbEnabledState(context))
     }
 
-    private fun readWirelessAdbState(): Boolean? {
-        val result = runCatching { KernelSuRuntime.rootShell(READ_SETTING_COMMAND) }.getOrNull()
-            ?: return null
-        if (result.exitCode != 0) return null
-        return when (result.output.trim()) {
+    private fun readWirelessAdbState(): Boolean? =
+        when (readSettingThroughRoot(ADB_WIFI_ENABLED_SETTING)) {
             "1" -> true
             "0" -> false
             else -> null
         }
+
+    /**
+     * Makes this device's ADB authorization permanent, and says what actually happened.
+     *
+     * The one transport problem worth changing on the device rather than working around. Android gives
+     * an ADB authorization a week ([ADB_DEFAULT_AUTHORIZATION_TIMEOUT_MILLIS]) and then revokes the
+     * host's key, so every pairing this app asks the user for is undone by the calendar unless something
+     * writes the timeout away. Writing zero - the framework's "never" - is what turns one pairing into a
+     * standing one on a device that hands out no permission to write it.
+     *
+     * The same two routes [tryEnableWirelessAdb] has, and for the same two devices: the setting directly
+     * where `WRITE_SECURE_SETTINGS` was granted, a root shell `settings put` where it was not. The
+     * reading afterwards is what decides the answer, because a device can ignore the write - and the
+     * whole point of asking is that a device which ignored it will ask for the code again next week.
+     *
+     * `adb_enabled` is written alongside it: it is the switch that has to be on before any host can be
+     * authorized at all, including the cable session [GRANT_COMMAND] is meant to be pasted into.
+     *
+     * Zero is a deliberate weakening of a device default, which is why it is spelled out here rather
+     * than left implicit: a key that a device would have thrown away after a week now lasts until the
+     * user revokes it in Developer options. That trade is the entire point of this function.
+     */
+    fun authorizeDebugging(context: Context): Boolean = when (tryAuthorizeDebugging(context)) {
+        // A could-not-read is not a failure: the write is attempted either way, and refusing to report
+        // it as arranged would have callers redo work on a device that may already be arranged.
+        DebugAuthorizationResult.AlreadyPermanent,
+        DebugAuthorizationResult.MadePermanent,
+        DebugAuthorizationResult.Unknown,
+        -> true
+
+        DebugAuthorizationResult.Refused,
+        DebugAuthorizationResult.Unavailable,
+        -> false
+    }
+
+    internal fun tryAuthorizeDebugging(context: Context): DebugAuthorizationResult {
+        val before = allowedConnectionTimeMillis(context)
+        if (before == 0L) return DebugAuthorizationResult.AlreadyPermanent
+        // Asked in this order for the reason the wireless path asks in it: a granted permission answers
+        // the question on its own, and the root probe behind the other arm can sit on a grant prompt.
+        val route = if (hasWriteSecureSettings(context)) {
+            WirelessAdbEnableRoute.Setting
+        } else {
+            wirelessAdbEnableRoute(permissionGranted = false, rootAvailable = rootIsAvailable())
+        }
+        when (route) {
+            WirelessAdbEnableRoute.Setting ->
+                runCatching {
+                    Settings.Global.putInt(context.contentResolver, ADB_ENABLED_SETTING, 1)
+                    Settings.Global.putLong(
+                        context.contentResolver,
+                        ADB_ALLOWED_CONNECTION_TIME_SETTING,
+                        0L,
+                    )
+                }.isSuccess || writeAuthorizationThroughRoot()
+            WirelessAdbEnableRoute.Root -> writeAuthorizationThroughRoot()
+            WirelessAdbEnableRoute.Unavailable -> Unit
+        }
+        return debugAuthorizationResult(before, route, allowedConnectionTimeMillis(context))
+    }
+
+    private fun writeAuthorizationThroughRoot(): Boolean =
+        writeSettingThroughRoot(ADB_ENABLED_SETTING, "1") &&
+            writeSettingThroughRoot(ADB_ALLOWED_CONNECTION_TIME_SETTING, "0")
+
+    /**
+     * How long this device keeps an ADB authorization, or `null` when that cannot be read.
+     *
+     * Asked of the setting and then of a root shell, exactly as the wireless-debugging setting is and
+     * for the same reason: an unreadable value is not an expiring one.
+     */
+    fun allowedConnectionTimeMillis(context: Context): Long? {
+        val direct = runCatching {
+            Settings.Global.getString(context.contentResolver, ADB_ALLOWED_CONNECTION_TIME_SETTING)
+        }.getOrNull()
+        val raw = direct ?: readSettingThroughRoot(ADB_ALLOWED_CONNECTION_TIME_SETTING)
+        return raw?.trim()?.takeIf { it.isNotEmpty() }?.toLongOrNull()
     }
 
     fun hasWriteSecureSettings(context: Context): Boolean =
