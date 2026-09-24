@@ -130,7 +130,6 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -138,7 +137,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -159,7 +157,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
@@ -1851,12 +1848,16 @@ private fun UpdateCard(
                     )
                 }
                 else -> {
-                    FilledTonalButton(onClick = {
-                        clickHaptic(view)
-                        onStartDownload(info)
-                    }) {
-                        Text(stringResource(R.string.updater_button_download))
-                    }
+                    // The banner's one action, so it is the loud one.
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.updater_button_download,
+                            role = AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            onStartDownload(info)
+                        },
+                    )
                 }
             }
         }
@@ -2045,29 +2046,31 @@ private fun ArmedRetryCard(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        onCancel()
-                    },
-                ) {
-                    Text(stringResource(R.string.retry_armed_cancel))
-                }
-                if (retry.afterReboot) {
-                    Button(
-                        onClick = {
+            // A set of answers rather than two buttons pushed to one end, so this card's pair is laid out
+            // by the same rule every dialog's is - see [AppDialogActions]. Starting is offered only for an
+            // attempt that is waiting for the next boot; there is nothing to start otherwise, and a card
+            // that is only reporting an armed retry has one answer.
+            AppDialogActions(
+                buildList {
+                    add(
+                        AppAction(R.string.retry_armed_cancel) {
                             clickHaptic(view)
-                            onStart()
+                            onCancel()
                         },
-                    ) {
-                        Text(stringResource(R.string.retry_armed_start))
+                    )
+                    if (retry.afterReboot) {
+                        add(
+                            AppAction(
+                                label = R.string.retry_armed_start,
+                                role = AppActionRole.Priority,
+                            ) {
+                                clickHaptic(view)
+                                onStart()
+                            },
+                        )
                     }
-                }
-            }
+                },
+            )
         }
     }
 }
@@ -2874,14 +2877,17 @@ private fun EmptyHistoryFilterCard(onClearFilters: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FilledTonalButton(
-                onClick = {
+            // An empty list that is empty because of a filter has one thing to do about it, so it is the
+            // loud one.
+            AppActionButton(
+                AppAction(
+                    label = R.string.history_filter_clear,
+                    role = AppActionRole.Priority,
+                ) {
                     clickHaptic(view)
                     onClearFilters()
                 },
-            ) {
-                Text(stringResource(R.string.history_filter_clear))
-            }
+            )
         }
     }
 }
@@ -2916,12 +2922,15 @@ private fun EmptyHistoryCard(onOpenHome: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    onOpenHome()
-                }) {
-                    Text(stringResource(R.string.history_empty_action))
-                }
+                AppActionButton(
+                    AppAction(
+                        label = R.string.history_empty_action,
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        onOpenHome()
+                    },
+                )
             }
         }
     }
@@ -3515,12 +3524,15 @@ private fun EmptyLogsCard(filtered: Boolean, onClearFilters: () -> Unit) {
             // Only when there is a filter to clear: an unfiltered empty log has nothing to undo, and the
             // body above says what will fill it instead.
             if (filtered) {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    onClearFilters()
-                }) {
-                    Text(stringResource(R.string.logs_filter_clear))
-                }
+                AppActionButton(
+                    AppAction(
+                        label = R.string.logs_filter_clear,
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        onClearFilters()
+                    },
+                )
             }
         }
     }
@@ -3867,14 +3879,16 @@ private fun SettingsPage(
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = { managerVersionDraft = running }) {
-                                    Text(
-                                        stringResource(
-                                            R.string.settings_manager_running_use,
-                                            running,
-                                        ),
-                                    )
-                                }
+                                // A link rather than a filled answer: it sits in the row naming the
+                                // running version, and the card's own answers are further down. Its label
+                                // carries the version it would name, which is why the action takes
+                                // arguments at all.
+                                AppTextAction(
+                                    AppAction(
+                                        label = R.string.settings_manager_running_use,
+                                        labelArgs = listOf(running),
+                                    ) { managerVersionDraft = running },
+                                )
                             }
                         }
                     }
@@ -4828,20 +4842,21 @@ private fun SettingsPage(
                     // version, because "install this" is a statement about which one is wanted - so
                     // the app's own default stops disagreeing with the phone the moment it is asked.
                     action = managerMismatchTarget(versionPair.state, runningKernelSu?.daemon)?.let { target ->
-                        NoticeAction(
-                            label = stringResource(R.string.settings_manager_install_running, target),
-                            onClick = {
-                                onManagerVersionChanged(target)
-                                KernelSuManager.downloadVersion(
-                                    context = context,
-                                    flavor = kernelsuFlavor,
-                                    version = target,
-                                    onMessage = { message ->
-                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                    },
-                                )
-                            },
-                        )
+                        AppAction(
+                            label = R.string.settings_manager_install_running,
+                            labelArgs = listOf(target),
+                        ) {
+                            clickHaptic(view)
+                            onManagerVersionChanged(target)
+                            KernelSuManager.downloadVersion(
+                                context = context,
+                                flavor = kernelsuFlavor,
+                                version = target,
+                                onMessage = { message ->
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                },
+                            )
+                        }
                     },
                     position = SettingsCardPosition.Middle,
                 )
@@ -4869,10 +4884,13 @@ private fun SettingsPage(
                         Icons.Rounded.RestartAlt
                     },
                     noticeAction = payloadBehindTarget(payloadKernel)?.let { running ->
-                        NoticeAction(
-                            label = stringResource(R.string.settings_manager_version_keep_boot, running),
-                            onClick = { onManagerVersionChanged(running) },
-                        )
+                        AppAction(
+                            label = R.string.settings_manager_version_keep_boot,
+                            labelArgs = listOf(running),
+                        ) {
+                            clickHaptic(view)
+                            onManagerVersionChanged(running)
+                        }
                     },
                     position = SettingsCardPosition.Middle,
                     onClick = {
@@ -6096,9 +6114,13 @@ private fun TargetSelectionSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(catalog.error, color = MaterialTheme.colorScheme.error)
-                    FilledTonalButton(onClick = onRetry) {
-                        Text(stringResource(R.string.action_retry))
-                    }
+                    // The sheet failed to read the catalog and this is the whole of what it offers.
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.action_retry,
+                            role = AppActionRole.Priority,
+                        ) { onRetry() },
+                    )
                 }
                 // Which of the two controls emptied the list, said rather than left to be worked out -
                 // and with the way out of it under the sentence, since a search that matches nothing
@@ -6121,15 +6143,18 @@ private fun TargetSelectionSheet(
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    FilledTonalButton(onClick = {
-                        clickHaptic(view)
-                        query = ""
-                        flavorFilter = null
-                        showOnlyMyDevice = false
-                        AppPreferences.setTargetFitsDeviceOnly(context, false)
-                    }) {
-                        Text(stringResource(R.string.target_show_everything))
-                    }
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.target_show_everything,
+                            role = AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            query = ""
+                            flavorFilter = null
+                            showOnlyMyDevice = false
+                            AppPreferences.setTargetFitsDeviceOnly(context, false)
+                        },
+                    )
                 }
                 else -> LazyColumn(
                     modifier = Modifier
@@ -6239,27 +6264,22 @@ private fun TargetSelectionSheet(
             }
 
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onDismiss()
-                }, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-                Button(
-                    onClick = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_cancel) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    AppAction(
+                        label = R.string.action_next,
+                        role = AppActionRole.Priority,
+                        enabled = selectedProfile != null,
+                    ) {
                         clickHaptic(view)
                         selectedProfile?.let(onNext)
                     },
-                    enabled = selectedProfile != null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_next))
-                }
-            }
+                ),
+            )
         }
     }
 }
@@ -7238,39 +7258,35 @@ private fun PayloadSourcesEditor(
             }
 
             if (sources.none { it.id == PayloadSource.DEFAULT.id }) {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    sources = sources.withSourceAdded(PayloadSource.DEFAULT)
-                }) {
-                    Text(stringResource(R.string.payload_source_default))
-                }
+                // A link, and a quiet one: it puts back the source every build ships with, which is a
+                // convenience inside this list rather than one of the screen's answers.
+                AppTextAction(
+                    AppAction(R.string.payload_source_default) {
+                        clickHaptic(view)
+                        sources = sources.withSourceAdded(PayloadSource.DEFAULT)
+                    },
+                )
             }
 
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TextButton(
-                    onClick = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_cancel) {
                         clickHaptic(view)
                         onDismiss()
                     },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-                Button(
-                    onClick = {
+                    AppAction(
+                        label = R.string.action_save,
+                        role = AppActionRole.Priority,
+                        // Nothing to save until something is enabled: a list with every source off is a
+                        // list the app could not read a payload from.
+                        enabled = enabledCount > 0,
+                    ) {
                         clickHaptic(view)
                         onSave(sources)
                     },
-                    enabled = enabledCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_save))
-                }
-            }
+                ),
+            )
         }
     }
 }
@@ -7490,30 +7506,26 @@ private fun RevisionPicker(
             }
         }
 
-        Button(
-            onClick = {
+        AppActionButton(
+            AppAction(
+                label = if (choice is RevisionChoice.Commit) {
+                    R.string.payload_pin_apply
+                } else {
+                    R.string.payload_pin_follow_action
+                },
+                role = AppActionRole.Priority,
+                // The one pair of actions in the app that are each other's opposite, and the icon is what
+                // tells them apart before the label is read.
+                icon = if (choice is RevisionChoice.Commit) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                // Deliberately not gated on the read having succeeded: a pin is a decision about a
+                // revision, and a network refusal while summarising it is not a reason to leave the user
+                // unable to pin or to stop following a branch at all.
+                enabled = choice != null && !reading && !applying,
+            ) {
                 clickHaptic(view)
                 onPick((choice as? RevisionChoice.Commit)?.commit)
             },
-            // Deliberately not gated on the read having succeeded: a pin is a decision about a
-            // revision, and a network refusal while summarising it is not a reason to leave the user
-            // unable to pin or to stop following a branch at all.
-            enabled = choice != null && !reading && !applying,
-        ) {
-            Icon(
-                if (choice is RevisionChoice.Commit) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (choice is RevisionChoice.Commit) {
-                    stringResource(R.string.payload_pin_apply)
-                } else {
-                    stringResource(R.string.payload_pin_follow_action)
-                },
-            )
-        }
+        )
 
         // The revision list sits below the decision, not above it. It is the longest thing on this
         // screen and the only one that is a browse rather than a choice, so putting it first pushed
@@ -8069,8 +8081,6 @@ private const val SHIZUKU_START_LOG_LINES = 14
 private val SHIZUKU_START_LOG_MAX_HEIGHT = 220.dp
 
 /** An action offered beside a card's notice: what it says it does, and what it does. */
-internal data class NoticeAction(val label: String, val onClick: () -> Unit)
-
 /**
  * The flag for a payload's KernelSU standing beside the boot's, or null when they agree or nothing is
  * known.
@@ -8131,8 +8141,11 @@ internal fun SettingsCard(
      * the one action that resolves the state directly under the line naming it, and it is deliberately
      * a *separate* control from the row: the row's own tap does what the row is for, and a warning that
      * hijacked it would make the card do something different depending on a state nobody can see.
+     *
+     * An [AppAction] like every other action in the app, drawn as the link shape - see [AppTextAction] -
+     * because a filled answer inside a card would be the card's own colour.
      */
-    noticeAction: NoticeAction? = null,
+    noticeAction: AppAction? = null,
     position: SettingsCardPosition = SettingsCardPosition.Single,
     busy: Boolean = false,
     /**
@@ -8215,15 +8228,10 @@ internal fun SettingsCard(
                 // Under the notice and centred with it, because it answers that line rather than the
                 // row: it takes its own tap without the card's, so the two do not both fire.
                 noticeAction?.let { action ->
-                    TextButton(
-                        onClick = {
-                            clickHaptic(view)
-                            action.onClick()
-                        },
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) {
-                        Text(action.label)
-                    }
+                    // The link shape rather than a filled answer: it is drawn inside the card, where a
+                    // filled button would be the card's own colour, and the card's own tap is what the row
+                    // is for - this is only the fix for the line just above it.
+                    AppTextAction(action, Modifier.align(Alignment.CenterHorizontally))
                 }
             }
             if (busy) {
@@ -8469,9 +8477,9 @@ private fun SettingsReadingsCard(
      *
      * Unlike a [SettingsCard]'s, it does not wait for a notice: the readings above *are* the notice here,
      * and a card that restated them in a sentence before offering the button would be the same facts
-     * twice in one card.
+     * twice in one card. An [AppAction], and drawn as the link shape, for the same reason.
      */
-    action: NoticeAction? = null,
+    action: AppAction? = null,
 ) {
     val view = LocalView.current
     Card(
@@ -8539,15 +8547,7 @@ private fun SettingsReadingsCard(
             }
             action?.let { offered ->
                 Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        offered.onClick()
-                    },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    Text(offered.label)
-                }
+                AppTextAction(offered, Modifier.align(Alignment.CenterHorizontally))
             }
         }
     }

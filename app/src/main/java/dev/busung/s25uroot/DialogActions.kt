@@ -11,13 +11,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -56,6 +61,18 @@ import androidx.compose.ui.unit.dp
  * that was pressed rather than beside it - see [AppAction.progress]. It replaced a hand-made button that
  * carried its own spinner, which meant the one screen with a slow answer was also the one screen whose
  * buttons did not match the rest of the app's.
+ *
+ * **And it is not only dialogs.** These rules are about a labelled button - one that names what it does -
+ * wherever it is drawn: a dialog's answers, a run's Stop and Retry in the bar that floats over its log, the
+ * way out of an empty history, the fix offered under a warning. All of them are [AppActionButton] now, which
+ * is why it is drawn here rather than inside the dialog vocabulary: before, a screen's own buttons were the
+ * platform's `Button` at the platform's padding and label size, so a screen's Stop and a dialog's Cancel
+ * were two different objects that happened to both be buttons. The three roles above are the whole of the
+ * emphasis available anywhere in the app.
+ *
+ * What is deliberately *not* in this vocabulary, because a role and a label are not what they have to say:
+ * icon-only buttons and the floating buttons that sit over a list. Those are about a thing rather than about
+ * a decision - a pin, a row's own delete, a jump to the top - and they are drawn by their own rules.
  */
 internal enum class AppActionRole {
     /** The answer this screen recommends: the filled one, and only one per set. */
@@ -98,6 +115,16 @@ internal class AppAction(
      * hand-built button, which is the thing this file is here to stop.
      */
     val labelArgs: List<Any> = emptyList(),
+    /**
+     * An icon for an action whose meaning its label does not carry on its own, or null for the many that do
+     * not need one.
+     *
+     * Rare on purpose, and last because of it: an action here is a sentence, and a symbol beside every one
+     * of them is a row of pictures competing with the words. It is wanted where a pair of actions are each
+     * other's opposite - pinning this revision against giving the branch up - and the label alone leaves the
+     * two being read twice to tell which is which.
+     */
+    val icon: ImageVector? = null,
     val onClick: () -> Unit,
 )
 
@@ -169,39 +196,103 @@ internal fun AppActionButton(action: AppAction, modifier: Modifier = Modifier) {
         modifier = modifier.height(ACTION_HEIGHT),
         enabled = action.enabled,
         contentPadding = ACTION_PADDING,
-        colors = when (action.role) {
-            AppActionRole.Priority -> ButtonDefaults.buttonColors()
-            AppActionRole.Destructive -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            AppActionRole.Standard -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
+        colors = appActionColors(action.role),
     ) {
-        // Before the label rather than after it, so the words keep the same place whether or not this
-        // answer is working: a spinner that pushed the label across would make the button jump at the
-        // moment it was pressed.
-        if (action.progress) {
-            LoadingIndicator(
-                modifier = Modifier.size(ACTION_PROGRESS_SIZE),
-                color = LocalContentColor.current,
-            )
-            Spacer(Modifier.width(ACTION_PROGRESS_GAP))
-        }
-        Text(
-            if (action.labelArgs.isEmpty()) {
-                stringResource(action.label)
-            } else {
-                stringResource(action.label, *action.labelArgs.toTypedArray())
-            },
-            style = MaterialTheme.typography.labelMedium,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-        )
+        AppActionLabel(action)
     }
+}
+
+/**
+ * The other shape an action takes: a bare label, with no fill of its own.
+ *
+ * For an action drawn inside something the app itself put up - a settings card, a form row, the notice that
+ * a setting is not in the state it wants - where a filled answer would either be the same colour as what it
+ * is drawn on or would outrank the answer that screen is actually asking for. One screen's "use the running
+ * version" and another's "open setting" are the same control: this one.
+ *
+ * It draws the same words as [AppActionButton] - one label style, one way of wrapping, the same spinner
+ * beside a slow one - so an action does not change how it reads by changing where it sits.
+ */
+@Composable
+internal fun AppTextAction(
+    action: AppAction,
+    modifier: Modifier = Modifier,
+    /**
+     * The colour of the words, when the caller is drawn on a container the theme did not hand it.
+     *
+     * Primary is what a link is everywhere else, and a card that is an error is the case that needs the
+     * other: a fixed palette over a coloured surface is one of them reading wrong, and there the surface
+     * wins - the caller passes what it is drawn on.
+     */
+    contentColor: Color = MaterialTheme.colorScheme.primary,
+) {
+    TextButton(
+        onClick = action.onClick,
+        modifier = modifier,
+        enabled = action.enabled,
+        contentPadding = ACTION_PADDING,
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
+    ) {
+        AppActionLabel(action)
+    }
+}
+
+/**
+ * What an action says, drawn once for both shapes.
+ *
+ * The spinner comes before the label rather than after it, so the words keep the same place whether or not
+ * the action is working: one that pushed the label across would make the control jump at the moment it was
+ * pressed.
+ */
+@Composable
+private fun AppActionLabel(action: AppAction) {
+    action.icon?.let { icon ->
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(ACTION_ICON_SIZE),
+        )
+        Spacer(Modifier.width(ACTION_ICON_GAP))
+    }
+    if (action.progress) {
+        LoadingIndicator(
+            modifier = Modifier.size(ACTION_PROGRESS_SIZE),
+            color = LocalContentColor.current,
+        )
+        Spacer(Modifier.width(ACTION_PROGRESS_GAP))
+    }
+    Text(
+        if (action.labelArgs.isEmpty()) {
+            stringResource(action.label)
+        } else {
+            stringResource(action.label, *action.labelArgs.toTypedArray())
+        },
+        style = MaterialTheme.typography.labelMedium,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+    )
+}
+
+/**
+ * The three fills, in one place, because they are read in two.
+ *
+ * Every answer in the app is a [Button] wearing one of these, and one screen builds its own button anyway:
+ * the retry dialog's three answers carry a second line saying what each one buys, which is a taller and
+ * left-aligned answer than [AppActionButton] draws. That screen used to spell the fills out again, which is
+ * how it would have kept a shade that the rest of the app had moved on from - so the fills live here and it
+ * wears them.
+ */
+@Composable
+internal fun appActionColors(role: AppActionRole): ButtonColors = when (role) {
+    AppActionRole.Priority -> ButtonDefaults.buttonColors()
+    AppActionRole.Destructive -> ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    )
+    AppActionRole.Standard -> ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** How tall every answer is, whatever it says. */
@@ -228,6 +319,12 @@ private val ACTION_PROGRESS_SIZE = 16.dp
 
 /** The gap between that spinner and the label it belongs to. */
 private val ACTION_PROGRESS_GAP = 8.dp
+
+/** The size of an action's icon, which is the spinner's size with room for a symbol that has to be read. */
+private val ACTION_ICON_SIZE = 18.dp
+
+/** The gap between an icon and the words it belongs to. */
+private val ACTION_ICON_GAP = 8.dp
 
 /** The most answers read across in one row. */
 private const val ACTIONS_PER_ROW = 3

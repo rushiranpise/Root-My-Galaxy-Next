@@ -199,6 +199,51 @@ class ActionRowsTest {
     }
 
     @Test
+    fun `no screen draws a labelled action button of its own`() {
+        // The rule the vocabulary exists for, taken to the whole app rather than to the dialogs: an action
+        // that carries words is [AppActionButton] - a filled answer - or [AppTextAction], the link shape for
+        // one drawn inside a card or a form. A screen that draws its own is how the same action came to be a
+        // platform button at the platform's padding and label size on one screen and the shared pill on the
+        // next, which is what a run's Stop and a dialog's Cancel used to be.
+        //
+        // One screen is deliberately allowed its own: the retry dialog's answers carry a second line saying
+        // what each one buys, and a taller left-aligned answer is not what [AppActionButton] draws. Its
+        // three tiers are built in [RetryOption], wearing the shared fills - see the test below.
+        val handBuilt =
+            """(?:^|[^\w.])(Button|TextButton|FilledTonalButton|FilledButton|OutlinedButton|ElevatedButton)\("""
+                .toRegex()
+        val files = packageFiles()
+        assertTrue("no source was read, so this proves nothing", files.size >= 20)
+        val offenders = files
+            .filter { file -> file.name != "DialogActions.kt" }
+            .flatMap { file ->
+                val lines = file.readLines()
+                lines.mapIndexedNotNull { index, line ->
+                    if (line.trimStart().startsWith("import ")) return@mapIndexedNotNull null
+                    if (!handBuilt.containsMatchIn(line)) return@mapIndexedNotNull null
+                    if (index in retryOptionBody(lines)) return@mapIndexedNotNull null
+                    "${file.name}:${index + 1} ${line.trim()}"
+                }
+            }
+        assertTrue("a screen draws its own action button - $offenders", offenders.isEmpty())
+    }
+
+    @Test
+    fun `an action's fills are spelled out once`() {
+        // What the shared roles are for. A screen that writes out `surfaceContainerHighest` for its own
+        // second-tier answer is a screen that keeps that shade after the rest of the app has moved on -
+        // which is exactly what the retry dialog had done, in a comment claiming to match.
+        val spellers = packageFiles()
+            .filter { file -> file.name != "DialogActions.kt" }
+            .flatMap { file ->
+                file.readLines().withIndex()
+                    .filter { (_, line) -> line.contains("ButtonDefaults.buttonColors(") }
+                    .map { (index, line) -> "${file.name}:${index + 1} ${line.trim()}" }
+            }
+        assertTrue("a screen spells an action's fill out instead of wearing the shared one - $spellers", spellers.isEmpty())
+    }
+
+    @Test
     fun `no screen in the app lays its own answers out`() {
         // The rule this pins is the reason the shared set exists: every question in this app is asked with
         // it, and the way that stops being true is one new dialog - a Row of buttons by hand, which is how
@@ -253,6 +298,29 @@ class ActionRowsTest {
             .map { it.name }
         assertTrue("a dialog answers from the dismiss slot: $offenders", offenders.isEmpty())
     }
+
+    /**
+     * The lines of [RetryOption]'s body, as a range, because that is the one screen allowed its own buttons.
+     *
+     * Read from wherever the file being scanned is: a file without the function has no such range, which is
+     * how every other source is held to the rule.
+     */
+    private fun retryOptionBody(lines: List<String>): IntRange {
+        val start = lines.indexOfFirst { it.startsWith("internal fun RetryOption(") }
+        if (start < 0) return IntRange.EMPTY
+        val end = (start + 1 until lines.size).firstOrNull { lines[it] == "}" } ?: lines.size
+        return start..end
+    }
+
+    /** Every source of this package, whether or not it asks a question. */
+    private fun packageFiles(): List<File> = listOf(
+        File("src/main/java/dev/busung/s25uroot"),
+        File("app/src/main/java/dev/busung/s25uroot"),
+    ).firstOrNull(File::isDirectory)
+        ?.walkTopDown()
+        ?.filter { it.isFile && it.extension == "kt" }
+        ?.toList()
+        ?: error("the source directory was not found from ${File(".").absolutePath}")
 
     /** One of this package's sources, wherever the test JVM was started from. */
     private fun source(fileName: String): String =
