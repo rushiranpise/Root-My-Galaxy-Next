@@ -459,7 +459,9 @@ private fun InstallScreen(
                                     if (installState.phase == InstallPhase.Installed) {
                                         RecoveryActionButton(
                                             tool = RecoveryTool.SoftReboot,
-                                            label = stringResource(R.string.install_load_modules),
+                                            // The label, not the sentence: the answer button resolves its
+                                            // own label, so every answer in the app is one resource.
+                                            label = R.string.install_load_modules,
                                             modifier = Modifier.weight(1f),
                                             onOpenSetting = onOpenSetting,
                                         )

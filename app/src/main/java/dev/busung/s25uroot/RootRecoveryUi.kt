@@ -2,11 +2,10 @@ package dev.busung.s25uroot
 
 import android.content.Context
 import android.view.HapticFeedbackConstants
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Refresh
@@ -14,9 +13,7 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -199,7 +196,15 @@ internal fun RootRecoverySection(
 @Composable
 internal fun RecoveryActionButton(
     tool: RecoveryTool,
-    label: String,
+    /**
+     * What the button says, as the resource rather than the resolved sentence.
+     *
+     * This was a `String` while the button was built here - the caller resolved it and this function
+     * drew it - and the shared answer button takes a label resource, because the answers elsewhere in
+     * the app are all resources and the set is where they are resolved. Nothing about the call site
+     * changes but the type: its sentence is still its own.
+     */
+    @StringRes label: Int,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onBootRootModeChanged: (Boolean) -> Unit = {},
@@ -218,23 +223,23 @@ internal fun RecoveryActionButton(
     var confirming by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<RecoveryMessage?>(null) }
 
-    FilledTonalButton(
-        onClick = {
+    // The app's own answer button, because this press has a slow half: the action it confirms replaces the
+    // running framework, so the wait is not brief, and the button that started it is where "is it working"
+    // belongs. It used to answer that by hand, swapping its own icon for a spinner - which is
+    // [AppAction.progress], drawn beside the label rather than in place of the tool's icon. Its fill is
+    // [AppActionRole.Standard] and not the loud one, which is what it was: the row it sits in offers a
+    // quiet way out beside it, and the tonal button it replaces was never the row's primary answer.
+    AppActionButton(
+        AppAction(
+            label = label,
+            enabled = enabled && !running,
+            progress = running,
+        ) {
             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
             confirming = true
         },
         modifier = modifier,
-        enabled = enabled && !running,
-    ) {
-        if (running) {
-            LoadingIndicator(modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-        } else {
-            Icon(tool.icon(), contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(label)
-    }
+    )
 
     if (confirming) {
         AlertDialog(

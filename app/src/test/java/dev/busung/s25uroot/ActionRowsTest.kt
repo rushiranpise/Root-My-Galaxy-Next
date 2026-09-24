@@ -120,6 +120,67 @@ class ActionRowsTest {
     }
 
     @Test
+    fun `no screen builds its own busy state`() {
+        // The shape this replaces, in every screen that had a slow press: a button that swapped its own
+        // label - or the icon beside it - for a spinner while it worked. It is one statement written out
+        // by hand everywhere it was needed, which is how the two answers in this app that could say "I am
+        // working" came to be the two that were drawn by hand. [AppAction.progress] is that statement now,
+        // so what must not exist is a spinner inside one of the platform's own buttons.
+        //
+        // Read by indentation rather than by parsing the file: a spinner's line is inside a call, and the
+        // call it belongs to is the first line above it that is indented less - see [ownerCall]. The shared
+        // button's own file is not read, because a spinner inside a button is exactly what it is.
+        val handBuilt =
+            """(?:^|\s)(?:Button|TextButton|FilledTonalButton|FilledButton|OutlinedButton)\(""".toRegex()
+        val screens = screens()
+        // Several spinners are read, and every one of them has to be somewhere this does not flag - a
+        // status row, a list heading, a panel waiting on a read. A file that failed to read would find no
+        // offenders and prove nothing, so the read is checked first.
+        val seen = screens.sumOf { file ->
+            file.readLines().count { it.contains("LoadingIndicator(") }
+        }
+        assertTrue("no spinner was read, so this proves nothing", seen >= 4)
+        val offenders = screens.flatMap { file ->
+            val lines = file.readLines()
+            lines.mapIndexedNotNull { index, line ->
+                if (!line.contains("LoadingIndicator(")) return@mapIndexedNotNull null
+                val owner = ownerCall(lines, index)
+                val call = owner?.let { lines[it].trim() }.orEmpty()
+                if (handBuilt.containsMatchIn(call)) "${file.name}:${index + 1} $call" else null
+            }
+        }
+        assertTrue("a screen draws its own spinner in a button - $offenders", offenders.isEmpty())
+    }
+
+    /**
+     * The call a line's body belongs to: the nearest line above it that is indented less, and that is not
+     * only the punctuation of an argument list.
+     *
+     * Indentation is the block structure here. The parenthesis-only lines are the reason this cannot simply
+     * take the first shallower line: a multi-line call opens its trailing lambda with a `) {` of its own, so
+     * stopping at that would name the button's own lambda as the call whose body the line is in. A block
+     * that opens with a line of its own is passed through for the same reason - the `if` a busy button
+     * draws its spinner under is not the call either.
+     */
+    private fun ownerCall(lines: List<String>, index: Int): Int? {
+        var indent = lines[index].takeWhile { it == ' ' }.length
+        for (above in index - 1 downTo 0) {
+            val line = lines[above]
+            val aboveIndent = line.takeWhile { it == ' ' }.length
+            if (aboveIndent >= indent || isPunctuationOnly(line.trim())) continue
+            // "Names a call" and "opens a block" are one check, because the call this body belongs to is
+            // the first shallower line that is not itself a block opener.
+            if (!line.trim().endsWith("{")) return above
+            indent = aboveIndent
+        }
+        return null
+    }
+
+    /** Whether a line holds only the brackets of a call, and nothing that names one. */
+    private fun isPunctuationOnly(trimmed: String): Boolean =
+        trimmed.replace("else", "").none { !it.isWhitespace() && it !in "()}{," }
+
+    @Test
     fun `the shizuku start prompt asks with the shared set instead of its own button`() {
         // The special case the slot exists for: this dialog built its own pressable answer, spinner and
         // all, which is how one screen came to have buttons that did not match the other twenty.

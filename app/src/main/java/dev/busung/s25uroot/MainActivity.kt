@@ -131,7 +131,6 @@ import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -150,7 +149,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -5448,24 +5446,23 @@ private fun StagedResidueDialog(
                 // error colour, and only when there is something to remove.
                 if (reading != null && !reading.temp.blind && reading.anything) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilledTonalButton(
-                            enabled = !clearing,
-                            onClick = {
+                        // The app's own answer button rather than a tonal one of this screen's: it is the
+                        // one press here that can take something that is not this app's, so it wears the
+                        // error colours whatever else the screen is recommending. The spinner it used to
+                        // draw *instead of* its label is now [AppAction.progress], beside the label - which
+                        // is also what keeps the button the same size at the moment it is pressed.
+                        AppActionButton(
+                            AppAction(
+                                label = R.string.residue_clear,
+                                role = AppActionRole.Destructive,
+                                enabled = !clearing,
+                                progress = clearing,
+                            ) {
                                 clickHaptic(view)
                                 confirmingClear = true
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
-                        ) {
-                            if (clearing) {
-                                LoadingIndicator(modifier = Modifier.size(18.dp))
-                            } else {
-                                Text(stringResource(R.string.residue_clear))
-                            }
-                        }
+                        )
                         clearOutcome?.let { outcome ->
                             Text(
                                 text = clearOutcomeLine(context, outcome),
@@ -7136,42 +7133,39 @@ private fun PayloadSourcesEditor(
                     )
                 }
                 val candidateChecking = candidate != null && checking == candidate.id
-                Button(
-                    onClick = {
-                        clickHaptic(view)
-                        val source = candidate ?: return@Button
-                        if (sources.any { it.id == source.id }) {
-                            duplicate = true
+                // The shared answer button, because this press has a slow half: the check runs before
+                // anything is added, and the screen used to answer "is it working" by replacing this
+                // button's icon with a spinner - which is [AppAction.progress], and is now drawn beside
+                // the label rather than in place of the icon. The label carries the other half of it,
+                // since checking and adding are the same press.
+                AppActionButton(
+                    AppAction(
+                        label = if (candidateChecking) {
+                            R.string.payload_source_checking
                         } else {
-                            // Added only once the source has been read, so the list never holds a
-                            // repository nobody has confirmed serves a catalog.
-                            checkSource(source) {
-                                sources = sources.withSourceAdded(source)
-                                repository = ""
-                                branch = PayloadSource.DEFAULT_BRANCH
-                                duplicate = false
+                            R.string.payload_source_add_action
+                        },
+                        role = AppActionRole.Priority,
+                        enabled = candidate != null && !candidateChecking,
+                        progress = candidateChecking,
+                    ) {
+                        clickHaptic(view)
+                        candidate?.let { source ->
+                            if (sources.any { it.id == source.id }) {
+                                duplicate = true
+                            } else {
+                                // Added only once the source has been read, so the list never holds a
+                                // repository nobody has confirmed serves a catalog.
+                                checkSource(source) {
+                                    sources = sources.withSourceAdded(source)
+                                    repository = ""
+                                    branch = PayloadSource.DEFAULT_BRANCH
+                                    duplicate = false
+                                }
                             }
                         }
                     },
-                    enabled = candidate != null && !candidateChecking,
-                ) {
-                    if (candidateChecking) {
-                        LoadingIndicator(modifier = Modifier.size(18.dp))
-                    } else {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(
-                            if (candidateChecking) R.string.payload_source_checking
-                            else R.string.payload_source_add_action,
-                        ),
-                    )
-                }
+                )
             }
 
             HorizontalDivider()
@@ -7416,35 +7410,35 @@ private fun RevisionPicker(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        OutlinedButton(
-            onClick = {
+        // Resolving a ref is a network read, so this press is the slow one on the screen - and it is the
+        // shared answer button that answers "is it working", rather than a spinner of this screen's own
+        // standing where the search icon used to be. The guard the press had is a condition on the work
+        // instead of a return out of the button, because the body it returns from is not a builder here.
+        AppActionButton(
+            AppAction(
+                label = R.string.payload_pin_resolve,
+                enabled = manual.isNotBlank() && !applying,
+                progress = applying,
+            ) {
                 clickHaptic(view)
                 val ref = manual.trim()
-                if (ref.isEmpty() || applying) return@OutlinedButton
-                scope.launch {
-                    applying = true
-                    applyFailure = null
-                    runCatchingCancellable {
-                        withContext(Dispatchers.IO) {
-                            PayloadRepository(context).resolveNamedRevision(source.repository, ref)
-                        }
-                    }.onSuccess { commit -> choice = RevisionChoice.Commit(commit) }
-                        .onFailure { failure ->
-                            applyFailure = failure.message ?: failure.javaClass.simpleName
-                        }
-                    applying = false
+                if (ref.isNotEmpty() && !applying) {
+                    scope.launch {
+                        applying = true
+                        applyFailure = null
+                        runCatchingCancellable {
+                            withContext(Dispatchers.IO) {
+                                PayloadRepository(context).resolveNamedRevision(source.repository, ref)
+                            }
+                        }.onSuccess { commit -> choice = RevisionChoice.Commit(commit) }
+                            .onFailure { failure ->
+                                applyFailure = failure.message ?: failure.javaClass.simpleName
+                            }
+                        applying = false
+                    }
                 }
             },
-            enabled = manual.isNotBlank() && !applying,
-        ) {
-            if (applying) {
-                LoadingIndicator(modifier = Modifier.size(18.dp))
-            } else {
-                Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.payload_pin_resolve))
-        }
+        )
 
         // What the chosen revision serves, stated before it is what the source is pinned to. The
         // lists are the whole catalog's, because a pin is a decision about the catalog and not only
