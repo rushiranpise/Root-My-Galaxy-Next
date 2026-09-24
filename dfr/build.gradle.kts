@@ -1,7 +1,43 @@
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
     id("com.android.application")
+}
+
+/**
+ * The helper's version code, taken from the bytes the helper is built out of.
+ *
+ * A number written here by hand is a number somebody has to remember to change, and forgetting it is the
+ * failure the app's stale-helper check exists to catch: the phone keeps the copy it installed last time,
+ * Package Manager reports it as installed and healthy - it really is - and the run that follows fails
+ * inside the exploit, in the shape of the exploit having failed. So the code is a digest of this module's
+ * own sources, which are the same input its behaviour is built from: it changes exactly when the helper
+ * does, whether or not anybody was watching, and two builds of the same sources get the same code because
+ * they are the same helper.
+ *
+ * That last property is what makes equality the right comparison rather than order - see
+ * `stageTwoBuild` in the app, which asks whether the copy on the phone *is* this one and never which is
+ * newer. A code that only ever went up would have to be bumped for a comment as well as for a fix, and
+ * the app would ask for an install that changes nothing.
+ *
+ * [SCOPE] is the resources, the manifest and every source the APK carries. Files are read in path order
+ * so the digest does not depend on how the filesystem enumerates them, and the path is part of the digest
+ * so moving a file is a change - because it can be one: this module's own manifest decides the process it
+ * runs in.
+ */
+val helperVersionCode: Int = run {
+    val digest = MessageDigest.getInstance("SHA-256")
+    fileTree("src/main") {
+        include("**/*.kt", "**/*.java", "**/*.c", "**/*.h", "**/*.S", "**/*.xml", "**/*.txt")
+    }.files.sortedBy { it.absolutePath }.forEach { file ->
+        digest.update(file.relativeTo(projectDir).invariantSeparatorsPath.toByteArray())
+        digest.update(file.readBytes())
+    }
+    // 31 bits of the digest, kept inside the range every installer accepts, and never zero: a version
+    // code of zero is the one value Package Manager treats as unset.
+    (ByteBuffer.wrap(digest.digest(), 0, 4).int and 0x3FFFFFFF) + 1
 }
 
 // The same signing material the app module uses: CI passes it through environment variables, a local
@@ -38,7 +74,7 @@ android {
         applicationId = "dev.rushiranpise.rmgnext.helper"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
+        versionCode = helperVersionCode
         versionName = "1.0"
         // Stage one is AArch64 assembly (stage1.S), so the artifact is arm64-only; everything else in
         // the chain is portable, and on a device without that ABI the native load fails with a message

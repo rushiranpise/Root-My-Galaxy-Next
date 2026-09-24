@@ -131,6 +131,24 @@ class StageTwoIdentityTest {
     }
 
     @Test
+    fun `the helper's version code is taken from the helper rather than written down`() {
+        // What the app compares to decide whether the copy on the phone is the one it ships is this
+        // number, so a literal here is a stale helper the app cannot see: the phone keeps the old copy,
+        // Package Manager reports it as installed and healthy - it really is - and the run it starts
+        // fails inside the exploit. Derived from the module's own sources, it changes when the helper does.
+        assertTrue(
+            "the helper's versionCode is not taken from the module's own sources, so nothing makes it " +
+                "change when the helper does and the app's stale-helper check can never fire",
+            helperBuildFile().contains("versionCode = helperVersionCode"),
+        )
+        assertTrue(
+            "no digest of the helper's sources in its build file, so the number above cannot be " +
+                "following them",
+            helperBuildFile().contains("MessageDigest.getInstance(\"SHA-256\")"),
+        )
+    }
+
+    @Test
     fun `the helper draws the same icon as the app`() {
         // The two APKs are one product and a launcher shows them together, so the icon is one set of
         // files. A manifest naming an icon the module cannot resolve is a build failure rather than a

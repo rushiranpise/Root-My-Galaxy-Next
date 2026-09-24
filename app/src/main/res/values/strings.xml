@@ -689,9 +689,12 @@
     <string name="dfr_step_remove">Remove the stage 2</string>
     <string name="dfr_step_remove_detail">It installed as an ordinary app, so its key was not in the list yet. Remove it, reboot, then install it again. Package Manager never re-keys an app it has already installed.</string>
     <string name="dfr_step_install">Install the stage 2</string>
-    <string name="dfr_step_install_detail">Choose the stage-2 APK below and install it. Only now, after the reboot, is it accepted as a system app.</string>
+    <string name="dfr_step_install_detail">Press Install stage 2, which installs the helper APK this app carries. Only now, after the reboot, is it accepted as a system app.</string>
+    <string name="dfr_step_stale">Install the stage 2 this app ships</string>
+    <string name="dfr_step_stale_detail">The helper on the phone was built by a different version of this app, so it carries that version\'s shellcode: a run it starts is that build\'s run, and what this one fixed is not on the phone yet. Installing replaces it in place - the package keeps the system uid it already has, and the copy in this APK is the only one this app can drive.</string>
+    <string name="dfr_helper_build_stale">The helper on the phone is build %1$d; the one in this APK is build %2$d.</string>
     <string name="dfr_step_reboot_again">Reboot again</string>
-    <string name="dfr_step_reboot_again_detail">The stage 2 needs one more boot before its system user takes effect.</string>
+    <string name="dfr_step_reboot_again_detail">The helper\'s code runs inside the system process, which is already up, so a restart is what makes it load what was just installed rather than the copy it has in memory. On a first install it is also the boot that puts its system user into effect.</string>
     <string name="dfr_step_open">Open the stage 2</string>
     <string name="dfr_step_open_detail">Press Obtain root there. After this, root does not need the exploit again.</string>
     <string name="dfr_step_ready">Rooted without the exploit</string>

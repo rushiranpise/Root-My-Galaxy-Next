@@ -37,6 +37,8 @@ import dev.busung.s25uroot.dfr.DfrMode
 import dev.busung.s25uroot.dfr.DfrProbe
 import dev.busung.s25uroot.dfr.DfrState
 import dev.busung.s25uroot.dfr.DfrStep
+import dev.busung.s25uroot.dfr.StageTwoBuild
+import dev.busung.s25uroot.dfr.StageTwoBuildReading
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -102,7 +104,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                 val helper = DfrApk.bundled(context)
                 bundledApk = helper.file
                 helperRefusal = helper.availability.takeIf { it != DfrHelperAvailability.Ready }
-                readState(context, helper.availability)
+                readState(context, helper.availability, helper.file)
             }
             reading = next
             readFailed = next == null
@@ -314,6 +316,10 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                 // The current step's own line, which is where the copy explains the one thing that is easy
                 // to get wrong about it - and it is the same line whether the step was reached, refused or
                 // could not be read at all.
+                // Each step carries its own line, including the two that are about a helper rather than
+                // about the phone: [DfrStep.StaleStageTwo] is not [DfrStep.InstallStageTwo] with a
+                // different button, because "there is no helper" and "the helper is another build" are
+                // different things to have to do something about, and only one of them is visible.
                 val detail = when {
                     readFailed -> R.string.dfr_step_read_detail
                     step != null -> step.detail
@@ -329,6 +335,20 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                 // Only when something was measured: with no helper the flow refuses before it opens a
                 // shell, so a line about the package, the certificate and the hooks would be three claims
                 // nobody made.
+                // The evidence behind the one conclusion here that is about two files rather than about
+                // the phone, and only when they actually disagree: a line that always said "these two
+                // match" would be a line nobody reads by the time it says they do not.
+                reading?.build?.takeIf { it.verdict == StageTwoBuild.Different }?.let { build ->
+                    Text(
+                        stringResource(
+                            R.string.dfr_helper_build_stale,
+                            build.installed ?: 0L,
+                            build.bundled ?: 0L,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 reading?.probe?.let { probe ->
                     Text(
                         stringResource(
@@ -450,7 +470,13 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         ) { removeStageTwo() }
                         // No condition on the helper here: a build without one never reaches this step,
                         // because the flow refuses before it - see [DfrStep.NoHelper].
-                        DfrStep.InstallStageTwo -> AppAction(
+                        //
+                        // [DfrStep.StaleStageTwo] shares this answer because it is the same press: what
+                        // differs between a phone with no helper and a phone with somebody else's is the
+                        // reason in the step's own line, not the command. `pm install -r` over the copy
+                        // that is there is how the second one is fixed, and it keeps the system uid the
+                        // package was given when it was first installed.
+                        DfrStep.InstallStageTwo, DfrStep.StaleStageTwo -> AppAction(
                             R.string.dfr_action_install_stage2,
                             roleFor(DfrAction.StageTwo),
                             enabled,
@@ -574,7 +600,9 @@ private fun askedAction(step: DfrStep?): DfrAction? = when (step) {
     DfrStep.ReadState, DfrStep.HelperUnwritable -> DfrAction.Read
     DfrStep.Inject -> DfrAction.Inject
     DfrStep.Reboot, DfrStep.RebootAgain, DfrStep.ApplyRemoval -> DfrAction.Reboot
-    DfrStep.RemoveStageTwo, DfrStep.InstallStageTwo, DfrStep.OpenStageTwo -> DfrAction.StageTwo
+    DfrStep.RemoveStageTwo, DfrStep.InstallStageTwo, DfrStep.StaleStageTwo,
+    DfrStep.OpenStageTwo,
+    -> DfrAction.StageTwo
     else -> null
 }
 
@@ -596,6 +624,11 @@ private class DfrReading(
      */
     val probe: DfrProbe?,
     val injected: Boolean?,
+    /**
+     * The two helper builds, which are read alongside the probe because they are what decides whether the
+     * helper on the phone can be driven at all - see [DfrStep.StaleStageTwo].
+     */
+    val build: StageTwoBuildReading,
 )
 
 /**
@@ -605,16 +638,26 @@ private class DfrReading(
  * Package Manager's view of an installed app, the other is a parser's view of a file - and a device can
  * answer one and not the other.
  */
-private fun readState(context: Context, helper: DfrHelperAvailability): DfrReading? {
+private fun readState(
+    context: Context,
+    helper: DfrHelperAvailability,
+    bundled: File?,
+): DfrReading? {
     // Answered before the phone is asked anything, and that order is the point: the helper is this app's
     // own asset rather than a reading, so a build that cannot produce it refuses on a device where no
     // shell answers at all - which is exactly the device a mis-built APK gets tried on.
     if (helper != DfrHelperAvailability.Ready) {
-        return DfrReading(DfrFlow.next(DfrFlow.refusalState(helper)), probe = null, injected = null)
+        return DfrReading(
+            step = DfrFlow.next(DfrFlow.refusalState(helper)),
+            probe = null,
+            injected = null,
+            build = DfrInstall.readStageTwoBuild(context, bundled),
+        )
     }
     val probe = DfrInstall.probe() ?: return null
     val check = DfrInstall.run(context, DfrMode.Check)
     val injected = check?.allInjected
+    val build = DfrInstall.readStageTwoBuild(context, bundled)
     val state = DfrState(
         keyInjected = injected,
         injectedAtMillis = AppPreferences.dfrInjectedAt(context),
@@ -625,6 +668,10 @@ private fun readState(context: Context, helper: DfrHelperAvailability): DfrReadi
         // clean-up reads as a phone that was never injected, and the screen offers the inject it just undid.
         keyRemovedAtMillis = AppPreferences.dfrKeyRemovedAt(context),
         stageTwoArmed = probe.armed,
+        // The helper on the phone against the one in this APK, which no other reading can answer: Package
+        // Manager knows the installed package, and the file just unpacked out of the assets is the only
+        // place the shipped build exists to be asked about.
+        stageTwoBuild = build.verdict,
         // Reached only when the read said Ready, which is what got this far.
         helper = helper,
         // The clock that can see the restart this screen's own button performs. The kernel's uptime is
@@ -639,7 +686,12 @@ private fun readState(context: Context, helper: DfrHelperAvailability): DfrReadi
         // a report about this flow that omits it cannot be argued against when the step is wrong.
         "system uid flow read: key=$injected removedAt=${state.keyRemovedAtMillis} " +
             "now=${state.nowMillis} uptime=${state.uptimeMillis} " +
-            "framework=${state.frameworkUptimeMillis} -> ${DfrFlow.next(state)}",
+            "framework=${state.frameworkUptimeMillis} " +
+            // The two codes and not only the verdict they came to: this is the one judgement here that is
+            // about two files rather than about the phone, so a report of the flow that says "the helper
+            // was stale" without the numbers cannot be argued with.
+            "helper=${build.verdict}(${build.installed}/${build.bundled}) " +
+            "-> ${DfrFlow.next(state)}",
     )
-    return DfrReading(DfrFlow.next(state), probe, injected)
+    return DfrReading(DfrFlow.next(state), probe, injected, build)
 }

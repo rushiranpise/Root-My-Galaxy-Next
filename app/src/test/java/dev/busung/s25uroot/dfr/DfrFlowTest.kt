@@ -28,6 +28,7 @@ class DfrFlowTest {
         installedAtMillis: Long? = null,
         keyRemovedAtMillis: Long? = null,
         stageTwoArmed: Boolean = false,
+        stageTwoBuild: StageTwoBuild = StageTwoBuild.Unreadable,
         helper: DfrHelperAvailability = DfrHelperAvailability.Ready,
         frameworkUptimeMillis: Long? = null,
         uptimeMillis: Long = 4 * 60 * 60 * 1000L,
@@ -39,11 +40,133 @@ class DfrFlowTest {
         installedAtMillis = installedAtMillis,
         keyRemovedAtMillis = keyRemovedAtMillis,
         stageTwoArmed = stageTwoArmed,
+        stageTwoBuild = stageTwoBuild,
         helper = helper,
         frameworkUptimeMillis = frameworkUptimeMillis,
         nowMillis = now,
         uptimeMillis = uptimeMillis,
     )
+
+    @Test
+    fun `a helper built by another version of this app is replaced rather than opened`() {
+        // The failure this whole reading exists for: a helper from another build runs another build's
+        // shellcode, and the run it starts fails inside the exploit - which reads as the exploit having
+        // failed, on a phone whose helper installed cleanly and is exactly the system app it says it is.
+        assertEquals(
+            DfrStep.StaleStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 10 * 60 * 1000L,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 5 * 60 * 1000L,
+                    stageTwoBuild = StageTwoBuild.Different,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `a stale helper is replaced while root is still live`() {
+        // The one ordering worth arguing about: the hooks are in this boot's kernel, so the flow used to
+        // answer Ready and offer nothing - and Ready is exactly the state that could still fix the helper,
+        // because installing it is a shell command and the next reboot leaves no shell at all.
+        assertEquals(
+            DfrStep.StaleStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 10 * 60 * 1000L,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 5 * 60 * 1000L,
+                    stageTwoArmed = true,
+                    stageTwoBuild = StageTwoBuild.Different,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `the helper this app ships is opened the way it always was`() {
+        assertEquals(
+            DfrStep.OpenStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 10 * 60 * 1000L,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 5 * 60 * 1000L,
+                    stageTwoBuild = StageTwoBuild.Current,
+                    // Restarted since that install: a phone whose framework is a minute old, against an
+                    // install five minutes ago.
+                    frameworkUptimeMillis = 60_000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `a comparison nobody could make changes nothing`() {
+        // Both unanswerable cases at once, because they have to behave the same way: a build that could
+        // not be read and one that is not installed at all are the same silence here, and neither may turn
+        // into "install this one" over a number nobody read.
+        val samePhone = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 10 * 60 * 1000L,
+            stageTwoInstalled = true,
+            stageTwoIsSystemUid = true,
+            installedAtMillis = now - 5 * 60 * 1000L,
+        )
+        val restarted = samePhone.copy(frameworkUptimeMillis = 60_000L)
+        assertEquals(DfrStep.OpenStageTwo, DfrFlow.next(restarted.copy(stageTwoBuild = StageTwoBuild.Unreadable)))
+        assertEquals(DfrStep.OpenStageTwo, DfrFlow.next(restarted.copy(stageTwoBuild = StageTwoBuild.Absent)))
+    }
+
+    @Test
+    fun `an install that landed as an ordinary app is still removed before anything else`() {
+        // The identity problem dominates: Package Manager assigns the uid when a package is installed and
+        // never revisits it, so installing over an ordinary-app copy could not make it a system app - the
+        // removal is what the step sequence is for, and the build comparison waits behind it.
+        assertEquals(
+            DfrStep.RemoveStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 10 * 60 * 1000L,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = false,
+                    installedAtMillis = now - 5 * 60 * 1000L,
+                    stageTwoBuild = StageTwoBuild.Different,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `the comparison is equality, and the codes are never ordered`() {
+        // A version code is conventionally asked to go up, which is not the question: the question is
+        // whether the helper on the phone is the code in this APK. A build by a *newer* app is the same
+        // fix as one by an older one, and a number that could not be read is no fix at all.
+        assertEquals(StageTwoBuild.Absent, stageTwoBuild(installed = null, bundled = 42L))
+        assertEquals(StageTwoBuild.Unreadable, stageTwoBuild(installed = 42L, bundled = null))
+        assertEquals(StageTwoBuild.Current, stageTwoBuild(installed = 42L, bundled = 42L))
+        assertEquals(StageTwoBuild.Different, stageTwoBuild(installed = 41L, bundled = 42L))
+        assertEquals(StageTwoBuild.Different, stageTwoBuild(installed = 43L, bundled = 42L))
+        // Nothing installed answers before the second number is even asked about: there is nothing on the
+        // phone to disagree with, and the flow's own install step is the one that owns this state.
+        assertEquals(StageTwoBuild.Absent, stageTwoBuild(installed = null, bundled = null))
+    }
+
+    @Test
+    fun `the reading of both builds is what the verdict is drawn from`() {
+        assertEquals(StageTwoBuild.Current, StageTwoBuildReading(1L, 1L).verdict)
+        assertEquals(StageTwoBuild.Different, StageTwoBuildReading(1L, 2L).verdict)
+        assertEquals(StageTwoBuild.Absent, StageTwoBuildReading(null, 2L).verdict)
+        assertEquals(StageTwoBuild.Unreadable, StageTwoBuildReading(1L, null).verdict)
+    }
 
     @Test
     fun `a build with no helper refuses on a fresh device`() {
@@ -505,6 +628,17 @@ class DfrFlowTest {
                 uptimeMillis = 5 * 60 * 1000L,
             ),
             fresh(stageTwoArmed = true),
+            // The helper on the phone is another build's: installed as a system app, and not the one this
+            // APK carries. Reached from the armed state above as well, which is the ordering that matters.
+            fresh(
+                keyInjected = true,
+                injectedAtMillis = now - 30 * 60 * 1000L,
+                stageTwoInstalled = true,
+                stageTwoIsSystemUid = true,
+                installedAtMillis = now - 30 * 60 * 1000L,
+                stageTwoBuild = StageTwoBuild.Different,
+                uptimeMillis = 5 * 60 * 1000L,
+            ),
             // A clean-up that changed the file on this boot: no key in packages.xml, a removal waiting on
             // the restart that makes it true.
             fresh(keyRemovedAtMillis = now - 60_000),

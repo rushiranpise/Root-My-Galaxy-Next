@@ -1,6 +1,7 @@
 package dev.busung.s25uroot.dfr
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.SystemClock
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
@@ -532,6 +533,40 @@ internal object DfrInstall {
      * reads it for its own timeouts.
      */
     fun uptimeMillis(): Long = SystemClock.elapsedRealtime()
+
+    /**
+     * Reads both helper builds - the one on the phone and the one in this APK - and compares them.
+     *
+     * Two reads that need no shell and no permission, which matters more than it looks: this is the one
+     * judgement in the flow that can be made on a phone that has just rebooted with no root, and it is
+     * answered from Package Manager alone. [bundled] is the unpacked asset [DfrApk.bundled] just wrote, so
+     * a read with nothing to unpack is a read with nothing to compare rather than a disagreement.
+     */
+    fun readStageTwoBuild(context: Context, bundled: File?): StageTwoBuildReading = StageTwoBuildReading(
+        installed = installedStageTwoVersion(context),
+        bundled = bundled?.let { archiveVersion(context.packageManager, it.absolutePath) },
+    )
+
+    /**
+     * The version code of the helper installed on this phone, or null when it is not installed.
+     *
+     * Null and not zero: "not installed" and "installed under a code I read as nothing" are different
+     * answers, and the flow's own install step owns the first - a zero here would turn a missing helper
+     * into a stale one.
+     */
+    private fun installedStageTwoVersion(context: Context): Long? = runCatching {
+        context.packageManager.getPackageInfo(STAGE_TWO_PACKAGE, 0).longVersionCode
+    }.getOrNull()
+
+    /**
+     * The version code inside an APK file, or null when it could not be parsed.
+     *
+     * Read from the file rather than from an installed package, which is the whole point: the copy this
+     * app ships is installed nowhere, so asking what build it is means asking the file.
+     */
+    private fun archiveVersion(packageManager: PackageManager, apkPath: String): Long? = runCatching {
+        packageManager.getPackageArchiveInfo(apkPath, 0)?.longVersionCode
+    }.getOrNull()
 
     /** Reads the three facts, or null when no root shell answered. */
     fun probe(): DfrProbe? {

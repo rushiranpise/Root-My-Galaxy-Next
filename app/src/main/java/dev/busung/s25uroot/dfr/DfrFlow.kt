@@ -63,6 +63,7 @@ internal enum class DfrStep(
     Inject(R.string.dfr_step_inject, R.string.dfr_step_inject_detail),
     Reboot(R.string.dfr_step_reboot, R.string.dfr_step_reboot_detail),
     RemoveStageTwo(R.string.dfr_step_remove, R.string.dfr_step_remove_detail),
+    StaleStageTwo(R.string.dfr_step_stale, R.string.dfr_step_stale_detail),
     InstallStageTwo(R.string.dfr_step_install, R.string.dfr_step_install_detail),
     RebootAgain(R.string.dfr_step_reboot_again, R.string.dfr_step_reboot_again_detail),
     OpenStageTwo(R.string.dfr_step_open, R.string.dfr_step_open_detail),
@@ -112,6 +113,14 @@ internal data class DfrState(
     /** Whether the exploit's hooks are already in the kernel this boot. */
     val stageTwoArmed: Boolean,
     /**
+     * Whether the helper installed on the phone is the one this APK ships.
+     *
+     * [StageTwoBuild.Unreadable] by default, which is the same answer as "nobody asked": every caller
+     * that has not done this reading gets the flow's old behaviour rather than a claim about two builds
+     * nothing compared.
+     */
+    val stageTwoBuild: StageTwoBuild = StageTwoBuild.Unreadable,
+    /**
      * Whether this build can produce the helper APK.
      *
      * The one field here that is not a reading of the phone: the helper is an asset of the APK that is
@@ -132,6 +141,65 @@ internal data class DfrState(
     val nowMillis: Long,
     val uptimeMillis: Long,
 )
+
+/**
+ * Whether the helper on the phone is the build this app ships, and whether that could even be asked.
+ *
+ * The helper is one APK built from one commit, and this app carries a copy of it - so the two are the
+ * same helper only when the phone is running the one in the APK in front of you. When they are not, the
+ * run the helper starts is the *other* build's run: its shellcode, its arguments, its bugs. That is the
+ * failure this whole reading exists for, because nothing else about it is visible - a stale helper
+ * installs cleanly, reports the system uid it really has, and fails inside the exploit in the shape of
+ * the exploit having failed. See [stageTwoBuild] for what the two numbers are compared as.
+ *
+ * Four answers rather than a boolean, because two of them are the same silence for different reasons and
+ * a third has an action. "Installed and this build" needs nothing, "installed and another build" is the
+ * one step this can take, and both of the unanswerable cases - nothing installed at all, and one of the
+ * two numbers unreadable - must not be reported as a disagreement: the flow's advice for another build
+ * is "install this one", and sending somebody to install a helper they already have, over a number that
+ * could not be read, is how a screen teaches people to ignore it.
+ */
+internal enum class StageTwoBuild {
+    /** Installed, and it is the build this APK carries. */
+    Current,
+
+    /** Installed, and built by a different version of this app. */
+    Different,
+
+    /** Nothing is installed, so there is nothing to compare - the flow's install step owns this state. */
+    Absent,
+
+    /** One of the two numbers could not be read, so no claim is made either way. */
+    Unreadable,
+}
+
+/**
+ * The two version codes behind [StageTwoBuild], kept so a report can argue with the verdict.
+ *
+ * The numbers themselves mean nothing to a person, and that is exactly why they are kept: the verdict is
+ * this app's conclusion, and "the helper on the phone is a different build" is only checkable against the
+ * two codes it was drawn from - the same reason the framework's age and the boot ids are logged rather
+ * than only the steps they decide.
+ */
+internal data class StageTwoBuildReading(val installed: Long?, val bundled: Long?) {
+    val verdict: StageTwoBuild get() = stageTwoBuild(installed, bundled)
+}
+
+/**
+ * The comparison itself, as a pure function so the cases can be tested without two APKs.
+ *
+ * Equality and not order, which is the one thing about this that is easy to get wrong twice over. A
+ * version code is asked to be monotonically increasing so an *upgrade* can be recognised, and that is not
+ * the question here: the question is whether the helper on the phone is the code in this APK, and two
+ * builds of the same sources answer yes however their codes relate. So a helper built by a *newer* app
+ * than the one asking is a disagreement too - and it is the same fix, which is why one step covers both.
+ */
+internal fun stageTwoBuild(installed: Long?, bundled: Long?): StageTwoBuild = when {
+    installed == null -> StageTwoBuild.Absent
+    bundled == null -> StageTwoBuild.Unreadable
+    installed == bundled -> StageTwoBuild.Current
+    else -> StageTwoBuild.Different
+}
 
 internal object DfrFlow {
 
@@ -198,6 +266,23 @@ internal object DfrFlow {
         if (state.keyRemovedAtMillis != null && !restartedSince(state.keyRemovedAtMillis, state)) {
             return DfrStep.ApplyRemoval
         }
+        // The helper on the phone is not this build's, so the run it would start is another build's run -
+        // and this comes before the armed check, which is the one ordering here worth arguing about.
+        //
+        // Armed means root is live this boot, and "root is live" is not a reason to leave a wrong helper
+        // in place: it is the last moment the install *can* be made, because installing is a shell command
+        // and after the next reboot there is no shell at all. Waiting would spend the phone's one rooted
+        // window on nothing and leave the wrong copy for the next rerun to fail with - the very failure
+        // this reading exists to catch.
+        //
+        // It needs no other condition, which is not obvious: the key and the reboot are settled by the
+        // install being a *system* one already - Package Manager gives the uid at install time and never
+        // revisits it, so a package that runs as uid 1000 keeps that uid when this app installs over it,
+        // whatever state the key is in. What the key and the reboot still owe is the flow's own business
+        // two steps down, and re-installing here does not spend either of them.
+        if (state.stageTwoIsSystemUid && state.stageTwoBuild == StageTwoBuild.Different) {
+            return DfrStep.StaleStageTwo
+        }
         // Armed is first because it is the only state that needs nothing: hooks in the kernel this boot
         // mean the flow already completed, whatever any file says about how it started.
         if (state.stageTwoArmed) return DfrStep.Ready
@@ -234,6 +319,9 @@ internal object DfrFlow {
         stageTwoIsSystemUid = false,
         installedAtMillis = null,
         stageTwoArmed = false,
+        // Unreadable rather than Absent: nothing was read, and the refusal answers on the first line -
+        // but a field that claimed "nothing is installed" would be a claim this state never made.
+        stageTwoBuild = StageTwoBuild.Unreadable,
         helper = helper,
         frameworkUptimeMillis = null,
         nowMillis = 0L,
@@ -291,6 +379,7 @@ internal object DfrFlow {
         DfrStep.HelperUnwritable,
         DfrStep.ReadState,
         DfrStep.RemoveStageTwo,
+        DfrStep.StaleStageTwo,
         DfrStep.ApplyRemoval,
     )
 }
