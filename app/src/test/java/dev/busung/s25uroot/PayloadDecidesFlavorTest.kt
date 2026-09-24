@@ -88,6 +88,34 @@ class PayloadDecidesFlavorTest {
     }
 
     @Test
+    fun `the overview reports the manager of that flavour and of no other`() {
+        // One row per project was a comparison nobody can act on: the flavour is what the resolved payload
+        // loads, so the other projects' managers are apps the next run will never open, and listing them
+        // made the card ask a question with no answer on it.
+        val body = readinessCard()
+        assertTrue(
+            "the slice is not the readiness card, so this test is holding something else to the rule:\n$body",
+            body.contains("R.string.readiness_shizuku"),
+        )
+        assertFalse(
+            "the readiness card lists every flavour again, so a phone carrying another project's manager " +
+                "reports on an app this phone's payload will never load:\n$body",
+            body.contains("KernelSuFlavor.entries"),
+        )
+        assertEquals(
+            "the card no longer draws exactly one manager row, which is the one for the flavour it was " +
+                "handed:\n$body",
+            1,
+            Regex("""(?<![\w.])ManagerRow\(""").findAll(body).count(),
+        )
+        assertTrue(
+            "the row no longer asks about the flavour handed to it, so it can report on a manager this " +
+                "device is not meant to have:\n$body",
+            body.contains("readiness.managers.installed(kernelsuFlavor)"),
+        )
+    }
+
+    @Test
     fun `the flavour row takes no tap`() {
         // The row's own arguments: from its title up to the read that begins the manager card below it,
         // which is the point the source stops talking about this row.
@@ -106,6 +134,16 @@ class PayloadDecidesFlavorTest {
             row.contains("onClick"),
         )
     }
+
+    /**
+     * The readiness card's own text: its declaration up to the row declaration that follows it.
+     *
+     * Not [functionBody], which stops at the first line that is only a brace - enough for the three-line
+     * top-level function it was written for, and not for one with a `Card` and a `Column` in it.
+     */
+    private fun readinessCard(): String = sources.single { it.name == "MainActivity.kt" }.readText()
+        .substringAfter("private fun ReadinessCard(")
+        .substringBefore("private fun ManagerRow(")
 
     /**
      * One function's body, found by its declaration and closed at the first line that is only a brace.

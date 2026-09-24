@@ -1237,6 +1237,7 @@ private fun RootApp(
                         AppPage.Overview -> OverviewPage(
                             padding = padding,
                             device = device,
+                            kernelsuFlavor = kernelsuFlavor,
                             installState = installState,
                             armedRetry = armedRetry,
                             retryPayload = retryPayload,
@@ -1515,6 +1516,14 @@ private fun OverviewPage(
     retryPayload: CachedPayload?,
     updateStatus: UpdateStatus,
     updateCardDismissed: Boolean,
+    /**
+     * The flavour this device's payload loads, which is the only manager this page reports on.
+     *
+     * Handed in rather than read again here, because it is the same value the Settings screen's flavour
+     * row shows and the same one the run's transport uses: one reading of a fact about the payload, so a
+     * page cannot report on a manager the next run would never open.
+     */
+    kernelsuFlavor: KernelSuFlavor,
     onDismissUpdateCard: () -> Unit,
     /** What the last framework restart came back with, until it is dismissed. */
     frameworkRestart: FrameworkRestartReport?,
@@ -1687,7 +1696,7 @@ private fun OverviewPage(
                 )
             }
         }
-        item { ReadinessCard(readiness, onOpenSettings) }
+        item { ReadinessCard(readiness, kernelsuFlavor, onOpenSettings) }
         item { DeviceCard(device) }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
@@ -2287,7 +2296,11 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
  * boot exists.
  */
 @Composable
-private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
+private fun ReadinessCard(
+    readiness: Readiness,
+    kernelsuFlavor: KernelSuFlavor,
+    onOpenSettings: () -> Unit,
+) {
     val view = LocalView.current
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
@@ -2332,16 +2345,18 @@ private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
                     onOpenSettings()
                 },
             )
-            // One row per project, from the same list the flavour picker offers: the manager a run
-            // leaves the phone needing is the one for the flavour it loaded, and a project added to
-            // that list gets a row here without a second edit to remember.
-            for (flavor in KernelSuFlavor.entries) {
-                ManagerRow(
-                    label = stringResource(R.string.readiness_manager_row, flavor.label),
-                    installed = readiness.managers.installed(flavor),
-                    onClick = onOpenSettings,
-                )
-            }
+            // One row, for the flavour the payload set - see [kernelsuFlavor] - and not one per project.
+            // The other two are managers this phone will never open and this app will never look for, so
+            // listing them was a choice nobody has: the flavour is not a setting to compare against any
+            // more, it is what the resolved payload loads, and its row is the only one that can be acted
+            // on. What is still worth a line is whether *this* one is installed: root with no manager is a
+            // phone that cannot be managed without installing one, and a manager with no root is a phone
+            // whose install has not been run yet.
+            ManagerRow(
+                label = stringResource(R.string.readiness_manager_row, kernelsuFlavor.label),
+                installed = readiness.managers.installed(kernelsuFlavor),
+                onClick = onOpenSettings,
+            )
         }
     }
 }
