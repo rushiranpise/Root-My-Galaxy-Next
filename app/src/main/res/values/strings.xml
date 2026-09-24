@@ -685,9 +685,9 @@
     <string name="dfr_apk_bundled">Using the helper APK this app ships with.</string>
     <string name="dfr_inject">Inject</string>
     <string name="dfr_clean_up">Clean up</string>
-    <string name="dfr_log">Logs</string>
+    <string name="dfr_panel">Readings and output</string>
     <string name="dfr_reading">Reading the device...</string>
-    <string name="dfr_measured">Stage 2: %1$s | certificate in list: %2$s | hooks armed: %3$s</string>
+    <string name="dfr_measured">[*] stage 2: %1$s | certificate in list: %2$s | hooks armed: %3$s</string>
     <!--
       The panel's own line for the helper's two builds, one per verdict. The numbers are the evidence behind
       the flow's one judgement about two files rather than about the phone, and the dialog is where somebody
@@ -697,6 +697,7 @@
     <string name="dfr_log_build_current">[*] helper build: %1$d on the phone, %2$d in this APK - the same build</string>
     <string name="dfr_log_build_different">[*] helper build: %1$d on the phone, %2$d in this APK - another build\'s helper</string>
     <string name="dfr_log_build_absent">[*] helper build: nothing installed on the phone, so there is nothing to compare</string>
+    <string name="dfr_log_stage">[*] daemon stage: %1$s - %2$s</string>
     <string name="dfr_log_build_unreadable">[*] helper build: %1$d on the phone, and the helper APK in this app could not be read</string>
     <string name="dfr_stage_not_installed">not installed</string>
     <string name="dfr_stage_system">installed as a system app</string>

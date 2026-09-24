@@ -35,6 +35,7 @@ import dev.busung.s25uroot.dfr.DfrHelperAvailability
 import dev.busung.s25uroot.dfr.DfrInstall
 import dev.busung.s25uroot.dfr.DfrMode
 import dev.busung.s25uroot.dfr.DfrProbe
+import dev.busung.s25uroot.dfr.DfrStageReading
 import dev.busung.s25uroot.dfr.DfrState
 import dev.busung.s25uroot.dfr.DfrStep
 import dev.busung.s25uroot.dfr.StageTwoBuild
@@ -361,39 +362,6 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // What was measured, as three answers rather than only the step drawn from them: the step
-                // is this app's conclusion, and a wrong conclusion is only arguable against these.
-                // Only when something was measured: with no helper the flow refuses before it opens a
-                // shell, so a line about the package, the certificate and the hooks would be three claims
-                // nobody made.
-                // The helper's two builds used to be a line of their own here, and only when they
-                // disagreed. They are in the panel now, all four answers of them, next to the output that
-                // acted on them - one place for the numbers rather than a sentence here and a reading
-                // there, which is also the difference between a person seeing "nothing is installed to
-                // compare" and having to infer it from a line that is not there.
-                reading?.probe?.let { probe ->
-                    Text(
-                        stringResource(
-                            R.string.dfr_measured,
-                            // One answer, not a yes/no plus a qualifier: which identity the package has
-                            // is only a question when there is a package, and "not installed (ordinary
-                            // app)" is what a pair of fields says when nothing asks whether both apply.
-                            stringResource(
-                                when {
-                                    !probe.installed -> R.string.dfr_stage_not_installed
-                                    probe.isSystemUid -> R.string.dfr_stage_system
-                                    else -> R.string.dfr_stage_ordinary
-                                },
-                            ),
-                            stringResource(
-                                if (reading?.injected == true) R.string.dfr_yes else R.string.dfr_no,
-                            ),
-                            stringResource(if (probe.armed) R.string.dfr_yes else R.string.dfr_no),
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 Text(
                     // Three lines rather than two, for the same reason the refusal is two steps: "this app
                     // ships no helper" and "it ships one that could not be unpacked" send somebody to two
@@ -441,14 +409,52 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         )
                     }
                 }
-                // The action's own output after the reading it acted on, in the order they happened, and
-                // the panel is shown when there is either: what a press printed is not the only evidence
-                // this screen has, and waiting for one before saying what the helper is would hide the
-                // reading behind an action nobody has taken yet.
-                val panel = listOfNotNull(helperBuild, log).joinToString("\n")
+                // What the device answered, as the three answers rather than only the step drawn from
+                // them: the step is this app's conclusion, and a wrong conclusion is only arguable
+                // against these. Only when something was measured - with no helper the flow refuses
+                // before it opens a shell, so a line about the package, the certificate and the hooks
+                // would be three claims nobody made, and the daemon's line would be a fourth.
+                val measured = reading?.probe?.let { probe ->
+                    stringResource(
+                        R.string.dfr_measured,
+                        // One answer, not a yes/no plus a qualifier: which identity the package has
+                        // is only a question when there is a package, and "not installed (ordinary
+                        // app)" is what a pair of fields says when nothing asks whether both apply.
+                        stringResource(
+                            when {
+                                !probe.installed -> R.string.dfr_stage_not_installed
+                                probe.isSystemUid -> R.string.dfr_stage_system
+                                else -> R.string.dfr_stage_ordinary
+                            },
+                        ),
+                        stringResource(
+                            if (reading?.injected == true) R.string.dfr_yes else R.string.dfr_no,
+                        ),
+                        stringResource(if (probe.armed) R.string.dfr_yes else R.string.dfr_no),
+                    )
+                }
+                // The daemon the next boot and the next run both need, in this panel for the same reason
+                // the helper's builds are: what a press prints is what *its* staging attempt did, and the
+                // state it started from is what a reader argues with. It also says the one thing no
+                // action's output can - whether the file the next boot's late-load reads is already in
+                // place, and when it is not, why. The words are the Settings readout's own, from the same
+                // enum, so the two screens cannot come to different accounts of one file.
+                val stage = reading?.stage?.let { stage ->
+                    stringResource(
+                        R.string.dfr_log_stage,
+                        stringResource(stage.label),
+                        stringResource(stage.detail),
+                    )
+                }
+                // The readings in the order the step list is argued from - what the phone is, which
+                // build's helper is on it, what the next boot's late-load will find - and then whatever
+                // the press printed. The panel is shown when there is any of them: what a press printed
+                // is not the only evidence this screen has, and waiting for one before saying what the
+                // helper is would hide the readings behind an action nobody has taken yet.
+                val panel = listOfNotNull(measured, helperBuild, stage, log).joinToString("\n")
                 if (panel.isNotEmpty()) {
                     Text(
-                        stringResource(R.string.dfr_log),
+                        stringResource(R.string.dfr_panel),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -456,12 +462,12 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     // does and for the same reason: what the injector prints is a report of arbitrary
                     // length - its whole transform, then a verify line per target - and as plain text in
                     // this dialog it grew the screen until the step list and the actions were below the
-                    // fold. The screen's job is to say which step the phone is on, so the log may not be
-                    // what decides how tall it is.
+                    // fold. The screen's job is to say which step the phone is on, so the panel - readings
+                    // and output together - may not be what decides how tall it is.
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(DFR_LOG_HEIGHT),
+                            .height(DFR_PANEL_HEIGHT),
                         shape = MaterialTheme.shapes.medium,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ) {
@@ -632,20 +638,21 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
  *
  * A cap rather than "whatever is left", because the answers are not in this area at all: they are the
  * AlertDialog's own, laid out below everything here, and [AppDialogActions] puts this screen's six of them
- * in two rows rather than six. 440 dp is what is left for the step list, the measurement and the log once
+ * in two rows rather than six. 440 dp is what is left for the step list, the readings and the output once
  * those two rows, a title and the platform's padding have taken their share of the 780 dp screen this was
  * written against - and that difference is the reason the answers are a grid at all.
  */
 private val DFR_TEXT_HEIGHT = 440.dp
 
 /**
- * How much of the dialog the process log may take.
+ * How much of the dialog the panel may take - the readings first, then what a press printed.
  *
- * Fixed rather than a maximum, because the log is the one field here whose length nothing bounds: an
- * injector run prints its whole transform and a verify line per target, and the clean-up prints two files'
- * worth of it. See the panel in the dialog for what it looked like as plain text.
+ * Fixed rather than a maximum, because this is the one field here whose length nothing bounds: an injector
+ * run prints its whole transform and a verify line per target, the clean-up prints two files' worth of it,
+ * and the readings above those have no bound either - the daemon's line is a whole sentence. See the panel
+ * in the dialog for what any of it looked like as plain text.
  */
-private val DFR_LOG_HEIGHT = 140.dp
+private val DFR_PANEL_HEIGHT = 140.dp
 
 /**
  * Which of the grid's actions a step is waiting for, or null when it is waiting for none of them.
@@ -689,15 +696,24 @@ private class DfrReading(
      * helper on the phone can be driven at all - see [DfrStep.StaleStageTwo].
      */
     val build: StageTwoBuildReading,
+    /**
+     * What the next boot's late-load would find, or null when no shell was opened to ask.
+     *
+     * Null means the same here as it does for [probe], and it is deliberately not a reading of its own:
+     * the refusal path never reaches this question, and a panel line saying "no shell answered" about a
+     * question nobody asked would be this screen inventing a measurement - which is the one thing the
+     * panel is there not to do.
+     */
+    val stage: DfrStageReading?,
 )
 
 /**
  * Measures the phone and asks the flow what is next, or null when no shell answered at all - root or the
  * plain one Shizuku offers, since every reading here is a thing the `shell` user may do itself.
  *
- * The probe and the inject check are separate commands because they are separate questions - one is
- * Package Manager's view of an installed app, the other is a parser's view of a file - and a device can
- * answer one and not the other.
+ * The probe, the inject check and the daemon's state are separate commands because they are separate
+ * questions - one is Package Manager's view of an installed app, one is a parser's view of a file, and one
+ * is the staged daemon being asked what build it is - and a device can answer one and not the others.
  */
 private fun readState(
     context: Context,
@@ -713,6 +729,7 @@ private fun readState(
             probe = null,
             injected = null,
             build = DfrInstall.readStageTwoBuild(context, bundled),
+            stage = null,
         )
     }
     val probe = DfrInstall.probe() ?: return null
@@ -723,6 +740,9 @@ private fun readState(
     val check = DfrInstall.checkInjected(context)
     val injected = check?.allInjected
     val build = DfrInstall.readStageTwoBuild(context, bundled)
+    // The third question, and the one no action's output can stand in for: a press stages the daemon and
+    // prints what *that* attempt did, where this is what is there before it runs - see the panel.
+    val stage = DfrInstall.readDaemonStage(context)
     val state = DfrState(
         keyInjected = injected,
         injectedAtMillis = AppPreferences.dfrInjectedAt(context),
@@ -758,5 +778,5 @@ private fun readState(
             "helper=${build.verdict}(${build.installed}/${build.bundled}) " +
             "-> ${DfrFlow.next(state)}",
     )
-    return DfrReading(DfrFlow.next(state), probe, injected, build)
+    return DfrReading(DfrFlow.next(state), probe, injected, build, stage)
 }

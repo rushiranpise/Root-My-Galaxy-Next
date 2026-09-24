@@ -33,9 +33,9 @@ class DfrBuildEvidenceTest {
             ui.contains("val helperBuild = reading?.build?.let"),
         )
         assertTrue(
-            "the panel is composed from the action's output alone again, so nothing is shown until a " +
-                "press has printed something",
-            ui.contains("listOfNotNull(helperBuild, log)"),
+            "the build reading is printed beside the action's output again rather than in the panel with " +
+                "it, so the numbers sit somewhere other than where a press reports",
+            Regex("listOfNotNull\\(.*\\bhelperBuild\\b.*\\blog\\)").containsMatchIn(ui),
         )
         assertFalse(
             "the panel is drawn only when an action has printed something, which hides the reading behind " +
@@ -50,7 +50,7 @@ class DfrBuildEvidenceTest {
         // sentence. Four lines and not one: "the helper is this build", "nothing is installed to compare"
         // and "the APK in this app could not be read" all leave the step list looking the same, and each of
         // them is what somebody needs when the step it chose is the thing they are arguing with.
-        val evidence = between(uiSource(), "val helperBuild = reading?.build?.let", "val panel = listOfNotNull")
+        val evidence = buildLines()
         StageTwoBuild.entries.forEach { verdict ->
             assertTrue(
                 "the panel has no line for $verdict, so that answer is either hidden or shown as another",
@@ -69,7 +69,7 @@ class DfrBuildEvidenceTest {
         // The comparison answers absent on a missing installed code and unreadable on a missing bundled one
         // before it compares anything, so two codes are only ever printed where two codes were read. The
         // two sentences that print one are the two that have one.
-        val evidence = between(uiSource(), "val helperBuild = reading?.build?.let", "val panel = listOfNotNull")
+        val evidence = buildLines()
         val absent = evidence.substringAfter("StageTwoBuild.Absent").substringBefore("StageTwoBuild.Unreadable")
         val unreadable = evidence.substringAfter("StageTwoBuild.Unreadable")
         assertTrue(
@@ -108,6 +108,16 @@ class DfrBuildEvidenceTest {
             ui.contains("-> \${DfrFlow.next(state)}"),
         )
     }
+
+    /**
+     * The build reading's own lines, up to whatever the panel holds next to it - which ranges over the
+     * whole panel in [DfrPanelTest], and is deliberately not this test's business.
+     */
+    private fun buildLines() = between(
+        uiSource(),
+        "val helperBuild = reading?.build?.let",
+        "val measured = reading?.probe?.let",
+    )
 
     private fun uiSource() = source("src/main/java/dev/busung/s25uroot/DfrUi.kt")
 
