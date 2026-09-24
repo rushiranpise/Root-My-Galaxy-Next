@@ -3235,24 +3235,27 @@ private fun LogsPage(padding: PaddingValues) {
             },
             text = { Text(stringResource(R.string.logs_clear_body)) },
             confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    AppLog.clear()
-                    query = ""
-                    minLevel = AppLogLevel.Debug
-                    confirmClear = false
-                }) {
-                    Text(stringResource(R.string.logs_clear))
-                }
+                // Destructive even though the dialog exists for it: this is the line a log is kept
+                // for and it is the only copy. The rule the shared set is built on says as much - a
+                // recommendation to delete something is still a deletion - so this set has no filled
+                // answer, and the red is the meaning rather than an emphasis.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.logs_clear, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            AppLog.clear()
+                            query = ""
+                            minLevel = AppLogLevel.Debug
+                            confirmClear = false
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            confirmClear = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmClear = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -3667,22 +3670,24 @@ private fun SettingsPage(
             },
             text = { Text(stringResource(R.string.shizuku_not_running_body)) },
             confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                    openShizukuManager(context)
-                }) {
-                    Text(stringResource(R.string.action_download_shizuku))
-                }
+                // The recommended answer is the one that fixes what the dialog is about - the run asked
+                // for Shizuku and there is no manager to talk to - and getting it is not a deletion of
+                // anything, so it is the filled one.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_download_shizuku, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            showShizukuMissingDialog = false
+                            openShizukuManager(context)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            showShizukuMissingDialog = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -3936,33 +3941,39 @@ private fun SettingsPage(
                     )
                 }
             },
-            // Both actions in one slot, for the same reason the token dialog puts them there: split
-            // across the two slots the button beside Save ends up orphaned on its own line.
+            // Save and Reset are both answers, so both are answers here: each one ends the dialog and
+            // writes the preference, which is what separates an answer from the field's own controls -
+            // the "use the running version" affordance in the body stays a text button where it is,
+            // because it edits the draft and leaves the question open. Save leads because it is the
+            // recommended one; Reset is named with the version it resets to, so it cannot be mistaken
+            // for a second save.
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (managerVersionDraft.isNotBlank()) {
-                        TextButton(
-                            onClick = {
-                                showManagerVersionDialog = false
-                                onManagerVersionChanged("")
-                            },
-                        ) {
-                            Text(
-                                stringResource(
-                                    R.string.settings_manager_version_reset,
-                                    offeredVersion,
-                                ),
-                            )
-                        }
-                    }
-                    TextButton(
-                        onClick = {
+                AppDialogActions(
+                    listOfNotNull(
+                        AppAction(R.string.action_save, AppActionRole.Priority) {
                             showManagerVersionDialog = false
                             onManagerVersionChanged(managerVersionDraft)
                         },
-                    ) { Text(stringResource(R.string.action_save)) }
-                }
+                        AppAction(R.string.action_cancel) {
+                            showManagerVersionDialog = false
+                        },
+                        if (managerVersionDraft.isNotBlank()) {
+                            AppAction(
+                                label = R.string.settings_manager_version_reset,
+                                // Named with the version it resets to, which is the whole reason this
+                                // answer is not a second, quieter "save".
+                                labelArgs = listOf(offeredVersion),
+                            ) {
+                                showManagerVersionDialog = false
+                                onManagerVersionChanged("")
+                            }
+                        } else {
+                            null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -4013,30 +4024,31 @@ private fun SettingsPage(
                     )
                 }
             },
-            // All three actions in one slot. Split across the confirm and dismiss slots they interleave:
-            // a stacked dismiss column is placed beside the confirm button, so Delete ended up next to
-            // Save with Cancel orphaned on a line of its own below them.
+            // Save leads, Cancel follows, and Delete ends the row in the error colours: all three end
+            // the dialog and write something, so all three are answers - and the one that throws away a
+            // stored credential is the one that must not be the loud one.
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (shizukuToken.isNotBlank()) {
-                        TextButton(
-                            onClick = {
-                                showShizukuTokenDialog = false
-                                onShizukuTokenChanged("")
-                            },
-                        ) { Text(stringResource(R.string.history_delete)) }
-                    }
-                    TextButton(onClick = { showShizukuTokenDialog = false }) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                    TextButton(
-                        onClick = {
+                AppDialogActions(
+                    listOfNotNull(
+                        AppAction(R.string.action_save, AppActionRole.Priority) {
                             showShizukuTokenDialog = false
                             onShizukuTokenChanged(tokenDraft)
                         },
-                    ) { Text(stringResource(R.string.action_save)) }
-                }
+                        AppAction(R.string.action_cancel) {
+                            showShizukuTokenDialog = false
+                        },
+                        if (shizukuToken.isNotBlank()) {
+                            AppAction(R.string.history_delete, AppActionRole.Destructive) {
+                                showShizukuTokenDialog = false
+                                onShizukuTokenChanged("")
+                            }
+                        } else {
+                            null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 

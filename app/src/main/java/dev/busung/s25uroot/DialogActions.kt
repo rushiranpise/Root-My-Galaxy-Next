@@ -89,6 +89,15 @@ internal class AppAction(
      * beside is still the caller's, which is how one action can say "Start" and then "Starting…".
      */
     val progress: Boolean = false,
+    /**
+     * Arguments for a label that has placeholders in it, in the order the string names them.
+     *
+     * Empty for every label that is a fixed sentence, which is most of them. It exists because two of
+     * these answers name the value they act on - "Reset to 3.4.0" - and a set that could only say the
+     * unformatted string would either drop the number or push that answer back out of the set and into a
+     * hand-built button, which is the thing this file is here to stop.
+     */
+    val labelArgs: List<Any> = emptyList(),
     val onClick: () -> Unit,
 )
 
@@ -183,7 +192,11 @@ internal fun AppActionButton(action: AppAction, modifier: Modifier = Modifier) {
             Spacer(Modifier.width(ACTION_PROGRESS_GAP))
         }
         Text(
-            stringResource(action.label),
+            if (action.labelArgs.isEmpty()) {
+                stringResource(action.label)
+            } else {
+                stringResource(action.label, *action.labelArgs.toTypedArray())
+            },
             style = MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
             maxLines = 2,
