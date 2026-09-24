@@ -117,11 +117,14 @@ class SharedStagingNameTest {
     }
 
     /**
-     * Both APKs' sources: the stage two ships too, and it reads the daemon the app stages.
+     * Both APKs' sources: the stage two ships too, and it shares no code with this one.
      *
-     * Its write is into `/data/system`, which this file's rule is not about - but it reads
-     * `/data/local/tmp/ksud-s25u-kdp`, and that is a name on the shared list, so the module belongs in a
-     * scan whose subject is which install may touch which name.
+     * Its own paths are in `/data/system` now - a helper-run `system_server` cannot read the shell's temp
+     * directory, so the daemon it stages from lives beside the one the exploit execs rather than in
+     * `/data/local/tmp` - and this file's rule is about the temp directory. The module is still scanned
+     * because that is a decision this app made and the other APK could undo without either side noticing:
+     * a name added there under `/data/local/tmp` would stage into a file another install owns, and the two
+     * would work perfectly until they ran at the same time.
      */
     private fun shippedSources(): List<File> = listOf(
         File("src/main/java"),

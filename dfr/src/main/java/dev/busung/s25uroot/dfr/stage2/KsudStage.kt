@@ -20,22 +20,41 @@ import java.io.File
  * and a daemon that does not match the module in the kernel fails in exactly the way that looks like
  * the exploit having failed. So this APK carries none.
  *
- * What it does instead is take the daemon the phone already has, from whichever of these comes first:
+ * What it does instead is take the copy this project put there: `/data/system/rmgnext-ksud.src`, which the
+ * app writes from the payload it verified for this device, through whichever shell the phone has. That file
+ * is the source, and what it holds is what gets staged - nothing is invented, nothing is patched, and
+ * nothing is downloaded, because a daemon is version-locked to the kernel module that will load it and a
+ * missing one is a fact about the phone that the run's log has to carry.
  *
- * 1. `/data/system/rmgnext-ksud` itself, when the app has already put it there. Whoever staged it knew
- *    which flavour this boot runs, so it is left exactly as it is - staging over it would be this
- *    object replacing a known-good binary with one it guessed.
- * 2. `/data/adb/ksud`, where the payload leaves the daemon when the app's own run succeeds. This is the
- *    flavour-correct one by construction - it came out of the pair the app resolved for this device -
- *    and it is the best source here, because it lives outside the shared temp directory and therefore
- *    survives both a reboot and this app's own staging sweep.
- * 3. `/data/local/tmp/ksud-s25u-kdp`, the copy the app stages for its own runs. Also flavour-correct,
- *    but usually gone: the sweep that empties that directory after every run removes it.
+ * It is read out of `/data/system` and not out of the temp directory the app also stages in, and the reason
+ * is a measurement rather than a preference: this code runs *inside* `system_server`, and that context may
+ * not read `shell_data_file` - the type on everything under `/data/local/tmp`, which is the shell user's
+ * directory and not a type this app can relabel. So a helper pointed at that copy `stat`s a file and is
+ * denied the `open`, and says "present but unreadable" about a phone whose daemon is already staged
+ * correctly. `/data/system` is under `system_data_file`, which this process already writes, and is where
+ * the app leaves the second copy for exactly this reader.
  *
- * Nothing is invented and nothing is patched: the bytes are copied verbatim, because a daemon is
- * version-locked to the kernel module that will load it. And nothing is downloaded: a source that is
- * absent is reported, because a missing daemon is a fact about the phone that the run's log has to
- * carry - the exploit's last step would otherwise fail with nothing to exec and nothing to say why.
+ * `/data/adb/ksud` is deliberately **not** a source any more, and it used to be the first one. It looks like
+ * the best source there is - outside every shared directory, mode 0700 root - and it is the worst: it holds
+ * whichever KernelSU this *phone* has installed, which is not necessarily the one this project's payload
+ * ships. Measured on the device this rule was written from: the copy there was a vanilla KernelSU-Next 3.4.0
+ * daemon of 5,518,544 bytes, the payload's own daemon was 6,407,096, and both answered a `3.4.0`-family
+ * version string - so a comparison by version called them the same daemon, the exploit exec'd the installed
+ * one, and the phone's own dropbox recorded `SYSTEM_LAST_KMSG_*_KP` - a kernel panic - six times in one
+ * morning, every one of them at `ksud::late_load: Loading kernelsu.ko for KMI android15-6.6`.
+ *
+ * Two consequences, both deliberate:
+ *
+ * 1. A daemon already at [DEST] is kept when the app's copy is readable and byte-for-byte equal - and it is
+ *    *also* kept when the app's copy cannot be read at all, because [DEST] is this project's own name,
+ *    nothing else on the phone writes it, and the app rewrites it from the verified payload on every run.
+ *    That second branch is what a phone that has not run its app since it booted reaches, and it is said as
+ *    an unverified keep rather than as a match. Anything else *is* replaced, because whatever put a
+ *    different file there was an earlier build, another flavour or another project - and "it is already
+ *    staged" is exactly how a wrong daemon survived every run.
+ * 2. The one case that refuses is neither a readable source nor a daemon already in place. That costs a run
+ *    on a phone that has to open the app first; staging the installed daemon costs the kernel, and a phone
+ *    that has panicked cannot run the flow either.
  *
  * ## A manager's own copy is refused, and it used to be taken
  *
@@ -46,10 +65,10 @@ import java.io.File
  * 4,892,712 bytes of the wrong line, whose UAPI is not the module's - and nothing said so, because
  * every step up to the exec had succeeded.
  *
- * The two flavour-correct sources above are both files *this project* put there, so a daemon from
- * neither of them means the app has not staged one on this boot - which is a fact worth saying out loud
- * rather than papering over with another project's binary. So the managers are still named, as the list
- * of copies this refused, and the run stops here instead.
+ * The one source above is a file *this project* put there, so its absence means the app has not staged a
+ * daemon on this boot - which is a fact worth saying out loud rather than papering over with another
+ * project's binary. So the managers are still named, as the context for what was refused, and the run stops
+ * here instead.
  */
 internal object KsudStage {
 
@@ -57,15 +76,24 @@ internal object KsudStage {
     const val DEST = "/data/system/rmgnext-ksud"
 
     /**
-     * Where the payload leaves the daemon a successful run of this project's app installs.
+     * The path the phone's own installed KernelSU keeps its daemon at - and the copy this refuses.
      *
-     * A payload-owned name, and the first one the app's own version probe asks for, so the two cannot
-     * disagree about which daemon answers.
+     * A successful run of this project's app does rename its daemon onto this path, so it is not foreign
+     * by definition - but which build is there cannot be told from this process, and a wrong answer is a
+     * kernel panic. So it is named in the refusal instead of being staged.
      */
     private const val LEFT_BY_THE_PAYLOAD = "/data/adb/ksud"
 
-    /** The daemon the app stages for its own runs; a payload-owned name, so it is read, not written. */
-    private const val STAGED_BY_THE_APP = "/data/local/tmp/ksud-s25u-kdp"
+    /**
+     * The daemon the app stages for the helper to read, and the only source here.
+     *
+     * A fork-owned name under `/data/system`: the app writes it from the payload it verified for this device
+     * and beside the copy the exploit execs, so what is at this path is this project's daemon or nothing. It
+     * is read, never written by this APK. The temp directory holds the same bytes under the payload's own
+     * name, and that copy is *not* read here - this process' context is denied `shell_data_file`, so the file
+     * is visible and cannot be opened. See the object's KDoc.
+     */
+    private const val STAGED_BY_THE_APP = "/data/system/rmgnext-ksud.src"
 
     /**
      * The three flavours, as the app offers them: the id it names one by, what a person calls it, and the
@@ -94,18 +122,42 @@ internal object KsudStage {
     /** Stages the daemon and returns what happened, as lines for the log. */
     fun stage(context: Context): String {
         val log = StringBuilder()
-
-        // Already there: keep it. The copy in place was staged by whoever knew this boot's flavour.
+        val ours = File(STAGED_BY_THE_APP)
+        val mine = runCatching { ours.readBytes() }.getOrNull()?.takeIf { it.isNotEmpty() }
         val existing = File(DEST)
-        if (existing.isFile && existing.length() > 0) {
-            log.appendLine("[*] daemon already staged: $DEST (${existing.length()} bytes, left as it is)")
+        if (mine == null) {
+            // The app's copy could not be read - the state of a phone that has not run its app since it
+            // booted, and the state a helper pointed at the temp copy is in whatever the phone did. A
+            // daemon already at [DEST] is still kept: it is this project's own name and nothing else on
+            // the phone writes it, and the app rewrites it from the verified payload on every run. Said as
+            // the unverified keep it is, because nothing here compared the two files.
+            if (existing.isFile && existing.length() > 0) {
+                log.appendLine(
+                    "[*] daemon already staged at $DEST (${existing.length()} bytes, left as it is): " +
+                        "the app's copy at $STAGED_BY_THE_APP was not readable to compare it against",
+                )
+                return log.toString()
+            }
+            // Neither a copy of the app's to stage from nor a daemon already in place. With no root there
+            // is nothing else correct to take, so the run stops here rather than exec'ing the daemon the
+            // phone has installed - which is the copy that has to be refused rather than taken.
+            log.appendLine(refusal(ours, context))
             return log.toString()
         }
 
-        val (source, bytes) = read(context, log) ?: return log.toString()
-        log.appendLine("[*] daemon source: $source (${bytes.size} bytes)")
+        // Already there *and the same file*: keep it, so a run that follows another does not rewrite six
+        // megabytes to write what is already in place. Anything else is replaced - see the KDoc above.
+        if (sameBytes(existing, mine)) {
+            log.appendLine(
+                "[*] daemon already staged and it is this device's own: $DEST " +
+                    "(${existing.length()} bytes, left as it is)",
+            )
+            return log.toString()
+        }
+
+        log.appendLine("[*] daemon source: $STAGED_BY_THE_APP (${mine.size} bytes)")
         return try {
-            File(DEST).writeBytes(bytes)
+            File(DEST).writeBytes(mine)
             android.system.Os.chmod(DEST, MODE)
             log.appendLine("[+] staged $DEST")
             log.toString()
@@ -117,46 +169,39 @@ internal object KsudStage {
         }
     }
 
-    /** The first source that yields bytes, with the attempts logged. */
-    private fun read(context: Context, log: StringBuilder): Pair<String, ByteArray>? {
-        val payload = File(LEFT_BY_THE_PAYLOAD)
-        if (payload.isFile) {
-            runCatching { payload.readBytes() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
-                return payload.path to it
-            }
-            log.appendLine("[!] ${payload.path} is present but unreadable")
-        } else {
-            log.appendLine("[*] no daemon at ${payload.path} (has this app's own run succeeded on this phone?)")
-        }
+    /** Whether [file] is byte-for-byte [bytes], asked of the length first so the read is only paid for once. */
+    private fun sameBytes(file: File, bytes: ByteArray): Boolean =
+        file.isFile && file.length() == bytes.size.toLong() &&
+            runCatching { file.readBytes() }.getOrNull()?.contentEquals(bytes) == true
 
-        val staged = File(STAGED_BY_THE_APP)
-        if (staged.isFile) {
-            runCatching { staged.readBytes() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
-                return staged.path to it
-            }
-            log.appendLine("[!] ${staged.path} is present but unreadable")
-        } else {
-            log.appendLine("[*] no daemon staged by the app (${staged.path} absent)")
-        }
-
-        // Named and refused rather than taken. Each of these bundles a daemon for its own KernelSU, and
-        // which one that is cannot be known from here - the kernel is the only side that knows, and this
-        // process cannot ask it. A wrong daemon is worse than none: the exploit would exec it and fail a
-        // few steps later, in the shape of the exploit having failed.
-        val installed = installedFlavors(context).map { it.packageName }
-        log.appendLine(
-            "[x] nothing flavour-correct to stage: no readable daemon at $LEFT_BY_THE_PAYLOAD or " +
-                "$STAGED_BY_THE_APP" +
-                if (installed.isEmpty()) {
-                    "."
-                } else {
-                    ". ${installed.joinToString()} would each bundle one, and that copy is refused: it " +
-                        "belongs to whichever KernelSU that manager is, not to the module in this kernel. " +
-                        "The app stages the right one at $DEST before it hands over - run it again from " +
-                        "the app."
-                },
+    /**
+     * What this says when it has no daemon of its own to stage.
+     *
+     * It names the copy it will not take rather than taking it, because that copy is the whole failure: a
+     * daemon out of the phone's own installed KernelSU loads *that* project's kernel module, and a module
+     * belongs to one kernel build. On the device this rule was written from, that is a kernel panic and a
+     * reboot - so a run stopped here is a run that did not happen, which is the cheaper of the two.
+     */
+    private fun refusal(ours: File, context: Context): String = buildString {
+        appendLine(
+            if (ours.isFile) {
+                "[!] $STAGED_BY_THE_APP is present but unreadable, so nothing can be staged from it"
+            } else {
+                "[x] nothing staged by the app to stage: no daemon at $STAGED_BY_THE_APP"
+            },
         )
-        return null
+        appendLine("    nothing at $DEST either, so there is no earlier staging to keep.")
+        appendLine(
+            "    $LEFT_BY_THE_PAYLOAD is not taken: that path holds whichever KernelSU this phone " +
+                "has installed, and the daemon this run execs has to be this device's own payload's.",
+        )
+        val installed = installedFlavors(context).map { it.packageName }
+        if (installed.isNotEmpty()) {
+            // Named as context rather than as a source: each of these bundles a daemon for its own
+            // KernelSU, and which one is in the kernel cannot be known from this process.
+            appendLine("    installed managers: ${installed.joinToString()}")
+        }
+        append("    open the app and run the system uid flow again: it stages the daemon this device resolved.")
     }
 
     /** Whether a daemon is already at [DEST]. */

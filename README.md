@@ -680,7 +680,9 @@ folders, because one directory was never the whole picture:
   sentence as a clean device and the opposite of the truth. So the catalog is stat-ed and the directory
   is *listed* as well, with anything the listing names that the catalog does not carried as an extra.
 - **`/data/system`** — root-only, which is exactly why the system-uid flow works there: the daemon the
-  helper stages, and the inject's own copies of `packages.xml`. Read by name from a catalog rather than
+  exploit execs, the second copy the helper stages *from* (that helper runs inside `system_server`, whose
+  context may not read the shell's temp directory, so the daemon is left for it here rather than in
+  `/data/local/tmp`), and the inject's own copies of `packages.xml`. Read by name from a catalog rather than
   listed, because the directory holds hundreds of files belonging to the platform and to every app.
 - **`/data/adb`** — KernelSU's own. Listed, and never deleted from: everything in it is the root this app
   has just obtained, so no row there has a delete button, and neither does the folder.

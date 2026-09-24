@@ -79,7 +79,7 @@ class DfrStageArmingTest {
     }
 
     @Test
-    fun `the reading is taken on whichever shell the phone has, and asks the running version`() {
+    fun `the reading is taken on whichever shell the phone has, and compares the payload's own digest`() {
         val body = declaration(installSource(), "fun readDaemonStage(")
         assertTrue(
             "the stage file is read through root only, so the phone this reading is for - a boot with no " +
@@ -87,10 +87,10 @@ class DfrStageArmingTest {
             body.contains("runOnEitherShell("),
         )
         assertTrue(
-            "the reading no longer asks for the running daemon's version, so any copy at that path is " +
-                "called armed - including another flavour's, whose interface the module in the kernel does " +
-                "not match",
-            body.contains("runningDaemonVersion(context)"),
+            "the reading no longer compares the file against the payload's own digest, so a copy from " +
+                "another KernelSU is called armed - which is what left the wrong daemon in place on every " +
+                "return to the foreground, and every run after that exec'd it",
+            body.contains("payloadDaemonSha256(context)"),
         )
         assertTrue(
             "the reading no longer asks the question the arming asks, so what the row says and what the " +
@@ -120,7 +120,7 @@ class DfrStageArmingTest {
 
     @Test
     fun `the check reads the file the late-load renames and copies nothing`() {
-        val command = DfrInstall.stageArmedCommand(expectedVersion = "ksud 3.4.0 (uapi: 4)")
+        val command = DfrInstall.stageArmedCommand(payloadSha256 = "a".repeat(64))
         assertTrue(
             "the check no longer looks at the file the late-load renames, which is the only one whose " +
                 "absence stops the next boot",
@@ -136,22 +136,41 @@ class DfrStageArmingTest {
                 "the way in - so its absence is not what stops a boot",
             command.contains(DfrInstall.STAGED_DAEMON),
         )
-        // A version and not an existence check, and asked the same two ways the staging asks: a copy of
-        // another flavour is a file that is there and is the wrong daemon.
-        assertTrue("the check no longer asks the staged file what version it is", command.contains("-V"))
-        assertTrue("the daemon's other spelling of --version was dropped", command.contains("--version"))
-        assertTrue("the expected version is not compared against it", command.contains("RMG-stage=armed"))
+        // A digest and not a version, and this is the measurement behind it: two daemons on this device
+        // answered the same `ksud 3.4.0 (uapi: 4)` and were 1.2 MB apart, so a check that compares versions
+        // reports another project's daemon as armed - and the staging that would have replaced it is
+        // skipped, which is how the wrong daemon reached the kernel on every boot after it landed.
+        assertTrue("the check no longer hashes the staged file", command.contains("sha256sum"))
+        assertFalse(
+            "the check compares a version again, so a build from another KernelSU reads as armed: $command",
+            command.contains("-V 2>/dev/null"),
+        )
+        assertTrue("the expected digest is not compared against it", command.contains("RMG-stage=armed"))
+
+        // And with no payload to compare against, the row says so rather than guessing in either
+        // direction: "armed" would leave a foreign daemon in place, and it is the answer nothing checks.
+        val unknown = DfrInstall.stageArmedCommand(payloadSha256 = null)
+        assertTrue("an empty digest is not reported as uncompared", unknown.contains("want=''"))
+        assertTrue(
+            "the uncompared branch does not come before the comparison it stands for",
+            unknown.indexOf("RMG-stage=uncompared") < unknown.indexOf("RMG-stage=different"),
+        )
     }
 
     @Test
-    fun `the version the staging prefers is read the same way for the check`() {
-        // One spelling, or the check and the staging can disagree about whether a copy is the right one -
-        // and the check is what decides whether the staging happens at all.
-        val staging = DfrInstall.stageDaemonCommand(expectedVersion = "ksud 3.4.0 (uapi: 4)")
-        val check = DfrInstall.stageArmedCommand(expectedVersion = "ksud 3.4.0 (uapi: 4)")
-        listOf("-V", "--version").forEach { spelling ->
-            assertTrue("the staging no longer asks `$spelling`", staging.contains(spelling))
-            assertTrue("the check no longer asks `$spelling`", check.contains(spelling))
+    fun `the digest the staging is held to is the digest the check compares against`() {
+        // One rule, or the check and the staging can disagree about whether a copy is the right one - and
+        // the check is what decides whether the staging happens at all.
+        val sha = "b".repeat(64)
+        val staging = DfrInstall.stageDaemonCommand(payloadDaemon = "/data/cache/ksud", payloadSha256 = sha)
+        val check = DfrInstall.stageArmedCommand(payloadSha256 = sha)
+        assertTrue("the staging no longer carries the payload's digest", staging.contains("want='$sha'"))
+        assertTrue("the check no longer carries it", check.contains("want='$sha'"))
+        listOf(staging, check).forEach { command ->
+            assertTrue(
+                "a comparison that is not made of the device's own bytes: $command",
+                command.contains("sha256sum"),
+            )
         }
     }
 
@@ -199,11 +218,16 @@ class DfrStageArmingTest {
         val body = declaration(viewModelSource(), "private suspend fun installKernelSu(")
         assertTrue(
             "the run no longer writes the daemon back, so the next boot has nothing to late-load",
-            body.contains("DfrInstall.stageDaemonCommand()"),
+            body.contains("DfrInstall.stageDaemonCommand("),
+        )
+        assertTrue(
+            "the write-back no longer names the payload this run resolved, so it stages whatever the device " +
+                "happens to have installed instead of the daemon this boot just loaded",
+            body.contains("payloadDaemon = payloads.kernelSu.absolutePath"),
         )
         assertTrue(
             "the staging no longer goes through the run's own transport",
-            body.contains("runMaintenance(DfrInstall.stageDaemonCommand())"),
+            body.contains("runMaintenance("),
         )
         assertFalse(
             "the run asks the app's own root shell for the staging, which on a first install is a grant " +
@@ -213,7 +237,7 @@ class DfrStageArmingTest {
         assertTrue(
             "the daemon is written back before the load was confirmed, so it is written on runs that " +
                 "loaded nothing and the file it writes is the one that run just consumed either way",
-            body.indexOf("storeInstallReceipt()") < body.indexOf("DfrInstall.stageDaemonCommand()"),
+            body.indexOf("storeInstallReceipt()") < body.indexOf("DfrInstall.stageDaemonCommand("),
         )
     }
 

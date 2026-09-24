@@ -1604,10 +1604,18 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // bootstrap helper - while the app's own `su` grant is exactly what a first install has not been
         // given, so asking for one here is a prompt nobody asked for, or a minute of waiting for it.
         //
-        // No version is passed, and that is not a guess: the staging prefers a source by version only when
-        // it has one to compare, and its first source is `/data/adb/ksud` - which this run has just renamed
-        // the daemon onto. The daemon it writes back is therefore the one this boot is running.
-        val restaged = runCatching { runMaintenance(DfrInstall.stageDaemonCommand()) }.getOrNull()
+        // The payload this run just loaded is named here rather than left to the staging's own sources:
+        // the only daemon that may be staged is the one this device's payload ships, and this run is
+        // holding it. The running daemon's version goes with it as the reporting line and not as the
+        // choice - a version matched two different builds on this device once already.
+        val restaged = runCatching {
+            runMaintenance(
+                DfrInstall.stageDaemonCommand(
+                    payloadDaemon = payloads.kernelSu.absolutePath,
+                    expectedVersion = KernelSuVersionProbe.read(app).daemon,
+                ),
+            )
+        }.getOrNull()
         if (restaged != null && restaged.code == 0) {
             appendLog(
                 listOf(app.getString(R.string.log_ksu_stage_for_next_boot), restaged.output)

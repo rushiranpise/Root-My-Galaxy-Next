@@ -10,9 +10,12 @@ import dev.busung.s25uroot.AppLogTags
 import dev.busung.s25uroot.KernelSuFlavor
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
+import dev.busung.s25uroot.KnownGoodPayloadStore
 import dev.busung.s25uroot.RootStatusProbe
+import dev.busung.s25uroot.SYSTEM_HELPER_DAEMON
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
 import dev.busung.s25uroot.ShizukuController
+import dev.busung.s25uroot.sha256Of
 import java.io.File
 
 /**
@@ -497,17 +500,28 @@ internal object DfrInstall {
      */
     internal val STAGED_DAEMON: String get() = SYSTEM_STAGED_DAEMON
 
+    /** The copy this app stages for its own runs, written from the payload and from nothing else. */
+    internal const val PAYLOAD_STAGED_DAEMON = "/data/local/tmp/ksud-s25u-kdp"
+
     /**
-     * The daemons this app will stage, best first, both of them the flavour this device resolved.
+     * The daemon the phone's own installed KernelSU keeps.
      *
-     * `/data/adb/ksud` is the installed daemon - the one the verified load put there, so it is the
-     * flavour-correct copy by construction and outside every shared directory. The temp copy is the one
-     * this app stages for its own runs, which is the same binary and the fallback for a boot whose
-     * installed daemon the payload has not written yet.
+     * Not this project's file: whichever manager is installed writes *its* build here, and a build out of
+     * another KernelSU project is a module loader for a kernel this phone does not have. It is still a
+     * candidate below, because after a run of ours it *is* our daemon - the late-load renames the stage
+     * file onto exactly this path - and a boot that has lost the temp copy can still be armed from it.
+     */
+    internal const val INSTALLED_DAEMON = "/data/adb/ksud"
+
+    /**
+     * The paths the staging may copy from, preferred first - and none of them trusted for being there.
+     *
+     * Every candidate has to hash to the digest of the daemon *this device's payload* ships (see
+     * [stageDaemonCommand]), so this list only says which copy to prefer when more than one is right.
      */
     internal val DAEMON_SOURCES: List<String> = listOf(
-        "/data/adb/ksud",
-        "/data/local/tmp/ksud-s25u-kdp",
+        PAYLOAD_STAGED_DAEMON,
+        INSTALLED_DAEMON,
     )
 
     /**
@@ -520,6 +534,22 @@ internal object DfrInstall {
      * it has to be written again for every run rather than once per install.
      */
     internal const val DAEMON_STAGE_PATH = "/data/local/tmp/.ksud-stage"
+
+    /**
+     * The copy the system-uid helper reads, staged beside [STAGED_DAEMON] rather than in the temp directory.
+     *
+     * The helper runs inside `system_server`, and that context may not read `shell_data_file` - the type on
+     * everything under `/data/local/tmp`, which is the shell user's directory and not this app's to relabel.
+     * So the copy [PAYLOAD_STAGED_DAEMON] leaves there is one the helper can see and not open: it `stat`s a
+     * file and the read comes back denied, which is why the helper said "present but unreadable" and
+     * refused a phone whose [STAGED_DAEMON] was already the right daemon.
+     *
+     * Written from the same source and in the same breath as [STAGED_DAEMON], so the two are always the same
+     * bytes: the helper compares one against the other, and a copy that could drift would be worse than none.
+     * `system:system` mode 0600 rather than the daemon's own 0700, because the only reader is the helper - and
+     * no app on the phone can reach into `/data/system` to read it either way.
+     */
+    internal val HELPER_STAGED_DAEMON: String get() = SYSTEM_HELPER_DAEMON
 
     /**
      * Puts the flavour's own daemon where the exploit execs it, as root.
@@ -536,42 +566,64 @@ internal object DfrInstall {
      * copy may be a previous flavour's, and the helper keeps whatever it finds. Rewriting it is cheap
      * next to the run it enables, and it is what makes a flavour change safe.
      *
-     * **A size is not a version.** Measured on this device once the staging worked, the two sources are
-     * both `ksud 3.4.0 (uapi: 4)` and still 1.2 MB apart - 5,518,544 bytes for the installed daemon,
-     * 4,230,992 for this app's own pair build - so "both files are there, take the first" would have been
-     * a coin toss between two different builds presented as one decision. [expectedVersion] is what makes
-     * it a decision instead: a source answers `-V` with the version it *is*, and the first one that
-     * agrees with the daemon this device is running wins over a source that merely exists first.
+     * **A version is not an identity.** The measurement this is built on: two daemons on this phone both
+     * answered `ksud 3.4.0 (uapi: 4)` and were 1.2 MB apart - 5,518,544 bytes for the copy the installed
+     * KernelSU-Next manager had written to `/data/adb/ksud`, 4,230,992 for the payload's own build. A
+     * comparison by version called those the same daemon, and a run that followed handed the exploit the
+     * installed one: the log ends at `ksud::late_load: Loading kernelsu.ko for KMI android15-6.6` and the
+     * kernel panics - measured here as four reboots in twenty minutes, every one of them from a flow that
+     * looked healthy until the exec.
      *
-     * The chosen daemon is left in **two** places, because two different things read it: the path the
-     * exploit execs ([destination]), and [DAEMON_STAGE_PATH] - the copy the daemon's own `late-load`
-     * renames onto `/data/adb/ksud` as its first act. Only the first was written before, so a DFR run
-     * got as far as exec'ing the daemon and no further: without the second file the daemon aborts with
-     * "Failed to stage ksud" and nothing is loaded.
+     * So content is the authority and a version is not: [payloadSha256] is the digest of the daemon this
+     * device's payload ships - the Samsung-KDP build of the flavour the run resolved - and a candidate is
+     * staged only when it hashes to it. A candidate that is merely *there* is named and refused, which
+     * costs a run on a phone whose installed KernelSU is another build and cannot cost the kernel.
+     * [expectedVersion] is reporting only: it is the daemon this boot is running, said under the line that
+     * names which copy was staged.
+     *
+     * The chosen daemon is left in **three** places, because three different things read it: the path the
+     * exploit execs ([destination]), [DAEMON_STAGE_PATH] - the copy the daemon's own `late-load` renames
+     * onto `/data/adb/ksud` as its first act - and [HELPER_STAGED_DAEMON], the copy the system-uid helper
+     * stages *from* on a boot with no root. Only the first was written before, so a DFR run got as far as
+     * exec'ing the daemon and no further: without the second file the daemon aborts with "Failed to stage
+     * ksud" and nothing is loaded. The third is what the helper reads, and it is a copy in `/data/system`
+     * rather than the temp directory for the reason its own KDoc gives - `system_server` cannot read
+     * `shell_data_file`, so the copy this app leaves in the temp directory is one the helper cannot open.
      */
     internal fun stageDaemonCommand(
+        payloadDaemon: String? = null,
+        payloadSha256: String? = null,
         sources: List<String> = DAEMON_SOURCES,
         destination: String = STAGED_DAEMON,
         expectedVersion: String? = null,
         stagePath: String = DAEMON_STAGE_PATH,
     ): String = buildString {
-        fun versionOf(source: String) = versionOfCommand(source)
+        fun shaOf(source: String) = hashCommand(source)
 
-        append("want='").append(expectedVersion?.trim().orEmpty()).append("'; src=''; got=''; alt=''; altgot=''; ")
-        sources.forEach { source ->
-            append("if [ -s '").append(source).append("' ]; then v=").append(versionOf(source)).append("; ")
-            // The first source that exists is remembered, but only as a fallback: a source that answers
-            // with the right version is preferred however late in the list it is.
-            append("if [ -z \"${'$'}alt\" ]; then alt='").append(source)
-                .append("'; altgot=\"${'$'}v\"; fi; ")
-            append("if [ -z \"${'$'}src\" ] && [ -n \"${'$'}want\" ]; then case \"${'$'}v\" in ")
-                .append("*\"${'$'}want\"*) src='").append(source)
-                .append("'; got=\"${'$'}v\";; esac; fi; fi; ")
+        append("want='").append(payloadSha256?.trim().orEmpty()).append("'; wantver='")
+            .append(expectedVersion?.trim().orEmpty()).append("'; src=''; got=''; v=''; ")
+        // Read from the device only when the caller has not already hashed it, because one caller runs on
+        // every return to the foreground and would otherwise read six megabytes twice to learn what it
+        // was just told.
+        append("if [ -z \"${'$'}want\" ] && [ -s '").append(payloadDaemon.orEmpty())
+            .append("' ]; then want=").append(shaOf(payloadDaemon.orEmpty())).append("; fi; ")
+        append("if [ -z \"${'$'}want\" ]; then echo '[x] the payload daemon for this device is not known, so ")
+            .append("nothing is staged: a daemon this app did not take from the payload belongs to whichever ")
+            .append("KernelSU this phone runs'; exit 3; fi; ")
+        (listOfNotNull(payloadDaemon?.takeIf(String::isNotBlank)) + sources).forEach { source ->
+            append("if [ -z \"${'$'}src\" ] && [ -s '").append(source).append("' ]; then v=")
+                .append(shaOf(source)).append("; ")
+            append("if [ \"${'$'}v\" = \"${'$'}want\" ]; then src='").append(source)
+                .append("'; got=\"${'$'}('").append(source).append("' -V 2>/dev/null | head -1)\"; fi; ")
+            // The line that has to exist *before* a run: a phone whose installed KernelSU is another build
+            // is told which file that is, rather than finding out from a kernel that does not come back.
+            append("if [ -z \"${'$'}src\" ]; then echo \"[!] not the daemon this device payload ships ")
+                .append("(sha256 ${'$'}v), so it is not staged: ").append(source).append("\"; fi; fi; ")
         }
-        append("if [ -z \"${'$'}src\" ]; then src=\"${'$'}alt\"; got=\"${'$'}altgot\"; fi; ")
         // Named and refused rather than guessed: staging *a* daemon would be worse than staging none,
         // because the exploit would exec it and fail somewhere that looks like the exploit's fault.
-        append("if [ -z \"${'$'}src\" ]; then echo '[x] no daemon to stage'").append("; exit 3; fi; ")
+        append("if [ -z \"${'$'}src\" ]; then echo \"[x] no daemon to stage: none of the copies on this phone ")
+            .append("is the daemon this device payload ships (sha256 ${'$'}want)\"; exit 3; fi; ")
         append("/system/bin/cp -f \"${'$'}src\" '").append(destination).append("' || exit 4; ")
         // The identity the module's policy expects: the system, and nothing else.
         append("/system/bin/chown system:system '").append(destination).append("' || exit 5; ")
@@ -581,52 +633,113 @@ internal object DfrInstall {
         // there and readable by the root process doing the rename.
         append("/system/bin/cp -f \"${'$'}src\" '").append(stagePath).append("' || exit 7; ")
         append("/system/bin/chmod 755 '").append(stagePath).append("' || exit 8; ")
+        // And in the third place a daemon is read from: the copy the system-uid helper stages [destination]
+        // out of, on a boot with no root at all. That boot is the one this staging is ultimately for, and the
+        // file it needs used to be written only *during* a run - so a phone that had rebooted after one was
+        // left with a helper that could find nothing to stage. Skipped when it is already the source: copying
+        // a file onto itself is an error, and that source is this path whenever the app staged from it.
+        append("if [ \"${'$'}src\" != '").append(PAYLOAD_STAGED_DAEMON).append("' ]; then ")
+            .append("/system/bin/cp -f \"${'$'}src\" '").append(PAYLOAD_STAGED_DAEMON).append("' || exit 9; ")
+            .append("/system/bin/chmod 755 '").append(PAYLOAD_STAGED_DAEMON).append("' || exit 10; fi; ")
+        // And in the second place the helper can actually read: a `system_data_file` beside [destination],
+        // because the copy above is under a type `system_server` is denied. Same bytes, same pass, so the
+        // helper's comparison of the two can never be against a stale copy - and the source is always one of
+        // the temp paths, never this destination, so the copy is never onto a file that is already it.
+        append("if [ \"${'$'}src\" != '").append(HELPER_STAGED_DAEMON).append("' ]; then ")
+            .append("/system/bin/cp -f \"${'$'}src\" '").append(HELPER_STAGED_DAEMON).append("' || exit 11; ")
+            .append("/system/bin/chown system:system '").append(HELPER_STAGED_DAEMON).append("' || exit 12; ")
+            .append("/system/bin/chmod 600 '").append(HELPER_STAGED_DAEMON).append("' || exit 13; fi; ")
         append("echo \"[+] staged ").append(destination).append(" from ${'$'}src${'$'}{got:+ (${'$'}got)}\"; ")
-        // Said out loud rather than left to a size or a hash nobody reads: what was staged, what version
-        // it is, and whether that is the daemon this device is running. A mismatch is reported and the
-        // staging still stands - a device whose daemon cannot be read is not a reason to refuse - but it
-        // is said before the run, and not discovered by the run failing.
-        append("if [ -z \"${'$'}want\" ]; then echo '[?] the running daemon was not read, so the staged one cannot be compared to it'; ")
-            .append("elif case \"${'$'}got\" in *\"${'$'}want\"*) true;; *) false;; esac; then ")
-            .append("echo \"[*] that is the daemon this device is running (${'$'}want)\"; ")
-            .append("else echo \"[!] the daemon this device is running is ${'$'}want: the staged one is a different version\"; fi")
+        // Said plainly, and as a note rather than a warning, because by the time it prints the staging has
+        // already succeeded - and what it compares the staged daemon against is not "the device" but the file
+        // the phone's own installed KernelSU keeps at [INSTALLED_DAEMON]. That file is written by whichever
+        // manager is installed, so on a phone whose payload is this project's it is a *different build*:
+        // measured here as 5,518,544 bytes of vanilla KernelSU-Next 3.4.0 against the payload's own 4,230,992.
+        // Worth saying, because that file being another build is exactly the state that used to be staged by
+        // mistake - and worth *not* saying as an `[!]`, which read as a failure that had not happened and sent
+        // a reader looking for one; the digest above is what was checked.
+        append("if [ -z \"${'$'}wantver\" ]; then echo '[?] the copy installed at ").append(INSTALLED_DAEMON)
+            .append(" was not read, so its version cannot be compared with the one the staged daemon reports'; ")
+            .append("elif case \"${'$'}got\" in *\"${'$'}wantver\"*) true;; *) false;; esac; then ")
+            .append("echo \"[*] the daemon this run execs is also the build installed at ").append(INSTALLED_DAEMON)
+            .append(" (${'$'}got)\"; ")
+            .append("else echo \"[*] the copy installed at ").append(INSTALLED_DAEMON)
+            .append(" reports ${'$'}wantver, the daemon this run execs reports ${'$'}got: the digest is what was ")
+            .append("checked, and this line is what differs rather than a failure\"; fi")
     }
 
     /**
      * Runs [stageDaemonCommand] as root, or null when no root shell answered.
      *
-     * The running daemon's version is read first and passed in, because it is the only reading that can
-     * say whether a candidate is the right build - and it is read from the same daemon the app already
-     * asks after every boot, so this costs a cached lookup rather than a new probe.
+     * The payload's own daemon is read first and its digest passed in, because that digest is what decides
+     * which copy may be staged at all - and it comes from the verified cache rather than a download, so
+     * this costs a hash rather than a network round trip. The running daemon's version goes with it as the
+     * reading that says whether the copy staged is also the one this boot is running.
      */
-    fun stageDaemon(context: Context): DfrAction? = stageDaemonAs(runningDaemonVersion(context))
+    fun stageDaemon(context: Context): DfrAction? {
+        val daemon = payloadDaemon(context)
+        return stageDaemonAs(
+            payloadDaemon = daemon?.absolutePath,
+            payloadSha256 = daemon?.let { runCatching { sha256Of(it) }.getOrNull() },
+            expectedVersion = runningDaemonVersion(context),
+        )
+    }
 
     /**
-     * The staging itself, with the version already read - so a caller that needs the same answer for two
-     * questions asks the device once. See [armStageForNextBoot], which asks whether the staging can be
-     * skipped and then stages, and both halves of that are the same comparison.
+     * The staging itself, with the payload and the version already read - so a caller that needs the same
+     * answers for two questions asks the device once. See [armStageForNextBoot], which asks whether the
+     * staging can be skipped and then stages, and both halves of that are the same digest.
      */
-    private fun stageDaemonAs(expectedVersion: String?): DfrAction? =
-        runAction(stageDaemonCommand(expectedVersion = expectedVersion))
+    private fun stageDaemonAs(
+        payloadDaemon: String?,
+        payloadSha256: String?,
+        expectedVersion: String?,
+    ): DfrAction? = runAction(
+        stageDaemonCommand(
+            payloadDaemon = payloadDaemon,
+            payloadSha256 = payloadSha256,
+            expectedVersion = expectedVersion,
+        ),
+    )
 
     /**
      * The daemon version this device is running, or null when it could not be read.
      *
-     * Null is not a version: it is [stageDaemonCommand]'s own `want=''`, and the staging that follows still
-     * happens - from the first source there is - and says out loud that it could not compare what it staged.
+     * Null is not a version and nothing is decided by it: the staging is held to the payload's own digest,
+     * and this reading only says whether what was staged is also the daemon this boot is running. An
+     * unreadable daemon is reported as unread rather than treated as a match.
      */
     private fun runningDaemonVersion(context: Context): String? =
         runCatching { KernelSuVersionProbe.read(context).daemon }.getOrNull()
 
     /**
-     * What version a candidate daemon says it is, in the two spellings it has had, first line only.
+     * The daemon this device's payload ships, as the verified copy this app keeps of it.
      *
-     * One implementation for the two commands that compare a daemon now - the staging that chooses a
-     * source, and the read that decides whether the staging can be skipped - because a version asked two
-     * ways is a version that can disagree with itself.
+     * Null is "no verified payload is cached", which the staging reports instead of working around: the
+     * installed daemon belongs to whichever KernelSU this phone happens to run, and handing *that* to the
+     * exploit is what panics the kernel on a phone whose payload is another project's build.
      */
-    private fun versionOfCommand(source: String): String =
-        "${'$'}({ '" + source + "' -V 2>/dev/null || '" + source + "' --version 2>/dev/null; } | head -1)"
+    private fun payloadDaemon(context: Context): File? =
+        runCatching { KnownGoodPayloadStore.daemon(context) }.getOrNull()
+
+    /** The payload daemon's digest, or null when there is no payload daemon to hash. */
+    private fun payloadDaemonSha256(context: Context): String? =
+        payloadDaemon(context)?.let { daemon -> runCatching { sha256Of(daemon) }.getOrNull() }
+
+    /**
+     * What a file on the device hashes to, in one command.
+     *
+     * One implementation for the two places that compare a file by content - the staging that picks a copy,
+     * and the read that decides whether the staging can be skipped - because two spellings of a digest
+     * comparison are two ways for the same question to be answered differently.
+     *
+     * `sha256sum` is what every Android's toybox answers, with the absolute path as the fallback for a shell
+     * whose PATH is not the system's: this runs through Shizuku's shell as often as through the app's own,
+     * and those two do not agree about much.
+     */
+    private fun hashCommand(source: String): String =
+        "${'$'}({ sha256sum '" + source + "' 2>/dev/null || /system/bin/toybox sha256sum '" +
+            source + "' 2>/dev/null; } | cut -d' ' -f1)"
 
     /**
      * Whether the file the daemon's own late-load renames is already this device's daemon, in one command.
@@ -636,22 +749,22 @@ internal object DfrInstall {
      * is the file whose absence stops the next boot - while [STAGED_DAEMON] is the copy the exploit execs
      * and is rewritten on the way in by whoever is about to run it.
      *
-     * A version and not an existence check, for the reason the staging itself prefers a source by version:
-     * a copy from another flavour is a file that is *there* and is the wrong daemon, and treating it as
-     * armed is how a boot comes to exec a daemon whose UAPI does not match the module in the kernel. The
-     * command copies nothing - it is the cheap half of [armStageForNextBoot], and the point of it is that
-     * an app that already armed this boot does not move five megabytes twice to find that out.
+     * A digest and not a version, for the measurement the staging is built on: two daemons on this phone
+     * answered the same `ksud 3.4.0 (uapi: 4)` and were 1.2 MB apart, so "the file says the version this
+     * boot runs" is answered *yes* by a build that belongs to another KernelSU - and treating that as armed
+     * is how a boot comes to exec a module loader its kernel cannot survive. The command copies nothing - it
+     * is the cheap half of [armStageForNextBoot], and the point of it is that an app that already armed this
+     * boot does not move five megabytes twice to find that out.
      */
     internal fun stageArmedCommand(
+        payloadSha256: String? = null,
         stagePath: String = DAEMON_STAGE_PATH,
-        expectedVersion: String? = null,
     ): String = buildString {
-        append("want='").append(expectedVersion?.trim().orEmpty()).append("'; ")
+        append("want='").append(payloadSha256?.trim().orEmpty()).append("'; ")
         append("if [ ! -s '").append(stagePath).append("' ]; then echo '").append(STAGE_ABSENT).append("'; ")
         append("elif [ -z \"${'$'}want\" ]; then echo '").append(STAGE_UNCOMPARED).append("'; ")
-        append("else case \"").append(versionOfCommand(stagePath)).append("\" in ")
-            .append("*\"${'$'}want\"*) echo '").append(STAGE_ARMED)
-            .append("';; *) echo '").append(STAGE_DIFFERENT).append("';; esac; fi")
+        append("else v=").append(hashCommand(stagePath)).append("; if [ \"${'$'}v\" = \"${'$'}want\" ]; then echo '")
+            .append(STAGE_ARMED).append("'; else echo '").append(STAGE_DIFFERENT).append("'; fi; fi")
     }
 
     /**
@@ -692,13 +805,14 @@ internal object DfrInstall {
      * the state this reading is asked about most often, and the reason it is not taken through
      * [armStageForNextBoot], which needs root to write what it re-stages.
      *
-     * The running daemon's version comes from the same probe the staging and the re-arming use, so "a
-     * different build is in there" means the same thing to this row as it does to the write that follows it.
-     * A version that could not be read is [DfrStageReading.Uncompared] rather than a guess.
+     * The digest it compares against is the payload daemon's - the same one the staging is held to - so "a
+     * different build is in there" means the same thing to this row as it does to the write that follows
+     * it, and a phone with no verified payload to compare against is [DfrStageReading.Uncompared] rather
+     * than a guess.
      */
     fun readDaemonStage(context: Context): DfrStageReading = stageReadingOf(
         runOnEitherShell(
-            stageArmedCommand(expectedVersion = runningDaemonVersion(context)),
+            stageArmedCommand(payloadSha256 = payloadDaemonSha256(context)),
             TIMEOUT_SECONDS,
         )?.output,
     )
@@ -721,9 +835,10 @@ internal object DfrInstall {
      */
     fun armStageForNextBoot(context: Context): DfrStageArming {
         if (!RootStatusProbe.isActive()) return DfrStageArming.NoRoot
-        val expected = runningDaemonVersion(context)
+        val daemon = payloadDaemon(context)
+        val sha = daemon?.let { runCatching { sha256Of(it) }.getOrNull() }
         val reading = KernelSuRuntime.rootShell(
-            stageArmedCommand(expectedVersion = expected),
+            stageArmedCommand(payloadSha256 = sha),
             TIMEOUT_SECONDS,
         )
         // Said before it is acted on, on the same terms as the version reading above: this runs in the
@@ -732,7 +847,12 @@ internal object DfrInstall {
         // against. Nothing is said on a phone with no root, where the question is not asked at all.
         AppLog.debug(AppLogTags.KERNEL_SU, "Reroot staging: ${reading?.output?.trim().orEmpty()}")
         if (stageArmed(reading?.output)) return DfrStageArming.Armed
-        return if (stageDaemonAs(expected)?.ok == true) DfrStageArming.Armed else DfrStageArming.Failed
+        val staged = stageDaemonAs(
+            payloadDaemon = daemon?.absolutePath,
+            payloadSha256 = sha,
+            expectedVersion = runningDaemonVersion(context),
+        )
+        return if (staged?.ok == true) DfrStageArming.Armed else DfrStageArming.Failed
     }
 
     /**

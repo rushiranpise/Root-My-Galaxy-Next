@@ -81,6 +81,20 @@ internal const val ADB_DIRECTORY = "/data/adb"
  */
 internal const val SYSTEM_STAGED_DAEMON = "$SYSTEM_DIRECTORY/rmgnext-ksud"
 
+/**
+ * The second copy of that daemon, for the one reader that cannot reach the first.
+ *
+ * The system-uid helper runs *inside* `system_server`, whose SELinux context may not read `shell_data_file`
+ * - so the copy this app stages in `/data/local/tmp` is a file the helper can `stat` and cannot `open`.
+ * That is not a permission this app can grant its way around: the type is on the directory, and the
+ * directory is the shell user's. So the daemon is left a second time beside the first, under the same
+ * `system_data_file` type the helper already writes to, where its own context may read it.
+ *
+ * The same path as `KsudStage.STAGED_BY_THE_APP` in the `:dfr` module, held there the way
+ * [SYSTEM_STAGED_DAEMON] is held against `KsudStage.DEST` - by a test that reads both sources.
+ */
+internal const val SYSTEM_HELPER_DAEMON = "$SYSTEM_DIRECTORY/rmgnext-ksud.src"
+
 /** The daemon DFReroot stages, which is its own name for its own flow. */
 internal const val DFREROOT_STAGED_DAEMON = "$SYSTEM_DIRECTORY/dfreroot-ksud"
 
@@ -91,9 +105,9 @@ internal const val DFREROOT_PACKAGES_BACKUP = "$SYSTEM_DIRECTORY/packages.xml.ba
  * What this app's flows write into `/data/system`, plus the other install's two files.
  *
  * Read from the injector's own constants where they exist: the paths an inject writes are named in
- * `PackagesXml`, and a list that typed them out again could stop naming the file it writes. The daemon
- * path has no such neighbour - it is compiled into a different module's Kotlin - so it is stated here
- * and guarded by a test against that module's source.
+ * `PackagesXml`, and a list that typed them out again could stop naming the file it writes. The two
+ * daemon paths have no such neighbour - they are compiled into a different module's Kotlin - so they are
+ * stated here as the app writes them and guarded by a test against that module's source.
  *
  * The other install's two are included because on any phone that ran DFReroot they are sitting there: a
  * six-megabyte daemon and a full copy of `packages.xml` from before it touched the file. Neither is this
@@ -104,6 +118,7 @@ internal val SYSTEM_RESIDUE_PATHS: List<StagedPath> = listOf(
     StagedPath(DfrInstall.leftoverPaths[0], ResidueRole.Backup),
     StagedPath(DfrInstall.leftoverPaths[1], ResidueRole.Backup),
     StagedPath(SYSTEM_STAGED_DAEMON, ResidueRole.Daemon),
+    StagedPath(SYSTEM_HELPER_DAEMON, ResidueRole.Daemon),
     StagedPath(DFREROOT_STAGED_DAEMON, ResidueRole.OtherInstall),
     StagedPath(DFREROOT_PACKAGES_BACKUP, ResidueRole.OtherInstall),
 )

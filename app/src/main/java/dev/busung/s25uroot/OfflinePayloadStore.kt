@@ -231,6 +231,24 @@ internal object KnownGoodPayloadStore {
     fun describe(context: Context): CachedPayload? = runCatching { descriptor(context) }.getOrNull()
 
     /**
+     * The cached payload's daemon, for the staging that hands a daemon to the exploit.
+     *
+     * A different question from [load]: the caller wants the bytes this device's payload ships and nothing
+     * else - no chmod, no recording of a payload as being run, because nothing is being run yet. The
+     * artifact is verified on the way out exactly as [load] verifies it, so a cache that has been tampered
+     * with, or one left by an older build with a different helper, answers null here too.
+     *
+     * Null is "this phone has no verified payload cached", which the caller reports rather than works
+     * around: the daemon the phone has *installed* belongs to whichever KernelSU it runs, and handing that
+     * to an exploit bound for this project's payload is the kernel panic this rule exists for.
+     */
+    fun daemon(context: Context): File? = runCatching {
+        val cached = usableDescriptor(context, null)
+        val file = File(directory(context, cached.id), KSUD)
+        file.takeIf { fileMatchesArtifact(it, cached.kernelSu) }
+    }.getOrNull()
+
+    /**
      * The target the cached payload names, without reading its files.
      *
      * This is what a run resolves in Offline mode: the catalog is not consulted at all, and the

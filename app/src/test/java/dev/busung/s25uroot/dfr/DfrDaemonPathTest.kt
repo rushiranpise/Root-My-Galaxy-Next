@@ -1,7 +1,9 @@
 package dev.busung.s25uroot.dfr
 
+import dev.busung.s25uroot.SYSTEM_HELPER_DAEMON
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -75,15 +77,65 @@ class DfrDaemonPathTest {
     }
 
     @Test
-    fun `the flavour-correct sources are tried in order and a manager is never one of them`() {
-        // The installed daemon first - that is the one the verified load put there, and it is outside
-        // every shared directory - then the copy this app stages for its own runs.
-        val command = DfrInstall.stageDaemonCommand()
-        val installed = command.indexOf("'/data/adb/ksud'")
-        val temp = command.indexOf("'/data/local/tmp/ksud-s25u-kdp'")
-        assertTrue("the installed daemon is not a source: $command", installed >= 0)
-        assertTrue("the app's own staged copy is not a source: $command", temp > installed)
+    fun `every candidate is held to the payload's own digest, and none is taken for being there`() {
+        // The installed daemon *first* was the old rule, and it is what killed the phone: whichever KernelSU
+        // the phone has installed writes its own build to /data/adb/ksud, and a version string called that
+        // the same daemon as the payload's. So the order says only which copy to prefer when more than one
+        // is right, and the digest decides which ones are right at all.
+        val sha = "c".repeat(64)
+        val command = DfrInstall.stageDaemonCommand(payloadDaemon = "/data/cache/ksud", payloadSha256 = sha)
+        val payload = command.indexOf("'/data/cache/ksud'")
+        val temp = command.indexOf("'${DfrInstall.PAYLOAD_STAGED_DAEMON}'")
+        val installed = command.indexOf("'${DfrInstall.INSTALLED_DAEMON}'")
+        assertTrue("the payload's own daemon is not read: $command", payload >= 0)
+        assertTrue("this app's staged copy is not a source: $command", temp > payload)
+        assertTrue("the installed daemon is not considered at all: $command", installed > temp)
         assertTrue("every source is checked for content, not existence", command.contains("[ -s '"))
+        assertTrue(
+            "a source is not held to the payload's digest",
+            command.contains("if [ \"${'$'}v\" = \"${'$'}want\" ]"),
+        )
+        assertTrue("the payload's digest is not in the command: $command", command.contains("want='$sha'"))
+    }
+
+    @Test
+    fun `a copy that is not the payload's own is named and refused, not staged`() {
+        // The failure this is written from: /data/adb/ksud held a vanilla KernelSU-Next 3.4.0 daemon of
+        // 5,518,544 bytes while the payload's own was 6,407,096, both answering a 3.4.0-family version, and
+        // staging the first one ended the run in a kernel panic. So a candidate that is merely present has
+        // to be *said* before the run - or the only report of it is a kernel that does not come back.
+        val command = DfrInstall.stageDaemonCommand(payloadSha256 = "d".repeat(64))
+        assertTrue(
+            "a copy that is not the payload's is staged without a word: $command",
+            command.contains("not the daemon this device payload ships"),
+        )
+        assertTrue("the refused path is not named", command.contains("so it is not staged: "))
+        assertTrue(
+            "a copy is accepted for existing rather than for being this device's payload's, so the file " +
+                "named above is staged after all: $command",
+            command.contains("if [ \"${'$'}v\" = \"${'$'}want\" ]; then src='"),
+        )
+        assertTrue(
+            "the refusal comes after something is written",
+            command.indexOf("no daemon to stage") < command.indexOf("/system/bin/cp -f"),
+        )
+    }
+
+    @Test
+    fun `with the payload's daemon unknown, nothing is staged and the run is told why`() {
+        // Null is a state and not an error: a phone that has never resolved a payload - or whose cache was
+        // refused - has no daemon of its own to stage, and the installed one is not a substitute. Refusing
+        // this costs a run; staging *something* costs the kernel.
+        val command = DfrInstall.stageDaemonCommand()
+        assertTrue(
+            "an unknown payload daemon does not refuse: $command",
+            command.contains("the payload daemon for this device is not known"),
+        )
+        assertTrue(
+            "the refusal comes after a copy",
+            command.indexOf("is not known") < command.indexOf("/system/bin/cp -f"),
+        )
+        assertTrue("the refusal no longer exits non-zero", command.contains("exit 3"))
     }
 
     @Test
@@ -109,54 +161,162 @@ class DfrDaemonPathTest {
     }
 
     @Test
-    fun `a source that answers with the running version wins over one that merely exists`() {
-        // Measured on this device: both sources exist, both answer `ksud 3.4.0 (uapi: 4)`, and they are
-        // 5,518,544 and 4,230,992 bytes - two different builds. Choosing by "is it there" is a coin toss
-        // presented as a decision, so the choice is made by asking each source what version it is.
-        val command = DfrInstall.stageDaemonCommand(expectedVersion = "3.4.0")
-        assertTrue("the expected version is not carried into the command: $command", command.contains("want='3.4.0'"))
-        assertTrue("no source is asked for its version", command.contains("-V 2>/dev/null"))
-        assertTrue("the version read comes after the staging", command.indexOf("-V 2>/dev/null") < command.indexOf("cp -f"))
+    fun `the daemon staged is this device's payload, read out of the verified cache`() {
+        // The app's half of the hand-off: the file the exploit will exec is a copy of the payload artifact
+        // the run resolved, so the cache is asked for it rather than the device's own installed daemon.
+        val source = source("app/src/main/java/dev/busung/s25uroot/dfr/DfrInstall.kt")
         assertTrue(
-            "a source is not matched against the running version",
-            command.contains("case \"${'$'}v\" in *\"${'$'}want\"*"),
+            "the staging no longer reads the daemon out of the verified payload cache",
+            source.contains("KnownGoodPayloadStore.daemon(context)"),
         )
-        // The first source that exists is kept, but as the fallback and not as the answer: a device whose
-        // installed daemon is a stale flavour must still be able to stage the one that matches.
-        assertTrue("there is no fallback to the first source that exists", command.contains("alt='"))
         assertTrue(
-            "the fallback is not used when nothing matched",
-            command.indexOf("src=\"${'$'}alt\"") > command.indexOf("case \"${'$'}v\" in"),
+            "the staging no longer carries the payload's digest into the command",
+            source.contains("payloadSha256 = daemon?.let"),
+        )
+        // And the run's own write-back names the payload it just resolved, because that run is holding the
+        // very artifact this boot loaded - there is nothing better to stage from.
+        assertTrue(
+            "the write-back at the end of a run no longer names the payload that run resolved",
+            source("app/src/main/java/dev/busung/s25uroot/InstallViewModel.kt")
+                .contains("payloadDaemon = payloads.kernelSu.absolutePath"),
         )
     }
 
     @Test
-    fun `what was staged is reported with its version and whether it is the running one`() {
-        val command = DfrInstall.stageDaemonCommand(expectedVersion = "3.4.0")
+    fun `the staging leaves the daemon where the helper reads it, in the directory the helper can read`() {
+        // The helper runs inside system_server, whose context is denied shell_data_file - the type on every
+        // path under /data/local/tmp. So a copy left only there is one the helper can stat and cannot open,
+        // which is the whole of "present but unreadable" on a phone whose daemon was staged correctly. The
+        // copy it actually reads is under /data/system, beside the one the exploit execs, and this is the
+        // pair the app has to keep in step.
+        val command = DfrInstall.stageDaemonCommand(payloadSha256 = "f".repeat(64))
+        assertTrue(
+            "the staging no longer leaves the copy the helper reads: $command",
+            command.contains("/system/bin/cp -f \"${'$'}src\" '${DfrInstall.HELPER_STAGED_DAEMON}'"),
+        )
+        assertTrue(
+            "the copy the helper reads is not left under /data/system, where system_server may open it",
+            DfrInstall.HELPER_STAGED_DAEMON.startsWith("/data/system/"),
+        )
+        assertTrue(
+            "the copy the helper reads is not left with the identity the system uid needs",
+            command.contains("chown system:system '${DfrInstall.HELPER_STAGED_DAEMON}'"),
+        )
+        assertTrue(
+            "the copy the helper reads is world-readable rather than readable by the system uid alone",
+            command.contains("chmod 600 '${DfrInstall.HELPER_STAGED_DAEMON}'"),
+        )
+        // And never by copying a file onto itself: that is an error.
+        assertTrue(
+            "the copy the helper reads is copied onto itself when it was the source, which fails the staging",
+            command.contains("if [ \"${'$'}src\" != '${DfrInstall.HELPER_STAGED_DAEMON}' ]; then"),
+        )
+    }
+
+    @Test
+    fun `the helper reads the copy the app stages, under the name the app writes`() {
+        // Two APKs that share no code, so the only place the two spellings can be compared is here. The
+        // failure when they disagree is silent: the helper reports a phone clean and refuses a run while
+        // its daemon sits staged under a name nothing read.
+        val helper = constantIn(stageTwoSource(), "STAGED_BY_THE_APP")
+        assertEquals(
+            "the app stages the helper's copy at one path and the helper reads another",
+            SYSTEM_HELPER_DAEMON,
+            helper,
+        )
+        assertEquals(DfrInstall.HELPER_STAGED_DAEMON, helper)
+        assertTrue(
+            "the helper was pointed back at the temp directory, which system_server cannot read",
+            !helper.startsWith("/data/local/tmp/"),
+        )
+    }
+
+    @Test
+    fun `the stage two stages the app's copy or nothing, and never the installed daemon`() {
+        // The helper's half, and the half that runs first on a phone with no root: it used to read the
+        // installed daemon as its first source and to keep whatever was already at the path the exploit
+        // execs. Both are how a KernelSU-Next daemon the *installed manager* had written got handed to a
+        // run whose payload was another project's build - and the kernel panicked, six boots in one morning.
+        val source = stageTwoSource()
+        assertTrue("the helper no longer reads the app's own copy", source.contains("File(STAGED_BY_THE_APP)"))
+        assertTrue(
+            "a file already at the path the exploit execs is kept without being compared with the app's copy",
+            source.contains("sameBytes(existing, mine)"),
+        )
+        assertTrue(
+            "the helper reads the installed daemon again, which is the copy that panicked the kernel",
+            !source.contains("File(LEFT_BY_THE_PAYLOAD)"),
+        )
+        assertTrue(
+            "the refusal no longer says which copy it will not take",
+            source.contains("is not taken"),
+        )
+        // The keep is conditional on the app's copy being unreadable, and says so: trusting a daemon at the
+        // path the exploit execs is only safe because nothing but the app writes it, and a keep that claimed
+        // a comparison it did not make is the failure this whole change is about.
+        assertTrue(
+            "a daemon at the exec path is still taken without a word about why it could not be compared",
+            source.contains("was not readable to compare it against"),
+        )
+        assertTrue(
+            "the keep happens before the app's copy is even looked at, so a mismatch would never be noticed",
+            source.indexOf("mine == null") < source.indexOf("was not readable to compare it against"),
+        )
+    }
+
+    @Test
+    fun `what was staged is reported with its version, and the installed copy's as context`() {
+        val command = DfrInstall.stageDaemonCommand(payloadSha256 = "a".repeat(64), expectedVersion = "3.4.0")
         assertTrue("the staged version is not named", command.contains("${'$'}{got:+ (${'$'}got)}"))
-        assertTrue("a matching daemon is not said to match", command.contains("that is the daemon this device is running"))
-        assertTrue("a mismatched daemon is not warned about", command.contains("a different version"))
+        // The file the *other* version comes from is named, because that is the whole content of the line: a
+        // version with no owner reads as the app being confused about the daemon it just wrote itself.
+        assertTrue(
+            "the file the other version comes from is not named, so a difference has no owner",
+            command.contains("the copy installed at ${DfrInstall.INSTALLED_DAEMON}"),
+        )
+        assertTrue(
+            "a match is not said to be a match",
+            command.contains("is also the build installed at ${DfrInstall.INSTALLED_DAEMON}"),
+        )
+        assertTrue(
+            "a difference is not reported at all",
+            command.contains("reports ${'$'}wantver, the daemon this run execs reports"),
+        )
+        // A note and not a warning: the staging has already happened by the time this prints, and the copy it
+        // names is not the copy that was staged - so an `[!]` here is a failure message for something that
+        // worked, which is what sent a reader looking for a failure to fix.
+        assertTrue(
+            "the note about the installed copy is not marked as a note: $command",
+            command.contains("[*] the copy installed at ${DfrInstall.INSTALLED_DAEMON}"),
+        )
+        assertFalse(
+            "the report reads as a failure again: $command",
+            command.contains("[!] the daemon this device is running"),
+        )
     }
 
     @Test
     fun `an unreadable running daemon is never reported as a match`() {
-        // A device whose version could not be read is the case where a false "matches" would be worst:
+        // A device whose daemon could not be read is the case where a false "matches" would be worst:
         // the run would exec a daemon nothing had compared, and the log would say it had been checked.
         val unknown = DfrInstall.stageDaemonCommand(expectedVersion = null)
         assertTrue("an empty expectation still claims a comparison", unknown.contains("cannot be compared"))
         // Guarded at runtime rather than only in wording: with nothing to match on, the command takes the
         // "not read" branch, and the comparison branches below it are never reached on the device.
-        val guard = "if [ -z \"${'$'}want\" ]; then echo '[?]"
+        val guard = "if [ -z \"${'$'}wantver\" ]; then echo '[?]"
         assertTrue("the comparison is not guarded by the empty expectation", unknown.contains(guard))
         assertTrue(
-            "the guard does not come before the match it is there to prevent",
-            unknown.indexOf(guard) < unknown.indexOf("that is the daemon this device is running"),
+            "the guard does not come before the report it is there to prevent",
+            unknown.indexOf(guard) < unknown.indexOf("is also the build installed at"),
         )
 
-        // With nothing to match on, no source can be picked by version - so the order is the old one and
-        // the report says the question was never answered.
-        val blank = DfrInstall.stageDaemonCommand(expectedVersion = "  ")
-        assertTrue(blank.contains("want=''"))
+        // And the version is a separate question from the digest: what may be staged is decided by content,
+        // so a phone whose *running* daemon could not be read still stages the payload's own copy - the run
+        // says it could not compare versions and proceeds anyway, which is the honest half of the answer.
+        val digest = "e".repeat(64)
+        val blank = DfrInstall.stageDaemonCommand(payloadSha256 = digest, expectedVersion = "  ")
+        assertTrue(blank.contains("wantver=''"))
+        assertTrue("the digest is not carried separately from the version", blank.contains("want='$digest'"))
     }
 
     @Test
