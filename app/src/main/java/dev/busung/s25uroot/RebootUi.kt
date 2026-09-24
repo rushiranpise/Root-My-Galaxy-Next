@@ -17,7 +17,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -148,22 +147,23 @@ internal fun RebootSheet(onDismiss: () -> Unit, notice: RecoveryOutcome? = null)
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirming = null
-                    scope.launch { refusal = runRebootTarget(context, target) }
-                }) {
-                    Text(stringResource(R.string.action_continue))
-                }
+                AppDialogActions(
+                    listOf(
+                        // Continuing is what this dialog is for, so it is the filled answer and going back
+                        // is the quiet one - see [AppDialogActions].
+                        AppAction(R.string.action_continue, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            confirming = null
+                            scope.launch { refusal = runRebootTarget(context, target) }
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            confirming = null
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirming = null
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 }

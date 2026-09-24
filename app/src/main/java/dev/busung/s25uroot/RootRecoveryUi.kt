@@ -18,7 +18,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -106,19 +105,20 @@ internal fun RootRecoverySection(
             title = { Text(stringResource(tool.titleRes())) },
             text = { Text(stringResource(tool.confirmRes())) },
             confirmButton = {
-                TextButton(onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    confirming = null
-                    run(tool)
-                }) {
-                    Text(stringResource(tool.actionRes()))
-                }
+                AppDialogActions(
+                    listOf(
+                        // The action the row was pressed for is the one this dialog recommends, and the
+                        // only answer in the set that is filled.
+                        AppAction(tool.actionRes(), AppActionRole.Priority) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            confirming = null
+                            run(tool)
+                        },
+                        AppAction(R.string.action_cancel) { confirming = null },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = { confirming = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -146,12 +146,15 @@ internal fun RootRecoverySection(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    message = null
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                // One answer, so it is the loud one: there is nothing here for it to be recommended over.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            message = null
+                        },
+                    ),
+                )
             },
         )
     }
@@ -240,32 +243,31 @@ internal fun RecoveryActionButton(
             title = { Text(stringResource(tool.titleRes())) },
             text = { Text(stringResource(tool.confirmRes())) },
             confirmButton = {
-                TextButton(onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    confirming = false
-                    running = true
-                    scope.launch {
-                        val outcome = runRecoveryAction(context, tool)
-                        if (tool == RecoveryTool.RebootAndUnroot) {
-                            onBootRootModeChanged(AppPreferences.bootRootMode(context))
-                        }
-                        message = RecoveryMessage(
-                            title = context.getString(tool.titleRes()),
-                            detail = recoveryOutcomeMessage(context, tool, outcome),
-                            failure = !outcome.accepted,
-                            readOnlyWall = outcome.readOnlyWall,
-                        )
-                        running = false
-                    }
-                }) {
-                    Text(stringResource(tool.actionRes()))
-                }
+                AppDialogActions(
+                    listOf(
+                        AppAction(tool.actionRes(), AppActionRole.Priority) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            confirming = false
+                            running = true
+                            scope.launch {
+                                val outcome = runRecoveryAction(context, tool)
+                                if (tool == RecoveryTool.RebootAndUnroot) {
+                                    onBootRootModeChanged(AppPreferences.bootRootMode(context))
+                                }
+                                message = RecoveryMessage(
+                                    title = context.getString(tool.titleRes()),
+                                    detail = recoveryOutcomeMessage(context, tool, outcome),
+                                    failure = !outcome.accepted,
+                                    readOnlyWall = outcome.readOnlyWall,
+                                )
+                                running = false
+                            }
+                        },
+                        AppAction(R.string.action_cancel) { confirming = false },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = { confirming = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -293,12 +295,15 @@ internal fun RecoveryActionButton(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    message = null
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                // One answer, so it is the loud one: there is nothing here for it to be recommended over.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            message = null
+                        },
+                    ),
+                )
             },
         )
     }
