@@ -163,6 +163,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -1135,15 +1136,25 @@ private fun RootApp(
 
     // The bar's own two states, both decided here because both are the shell's: whether it is away, and how
     // far it travels to get there - which is its own height, known only once it has been laid out.
-    var navBarHidden by remember { mutableStateOf(false) }
+    //
+    // Away has two causes and they are kept apart, because only one of them is a scroll's to undo: a page has
+    // been scrolled past the point where the bar is in the way, or a step inside a page has taken the whole
+    // window, where there is no page under the bar to come back to.
+    var navBarScrolledAway by remember { mutableStateOf(false) }
+    var stepOwnsWindow by remember { mutableStateOf(false) }
+    val navBarHidden = stepOwnsWindow || navBarScrolledAway
     var navBarHeight by remember { mutableStateOf(0.dp) }
     val navBarShift by animateDpAsState(
         targetValue = if (navBarHidden) navBarHeight else 0.dp,
         label = "navBarShift",
     )
+    // One lambda for the life of the shell, so that offering it does not recompose the pages under it.
+    val claimWindow = remember { { owned: Boolean -> stepOwnsWindow = owned } }
     // A page change brings it back: the pages keep their own scroll states and are rebuilt at the top when
-    // one is switched to, so a bar that stayed away would be away over a list that has nowhere to go.
-    LaunchedEffect(selectedPage) { navBarHidden = false }
+    // one is switched to, so a bar that stayed away would be away over a list that has nowhere to go. A step
+    // opening or closing is that same event for the same reason - the scroll that put the bar away belonged
+    // to the screen that just left, and the one arriving has not been scrolled at all.
+    LaunchedEffect(selectedPage, stepOwnsWindow) { navBarScrolledAway = false }
     val density = LocalDensity.current
 
     // Declared by the shell rather than by a page, because two pages read the phone's state and both
@@ -1166,144 +1177,150 @@ private fun RootApp(
     // middle of the screen with an empty band below - while the pill itself covered nothing that could not
     // be scrolled past. As a sibling it costs no layout at all: the pages run to the navigation inset and
     // the bar is drawn last, over whatever is under it.
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            // One undo surface for the whole app, because the two deletions that can be undone are on
-            // different pages and both want the same shape: a message that says what went, and a button that
-            // puts it back.
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-        ) { padding ->
-            AnimatedContent(
-                targetState = selectedPage,
-                label = "page",
-                // The pages only. The sheets and dialogs are drawn outside this one, and scrolling a list
-                // inside one of them is not a page moving under the bar.
-                modifier = Modifier.nestedScroll(
-                    remember { navBarScrollConnection { hidden -> navBarHidden = hidden } },
-                ),
-            ) { page ->
-                when (page) {
-                    AppPage.Overview -> OverviewPage(
-                        padding = padding,
-                        device = device,
-                        installState = installState,
-                        armedRetry = armedRetry,
-                        retryPayload = retryPayload,
-                        updateStatus = updateStatus,
-                        updateCardDismissed = updateCardDismissed,
-                        onDismissUpdateCard = { updateCardDismissed = true },
-                        frameworkRestart = frameworkRestart.takeIf { !frameworkRestartDismissed },
-                        onDismissFrameworkRestart = { frameworkRestartDismissed = true },
-                        onStartDownload = startDownload,
-                        onCheckForUpdate = checkForUpdate,
-                        onStartArmedRetry = onStartArmedRetry,
-                        onCancelArmedRetry = onCancelArmedRetry,
-                        onOpenSettings = { selectedPage = AppPage.Settings },
-                        // Opened from the button rather than from a shortcut, so there is no attempt
-                        // behind it to report on.
-                        onOpenReboot = {
-                            rebootNotice = null
-                            showRebootSheet = true
-                        },
-                        resumeTick = resumeTick,
-                        onInstall = {
-                            selectedProfile = null
-                            if (advancedMode) {
+    //
+    // The claim is offered from here rather than from a page, because any step in any page is the screen this
+    // is about - a step is composed inside the page it was opened from, and the page has no way to reach the
+    // shell that draws over it.
+    CompositionLocalProvider(LocalFullScreenStep provides claimWindow) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                // One undo surface for the whole app, because the two deletions that can be undone are on
+                // different pages and both want the same shape: a message that says what went, and a button that
+                // puts it back.
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) { padding ->
+                AnimatedContent(
+                    targetState = selectedPage,
+                    label = "page",
+                    // The pages only. The sheets and dialogs are drawn outside this one, and scrolling a list
+                    // inside one of them is not a page moving under the bar.
+                    modifier = Modifier.nestedScroll(
+                        remember { navBarScrollConnection { hidden -> navBarScrolledAway = hidden } },
+                    ),
+                ) { page ->
+                    when (page) {
+                        AppPage.Overview -> OverviewPage(
+                            padding = padding,
+                            device = device,
+                            installState = installState,
+                            armedRetry = armedRetry,
+                            retryPayload = retryPayload,
+                            updateStatus = updateStatus,
+                            updateCardDismissed = updateCardDismissed,
+                            onDismissUpdateCard = { updateCardDismissed = true },
+                            frameworkRestart = frameworkRestart.takeIf { !frameworkRestartDismissed },
+                            onDismissFrameworkRestart = { frameworkRestartDismissed = true },
+                            onStartDownload = startDownload,
+                            onCheckForUpdate = checkForUpdate,
+                            onStartArmedRetry = onStartArmedRetry,
+                            onCancelArmedRetry = onCancelArmedRetry,
+                            onOpenSettings = { selectedPage = AppPage.Settings },
+                            // Opened from the button rather than from a shortcut, so there is no attempt
+                            // behind it to report on.
+                            onOpenReboot = {
+                                rebootNotice = null
+                                showRebootSheet = true
+                            },
+                            resumeTick = resumeTick,
+                            onInstall = {
+                                selectedProfile = null
+                                if (advancedMode) {
+                                    showTargetPicker = true
+                                    installViewModel.loadTargetCatalog()
+                                } else {
+                                    showInstallConfirmation = true
+                                }
+                            },
+                        )
+                        AppPage.History -> HistoryPage(
+                            padding = padding,
+                            history = history,
+                            snackbarHostState = snackbarHostState,
+                            onDeleteEntries = installViewModel::deleteHistoryEntries,
+                            onRestoreEntries = installViewModel::restoreHistoryEntries,
+                            onOpenHome = { selectedPage = AppPage.Overview },
+                            openEntryId = openedRunEntry,
+                            onEntryOpened = onOpenedRunEntryHandled,
+                            onReloadHistory = installViewModel::reloadHistory,
+                        )
+                        AppPage.Logs -> LogsPage(padding)
+                        AppPage.Settings -> SettingsPage(
+                            padding = padding,
+                            device = device,
+                            accentColor = accentColor,
+                            themeMode = themeMode,
+                            advancedMode = advancedMode,
+                            disableKsuModules = disableKsuModules,
+                            loadKernelSu = loadKernelSu,
+                            kernelsuFlavor = kernelsuFlavor,
+                            shizukuMode = shizukuMode,
+                            payloadSources = payloadSources,
+                            bootRootMode = bootRootMode,
+                            restartAfterRoot = restartAfterRoot,
+                            shizukuBootMode = shizukuBootMode,
+                            bootSettleSeconds = bootSettleSeconds,
+                            autoRootSettleSeconds = autoRootSettleSeconds,
+                            runLimits = runLimits,
+                            exploitOverride = exploitOverride,
+                            shizukuToken = shizukuToken,
+                            partitionReadOnly = partitionReadOnly,
+                            payloadMode = payloadMode,
+                            batteryUnrestricted = batteryUnrestricted,
+                            resumeTick = resumeTick,
+                            onAccentColorChanged = onAccentColorChanged,
+                            onThemeModeChanged = onThemeModeChanged,
+                            onAdvancedModeChanged = onAdvancedModeChanged,
+                            onDisableKsuModulesChanged = onDisableKsuModulesChanged,
+                            onLoadKernelSuChanged = onLoadKernelSuChanged,
+                            onManagerVersionChanged = onManagerVersionChanged,
+                            onShizukuModeChanged = onShizukuModeChanged,
+                            onPayloadSourcesChanged = onPayloadSourcesChanged,
+                            onBootRootModeChanged = onBootRootModeChanged,
+                            onRestartAfterRootChanged = onRestartAfterRootChanged,
+                            onShizukuBootModeChanged = onShizukuBootModeChanged,
+                            onBootSettleChanged = onBootSettleChanged,
+                            onAutoRootSettleChanged = onAutoRootSettleChanged,
+                            onRunLimitChanged = onRunLimitChanged,
+                            onExploitOverrideChanged = onExploitOverrideChanged,
+                            onShizukuTokenChanged = onShizukuTokenChanged,
+                            onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
+                            onPayloadModeChanged = onPayloadModeChanged,
+                            onForgetCachedPayload = onForgetCachedPayload,
+                            onOpenPayloadSheet = {
                                 showTargetPicker = true
                                 installViewModel.loadTargetCatalog()
-                            } else {
-                                showInstallConfirmation = true
-                            }
-                        },
-                    )
-                    AppPage.History -> HistoryPage(
-                        padding = padding,
-                        history = history,
-                        snackbarHostState = snackbarHostState,
-                        onDeleteEntries = installViewModel::deleteHistoryEntries,
-                        onRestoreEntries = installViewModel::restoreHistoryEntries,
-                        onOpenHome = { selectedPage = AppPage.Overview },
-                        openEntryId = openedRunEntry,
-                        onEntryOpened = onOpenedRunEntryHandled,
-                        onReloadHistory = installViewModel::reloadHistory,
-                    )
-                    AppPage.Logs -> LogsPage(padding)
-                    AppPage.Settings -> SettingsPage(
-                        padding = padding,
-                        device = device,
-                        accentColor = accentColor,
-                        themeMode = themeMode,
-                        advancedMode = advancedMode,
-                        disableKsuModules = disableKsuModules,
-                        loadKernelSu = loadKernelSu,
-                        kernelsuFlavor = kernelsuFlavor,
-                        shizukuMode = shizukuMode,
-                        payloadSources = payloadSources,
-                        bootRootMode = bootRootMode,
-                        restartAfterRoot = restartAfterRoot,
-                        shizukuBootMode = shizukuBootMode,
-                        bootSettleSeconds = bootSettleSeconds,
-                        autoRootSettleSeconds = autoRootSettleSeconds,
-                        runLimits = runLimits,
-                        exploitOverride = exploitOverride,
-                        shizukuToken = shizukuToken,
-                        partitionReadOnly = partitionReadOnly,
-                        payloadMode = payloadMode,
-                        batteryUnrestricted = batteryUnrestricted,
-                        resumeTick = resumeTick,
-                        onAccentColorChanged = onAccentColorChanged,
-                        onThemeModeChanged = onThemeModeChanged,
-                        onAdvancedModeChanged = onAdvancedModeChanged,
-                        onDisableKsuModulesChanged = onDisableKsuModulesChanged,
-                        onLoadKernelSuChanged = onLoadKernelSuChanged,
-                        onManagerVersionChanged = onManagerVersionChanged,
-                        onShizukuModeChanged = onShizukuModeChanged,
-                        onPayloadSourcesChanged = onPayloadSourcesChanged,
-                        onBootRootModeChanged = onBootRootModeChanged,
-                        onRestartAfterRootChanged = onRestartAfterRootChanged,
-                        onShizukuBootModeChanged = onShizukuBootModeChanged,
-                        onBootSettleChanged = onBootSettleChanged,
-                        onAutoRootSettleChanged = onAutoRootSettleChanged,
-                        onRunLimitChanged = onRunLimitChanged,
-                        onExploitOverrideChanged = onExploitOverrideChanged,
-                        onShizukuTokenChanged = onShizukuTokenChanged,
-                        onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
-                        onPayloadModeChanged = onPayloadModeChanged,
-                        onForgetCachedPayload = onForgetCachedPayload,
-                        onOpenPayloadSheet = {
-                            showTargetPicker = true
-                            installViewModel.loadTargetCatalog()
-                        },
-                        onRequestNotificationPermission = requestNotificationPermission,
-                        onRequestBatteryExemption = onRequestBatteryExemption,
-                        shizukuStarting = shizukuStarting,
-                        startShizuku = startShizuku,
-                        requestShizukuPermission = requestShizukuPermission,
-                        runPlan = runPlan,
-                        openTarget = settingsTarget,
-                        onOpenTargetHandled = onSettingsTargetHandled,
-                    )
+                            },
+                            onRequestNotificationPermission = requestNotificationPermission,
+                            onRequestBatteryExemption = onRequestBatteryExemption,
+                            shizukuStarting = shizukuStarting,
+                            startShizuku = startShizuku,
+                            requestShizukuPermission = requestShizukuPermission,
+                            runPlan = runPlan,
+                            openTarget = settingsTarget,
+                            onOpenTargetHandled = onSettingsTargetHandled,
+                        )
+                    }
                 }
             }
-        }
 
-        AppNavBar(
-            selected = selectedPage,
-            onSelect = { page ->
-                clickHaptic(view)
-                selectedPage = page
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // Measured rather than assumed: the bar carries the navigation inset, and this has no idea
-                // how tall that is. Its own height is also exactly how far it has to travel to be out of the
-                // way, so the pill ends below the screen edge rather than peeking at the bottom of it.
-                .onGloballyPositioned { coordinates ->
-                    navBarHeight = with(density) { coordinates.size.height.toDp() }
-                }
-                .offset(y = navBarShift),
-        )
+            AppNavBar(
+                selected = selectedPage,
+                onSelect = { page ->
+                    clickHaptic(view)
+                    selectedPage = page
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    // Measured rather than assumed: the bar carries the navigation inset, and this has no idea
+                    // how tall that is. Its own height is also exactly how far it has to travel to be out of the
+                    // way, so the pill ends below the screen edge rather than peeking at the bottom of it.
+                    .onGloballyPositioned { coordinates ->
+                        navBarHeight = with(density) { coordinates.size.height.toDp() }
+                    }
+                    .offset(y = navBarShift),
+            )
+        }
     }
 }
 
@@ -7003,6 +7020,11 @@ private fun PayloadSourcesEditor(
     BackHandler {
         if (revisionPickerOpen) revisionTarget = null else onDismiss()
     }
+    // The bar goes with it, because this is a step and not a page: it takes the window, and the pill sat on
+    // the footer - Cancel and Save were both behind it, on a screen whose list is short enough to have
+    // nothing to scroll the bar away with. Claimed for as long as this is composed, so however the screen is
+    // left - saved, cancelled, or back - the bar that comes back is the one the page underneath wants.
+    FullScreenStep()
     Surface(
         modifier = Modifier.fillMaxSize().padding(padding),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
