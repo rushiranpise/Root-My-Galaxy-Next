@@ -316,14 +316,45 @@ internal object DfrInstall {
         mode: DfrMode,
         apkPath: String? = null,
         keyHex: String? = null,
-    ): DfrResult? {
-        val command = command(context.packageCodePath, mode, apkPath = apkPath, keyHex = keyHex)
-        val result = KernelSuRuntime.rootShell(command, TIMEOUT_SECONDS) ?: return null
-        val log = result.output
-        // The entry point exits non-zero and prints "[x] FAILED: ..." for anything it refused, and a
-        // refusal is the common, expected answer for several of these modes - so it is reported as a
-        // result with the reason, not as an absence of one.
-        val ok = result.exitCode == 0 && !log.contains("[x] FAILED")
+    ): DfrResult? = resultOf(
+        KernelSuRuntime.rootShell(
+            command(context.packageCodePath, mode, apkPath = apkPath, keyHex = keyHex),
+            TIMEOUT_SECONDS,
+        ),
+        mode,
+    )
+
+    /**
+     * Whether this app's certificate is in the shared user's list, on whichever shell this phone has.
+     *
+     * `--check` is the one mode of the injector that writes nothing: it parses `packages.xml` and prints one
+     * verdict per target. That makes it a reading like the others this flow takes on the `shell` user's own
+     * shell, and it is the reading that stands between a phone whose helper is missing and its install -
+     * without it the flow answers [DfrStep.ReadState], because an install whose key nobody checked is how a
+     * helper comes to be installed as an ordinary app.
+     *
+     * A refused read is null, which is what makes it safe to try: the file is a platform file, and whether
+     * the `shell` user may open it is the platform's business rather than this app's. A build that says no
+     * leaves the flow exactly where it was - no claim made, and no step offered that the reading would not
+     * have - and `all_injected` is only ever printed after the file has been read and parsed, so an answer
+     * that arrives at all arrived from the same parser the root route uses.
+     */
+    internal fun checkInjected(context: Context): DfrResult? = resultOf(
+        runOnEitherShell(command(context.packageCodePath, DfrMode.Check), TIMEOUT_SECONDS),
+        DfrMode.Check,
+    )
+
+    /**
+     * A shell answer as a result, with the ported entry point's own refusal word read as the verdict.
+     *
+     * The entry point exits non-zero and prints "[x] FAILED: ..." for anything it refused, and a refusal is
+     * the common, expected answer for several of the modes - so it is reported as a result with the reason,
+     * not as an absence of one. Null is left for the one thing that is an absence: no shell answered at all.
+     */
+    private fun resultOf(result: ShizukuController.ShellResult?, mode: DfrMode): DfrResult? {
+        val answered = result ?: return null
+        val log = answered.output
+        val ok = answered.exitCode == 0 && !log.contains(INJECTOR_FAILURE)
         return DfrResult(mode, ok, log)
     }
 
@@ -369,7 +400,7 @@ internal object DfrInstall {
     }
 
     /**
-     * `pm install` of the stage two, run as root.
+     * `pm install` of the stage two, on whichever shell this phone has - see [installStageTwo].
      *
      * `-r` reinstalls over a copy already there and `-d` permits a version code lower than the installed
      * one, because the artifact being installed is built by hand and its code does not track releases.
@@ -378,6 +409,19 @@ internal object DfrInstall {
      */
     internal fun installCommand(apkPath: String): String =
         "/system/bin/pm install -r -d --user 0 '" + apkPath + "'"
+
+    /**
+     * Where the helper has to be put before the `shell` user can install it.
+     *
+     * `pm install` reads the APK as whoever asked for it, and this build's copy lives in app storage -
+     * `/data/data/<this app>/files/dfr-apk`, mode 0700 under the app's own uid - which the `shell` user
+     * cannot open. So the route that runs without root needs a second copy in the one directory the shell
+     * owns, staged the way a run stages its payload: see [stageForShell].
+     *
+     * Not the payload's own names, because this file is not a run's: a run replaces its staging on every
+     * run, and this one may be left there for a while.
+     */
+    internal const val SHELL_INSTALL_PATH = "/data/local/tmp/rmgnext-stage2.apk"
 
     /**
      * The two files an inject can leave in `/data/system`, for the screen that lists them.
@@ -605,6 +649,55 @@ internal object DfrInstall {
     }
 
     /**
+     * Installs the stage two on whichever shell this phone has.
+     *
+     * `pm install` is a permission the `shell` user holds by itself - it is what makes `adb install` work
+     * with no root - so a phone that has just rebooted into no root can still have its helper put back,
+     * which is the state this flow is opened in whenever what is wrong is the helper rather than the root:
+     * a copy from another build, or none at all.
+     *
+     * What this does not change is the check the flow depends on. Whether the APK is accepted under the
+     * shared user is Package Manager's own signature test against that user's certificate list, and it does
+     * not care who asked; an install that lands as an ordinary app anyway is caught by the uid the next
+     * reading reports, with [uninstallStageTwo] and [DfrStep.RemoveStageTwo] as the way back.
+     *
+     * Root first, so a rooted phone installs from app storage as it always has and stages nothing extra: the
+     * copy [stageForShell] writes is only paid for when there is no root to read the original, and it is a
+     * file transfer rather than a second command. Null only when neither shell answered.
+     */
+    internal fun installStageTwo(apk: File): DfrAction? {
+        runAction(installCommand(apk.absolutePath))?.let { rooted -> return rooted }
+        val staged = stageForShell(apk) ?: return null
+        return verdictFor(
+            KernelSuRuntime.unprivilegedShell(installCommand(staged)),
+            FAILURE,
+        )
+    }
+
+    /**
+     * The copy of the helper the `shell` user may read, or null when it could not be written.
+     *
+     * Written on every call rather than compared first, and that is the one place this differs from the
+     * staging a run does: the app cannot read `/data/local/tmp` itself - it is the `shell` user's directory,
+     * mode 0771 - so there is nothing to compare against, and a skip would need a reading this side of the
+     * binder does not have. What it costs is one APK transfer on a press that only happens without root,
+     * and what it buys is that the file installed is always the one in the APK that asked.
+     *
+     * A refusal is null and is logged rather than thrown, because null is already this route's own answer for
+     * "no shell": the install has nothing else to try, and the screen's sentence for it says so. Reaching
+     * here at all means no root answered, so the two are the same refusal from the reader's side.
+     */
+    private fun stageForShell(apk: File): String? = runCatching {
+        ShizukuController.writeFile(SHELL_INSTALL_PATH, "644", apk.inputStream())
+        SHELL_INSTALL_PATH
+    }.onFailure { error ->
+        AppLog.warn(
+            AppLogTags.KERNEL_SU,
+            "The helper could not be staged for an install without root: ${error.message}",
+        )
+    }.getOrNull()
+
+    /**
      * Removes the stage two, which is the only way past an install that landed as an ordinary app:
      * Package Manager assigns a package its uid when it installs it and never revisits it.
      */
@@ -787,11 +880,11 @@ internal object DfrInstall {
     /**
      * Runs one of the actions above as root, which is what the ones that write need.
      *
-     * `pm install` is the only caller left, and it is left here on purpose rather than by omission: whether
-     * the `shell` user may put an APK that declares the system's own shared user onto this phone has not
-     * been measured, and a wrong answer is worse than a refusal - an install that lands as an ordinary app
-     * is the exact state [DfrStep.RemoveStageTwo] exists to undo. See [uninstallStageTwo] and [launch] for
-     * the two commands that are the shell's own.
+     * The daemon staging is the only caller left, and it is here by construction rather than by preference:
+     * the two files it writes have to end up owned by the system and mode 0700, `cp` alone would leave them
+     * the `shell` user's, and a transport that cannot `chown` would write a daemon the module's policy
+     * refuses - a failure that surfaces inside the exploit. Every other command here is the `shell` user's
+     * own: see [installStageTwo], [uninstallStageTwo] and [launch].
      */
     fun runAction(command: String): DfrAction? =
         verdictFor(KernelSuRuntime.rootShell(command, TIMEOUT_SECONDS), FAILURE)
@@ -838,6 +931,9 @@ internal object DfrInstall {
     private const val PROBE_TIMEOUT_SECONDS = 30L
 
     private const val FAILURE = "Failure"
+
+    /** The word the ported entry point answers anything it refused with. */
+    private const val INJECTOR_FAILURE = "[x] FAILED"
 
     /** The word `am` answers a start that did not happen with. */
     private const val LAUNCH_FAILURE = "Error"

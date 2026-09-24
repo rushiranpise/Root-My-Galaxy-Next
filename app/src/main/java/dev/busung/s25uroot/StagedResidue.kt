@@ -5,6 +5,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import androidx.annotation.StringRes
+import dev.busung.s25uroot.dfr.DfrInstall
 import java.util.Locale
 
 /**
@@ -68,6 +69,16 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
 
     /** The root helper the exploit is loaded with. */
     Helper(R.string.residue_role_helper),
+
+    /**
+     * A copy of the helper *app*, left where the `shell` user can install it from.
+     *
+     * Its own role rather than [Helper], which is the binary a run pushes for the payload to load: this one
+     * exists because `pm install` reads the APK as whoever asked for it, and app storage - where this app
+     * keeps its own copy - is not readable by the `shell` user. It is a second copy of an APK the phone
+     * already has, and the list should say so rather than call it a helper binary.
+     */
+    HelperApk(R.string.residue_role_helper_apk),
 
     /** The exploit payload itself. */
     Payload(R.string.residue_role_payload),
@@ -367,6 +378,10 @@ internal object StagedResidue {
         StagedPath("/data/local/tmp/.ksud-stage", ResidueRole.Daemon),
         StagedPath("/data/local/tmp/temp_su.sock", ResidueRole.Socket),
         StagedPath("/data/local/tmp/rmgnext-helper", ResidueRole.Helper),
+        // The one entry here that is named from the code that writes it rather than typed out beside it:
+        // this path is a shell-readable copy of the helper APK, and the reason it may not drift is that
+        // the install that reads it and the list that reports it would otherwise disagree silently.
+        StagedPath(DfrInstall.SHELL_INSTALL_PATH, ResidueRole.HelperApk),
         StagedPath("/data/local/tmp/rmgnext-shizuku-payload", ResidueRole.Payload),
         StagedPath("/data/local/tmp/rmgnext-shizuku-exploit.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/rmgnext-ksud-helper", ResidueRole.Helper),

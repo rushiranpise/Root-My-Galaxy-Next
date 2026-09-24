@@ -10,11 +10,17 @@ import org.junit.Test
  *
  * The flow is for a phone whose root comes from the helper, so the state it is opened in most often is a
  * reboot with **no root at all** - and everything it reads (`pm list packages`, one `test -e`, `pidof`) and
- * two of the things it does (`am start`, `pm uninstall`) are commands the `shell` user holds by itself. The
- * difference between a screen that reports and one that says it could not look is therefore one fallback,
- * and the difference between a boot that works and one that hangs for thirty seconds is the same fallback
- * *not* being taken there. Both are properties of code that needs a device to exercise - a rooted phone and
- * an unrooted one, a granted `su` and a prompt nobody answers - so they are held here, against the source.
+ * three of the things it does (`am start`, `pm uninstall`, `pm install`) are commands the `shell` user holds
+ * by itself. The difference between a screen that reports and one that says it could not look is therefore
+ * one fallback, and the difference between a boot that works and one that hangs for thirty seconds is the
+ * same fallback *not* being taken there. Both are properties of code that needs a device to exercise - a
+ * rooted phone and an unrooted one, a granted `su` and a prompt nobody answers - so they are held here,
+ * against the source.
+ *
+ * The install is in that list because it is what makes a *helper* the repairable thing: a phone that has
+ * rebooted with a stale copy, or none, can be put right from this screen before it has ever been rerooted,
+ * which is the state the flow is opened in whenever the problem is the helper rather than the root. What
+ * that route costs is a second copy of the APK somewhere the `shell` user can read - app storage is not.
  */
 class DfrShellTransportTest {
 
@@ -100,8 +106,91 @@ class DfrShellTransportTest {
         assertTrue("the inject no longer runs as root", inject.contains("KernelSuRuntime.rootShell"))
         assertFalse("the inject tries the plain shell, which cannot write packages.xml", inject.contains("unprivilegedShell"))
         val action = declaration(installSource(), "fun runAction(")
-        assertTrue("the install no longer runs as root", action.contains("KernelSuRuntime.rootShell"))
-        assertFalse("the install tries a shell that cannot put a shared-user APK on the phone", action.contains("unprivilegedShell"))
+        assertTrue("the daemon staging no longer runs as root", action.contains("KernelSuRuntime.rootShell"))
+        assertFalse(
+            "the daemon staging tries the plain shell, where the `chown system:system` the module's policy " +
+                "expects cannot be made - and half a staged daemon fails inside the exploit, which reads " +
+                "as the exploit being broken",
+            action.contains("unprivilegedShell"),
+        )
+    }
+
+    @Test
+    fun `the install is sent on whichever shell the phone has`() {
+        // The third action the `shell` user holds, and the reason this is not a write like the inject: what
+        // decides whether an APK is accepted under android.uid.system is Package Manager's signature test
+        // against that user's list, and it does not care who asked. What a wrong answer would look like -
+        // a helper installed as an ordinary app - is caught by the uid the next reading reports, with the
+        // flow's own remove step as the way back.
+        val body = declaration(installSource(), "internal fun installStageTwo(")
+        assertTrue(
+            "installing the helper is root-only again, so a phone that rebooted with a stale or missing " +
+                "helper can only be repaired by rooting it first - which is what the helper is for",
+            body.contains("KernelSuRuntime.unprivilegedShell("),
+        )
+        val root = body.indexOf("runAction(installCommand(")
+        val plain = body.indexOf("KernelSuRuntime.unprivilegedShell(")
+        assertTrue(
+            "the rooted install is no longer tried first, so a rooted phone pays for a file transfer it " +
+                "does not need",
+            root >= 0 && root < plain,
+        )
+        assertTrue(
+            "the shell route installs something other than the copy staged for it",
+            body.contains("installCommand(staged)"),
+        )
+    }
+
+    @Test
+    fun `the copy the shell installs from is one the shell user may read`() {
+        // The trap this exists for: `pm install` reads the APK as whoever asked for it, and this build's
+        // copy lives in app storage - mode 0700 under the app's own uid - which the `shell` user cannot
+        // open. So the route that has no root needs its own copy in the shell's own directory, written the
+        // way a run writes its payload: over the Shizuku binder, which is the only thing here that can
+        // write as the shell user at all.
+        assertTrue(
+            "the helper is staged somewhere the shell user cannot be relied on to read: " +
+                DfrInstall.SHELL_INSTALL_PATH,
+            DfrInstall.SHELL_INSTALL_PATH.startsWith("/data/local/tmp/"),
+        )
+        val body = declaration(installSource(), "private fun stageForShell(")
+        assertTrue(
+            "the copy for the shell route is not written over the Shizuku binder",
+            body.contains("ShizukuController.writeFile(SHELL_INSTALL_PATH"),
+        )
+    }
+
+    @Test
+    fun `the key check is taken on whichever shell the phone has`() {
+        // A read and not a write: `--check` parses `packages.xml` and prints one verdict per target, and it
+        // is the reading that decides whether a phone whose helper is gone is offered its install step or
+        // told that nothing could be read. Refused, it is null - which is the state the flow was already
+        // in, so trying cannot make the screen claim something nobody read.
+        val body = declaration(installSource(), "internal fun checkInjected(")
+        assertTrue("the key check is root-only again", body.contains("runOnEitherShell("))
+        assertTrue(
+            "the key check no longer asks for the mode that writes nothing",
+            body.contains("DfrMode.Check"),
+        )
+        assertFalse(
+            "a mode that writes packages.xml is being run through the shell, which cannot make that write",
+            body.contains("DfrMode.Inject") || body.contains("DfrMode.Uninstall"),
+        )
+    }
+
+    @Test
+    fun `the screen's install and its key check are reached through DfrInstall`() {
+        val install = declaration(uiSource(), "fun install() =")
+        assertTrue(
+            "the install no longer takes the shell route, so the step a phone with a stale helper is on " +
+                "goes back to refusing for want of root",
+            install.contains("DfrInstall.installStageTwo("),
+        )
+        assertTrue(
+            "the screen's key check no longer falls back to the plain shell, which is what a phone with a " +
+                "missing helper and no root has instead of a root shell",
+            uiSource().contains("DfrInstall.checkInjected(context)"),
+        )
     }
 
     @Test

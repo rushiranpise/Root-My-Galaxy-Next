@@ -273,10 +273,10 @@ internal object DfrFlow {
         // and this comes before the armed check, which is the one ordering here worth arguing about.
         //
         // Armed means root is live this boot, and "root is live" is not a reason to leave a wrong helper
-        // in place: it is the last moment the install *can* be made, because installing is a shell command
-        // and after the next reboot there is no shell at all. Waiting would spend the phone's one rooted
-        // window on nothing and leave the wrong copy for the next rerun to fail with - the very failure
-        // this reading exists to catch.
+        // in place: the install is a shell command, and a boot with no root has one only once somebody has
+        // started Shizuku - so the moment root is live is the moment this costs nothing. Waiting would
+        // leave the wrong copy for the next rerun to fail with, which is the very failure this reading
+        // exists to catch.
         //
         // It needs no other condition, which is not obvious: the key and the reboot are settled by the
         // install being a *system* one already - Package Manager gives the uid at install time and never

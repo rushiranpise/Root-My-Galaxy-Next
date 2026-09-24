@@ -52,12 +52,14 @@ import kotlinx.coroutines.withContext
  * phone, names the step it is on, and offers that step's action instead of describing the order and
  * leaving it to the user. The two reboots are the app's too, on the soft-reboot path it already uses.
  *
- * **What it can still do with no root.** The readings and two of the actions here are commands the `shell`
- * user holds by itself, so they are taken through Shizuku when KernelSU answers nothing - and that matters
- * most on this screen of all of them, because the phone this flow produces has no root at all after a
- * reboot, and opening the helper by hand is the one press that puts it back. The two writes are the ones
- * that genuinely need root, and the inject and the key removal still refuse with a sentence rather than
- * being retried somewhere they cannot land.
+ * **What it can still do with no root.** The readings and three of the actions here are commands the
+ * `shell` user holds by itself, so they are taken through Shizuku when KernelSU answers nothing - and that
+ * matters most on this screen of all of them, because the phone this flow produces has no root at all after
+ * a reboot. Opening the helper by hand is the press that puts root back, removing it is a delete the shell
+ * user holds, and installing it is `pm install` - which is how `adb install` works with no root either - so
+ * a phone whose helper is another build's, or missing altogether, can be repaired here before it has ever
+ * been rerooted. The two writes that genuinely need root are the inject and the key removal, and they still
+ * refuse with a sentence rather than being retried somewhere they cannot land.
  *
  * The step list is shown in full, because the value of this screen is knowing where you are: five of these
  * six steps fail in a way that looks like a different problem, and the one that fails silently - an app
@@ -166,7 +168,12 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
      * of some other KernelSU. See [DfrInstall.stageDaemon] for the measurement.
      */
     fun stageDaemon(): String {
-        val action = DfrInstall.stageDaemon(context) ?: return context.getString(R.string.dfr_no_root)
+        // Root only, and the one place in this screen where that is a fact about the command rather than a
+        // shortcut: the staging ends by making the file system-owned at mode 0700, and a shell that cannot
+        // chown would leave a daemon the module's policy refuses - which fails inside the exploit. So the
+        // sentence names the step rather than the phone: the install below it does not need root at all.
+        val action = DfrInstall.stageDaemon(context)
+            ?: return context.getString(R.string.dfr_stage_no_root)
         AppLog.info(
             AppLogTags.KERNEL_SU,
             "system uid flow: stage daemon - ${action.log.lineSequence().lastOrNull().orEmpty()}",
@@ -179,8 +186,12 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // Before the helper exists, because the helper is what would otherwise settle for the wrong
         // daemon - it keeps whatever it finds at that path.
         val staged = stageDaemon()
-        val action = DfrInstall.runAction(DfrInstall.installCommand(file.absolutePath))
-            ?: return@act listOf(staged, context.getString(R.string.dfr_no_root)).joinToString("\n")
+        // Through whichever shell this phone has, which is the difference between a phone that has rebooted
+        // into no root being repairable here and that phone being told to come back with root: `pm install`
+        // is the shell user's own permission, and the copy it needs is staged for it - see
+        // [DfrInstall.installStageTwo].
+        val action = DfrInstall.installStageTwo(file)
+            ?: return@act listOf(staged, context.getString(R.string.dfr_no_shell)).joinToString("\n")
         // Stamped on the attempt, for the same reason as the inject above: `pm install` prints more than
         // one word beginning with Failure, and a stamp that only moves on a clean verdict leaves the
         // second reboot indistinguishable from one that has already happened.
@@ -194,7 +205,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // cannot escalate - so refusing this for want of root would be refusing it for a permission the
         // command never needed.
         val action = DfrInstall.uninstallStageTwo()
-            ?: return@act context.getString(R.string.dfr_no_root)
+            ?: return@act context.getString(R.string.dfr_no_shell)
         if (action.ok) AppPreferences.setDfrInstalledAt(context, null)
         action.log
     }
@@ -210,7 +221,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // helper is what puts root back, so on a boot that has none this press is the way out of it.
         val staged = stageDaemon()
         val action = DfrInstall.launch()
-            ?: return@act listOf(staged, context.getString(R.string.dfr_no_root)).joinToString("\n")
+            ?: return@act listOf(staged, context.getString(R.string.dfr_no_shell)).joinToString("\n")
         listOf(staged, action.log).joinToString("\n")
     }
 
@@ -705,7 +716,11 @@ private fun readState(
         )
     }
     val probe = DfrInstall.probe() ?: return null
-    val check = DfrInstall.run(context, DfrMode.Check)
+    // Through whichever shell this phone has, and the reading the missing-helper case turns on: with no root
+    // the only thing that can say whether this app's certificate is still in the list is the injector's own
+    // parser, and a phone whose helper was removed can only be handed its install step if that read answers.
+    // A refusal is null, which is exactly the state this screen was in before the fallback existed.
+    val check = DfrInstall.checkInjected(context)
     val injected = check?.allInjected
     val build = DfrInstall.readStageTwoBuild(context, bundled)
     val state = DfrState(

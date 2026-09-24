@@ -12,10 +12,12 @@ package dev.busung.s25uroot.dfr
 import dev.busung.s25uroot.BuildConfig
 
 /**
- * app_process entry point. Runs as root.
+ * app_process entry point. Runs as root, except for `--check`, which writes nothing and is a read.
  *
  * The app reaches it through its own root shell, with **this app's installed APK as the classpath** -
- * the ported classes are compiled into it, so nothing is staged to the device first. Manual example:
+ * the ported classes are compiled into it, so nothing is staged to the device first. `--check` is also
+ * asked through Shizuku's plain shell, because what it answers decides what a phone with no root can do
+ * next - see [DfrInstall.checkInjected]. Manual example:
  *   su -c 'CLASSPATH=<this app's base.apk> app_process /system/bin \
  *     --nice-name=rmg_inject dev.busung.s25uroot.dfr.InjectMain \
  *     --apk /sdcard/Download/picked.apk [--xml /data/system/packages.xml] \
