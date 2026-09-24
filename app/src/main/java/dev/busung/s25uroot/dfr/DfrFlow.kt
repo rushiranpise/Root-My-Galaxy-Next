@@ -183,14 +183,19 @@ internal object DfrFlow {
             DfrHelperAvailability.NotInBuild -> return DfrStep.NoHelper
             DfrHelperAvailability.Unwritable -> return DfrStep.HelperUnwritable
         }
-        // A removal waiting on a restart comes before everything below, including the armed check: the
-        // key is gone from the file and still live in the running system, so "Ready" would call a phone
-        // finished while the list it boots from is the one it will not use until it starts again. It is
-        // answered only while the file really is without our key - if Package Manager's own rewrite put it
-        // back, the ladder is the honest reading and this step has nothing to apply.
-        if (state.keyInjected == false && state.keyRemovedAtMillis != null &&
-            !restartedSince(state.keyRemovedAtMillis, state)
-        ) {
+        // A removal waiting on a restart comes before everything below, including the armed check: the key
+        // is out of the file this app wrote and still live in the running system, so "Ready" would call a
+        // phone finished while the list it boots from is the one it will not use until it starts again.
+        //
+        // It is answered from the stamp and not from the file, which is the opposite of what this did
+        // first. The Package Manager that has not restarted since a removal still holds our key in its
+        // memory and rewrites `packages.xml` from it on its own schedule - measured on this device, a
+        // removal that had landed was back in the file 45 s later with no restart in between. Requiring the
+        // file to still be clean before offering this step therefore sent the one phone that needed it down
+        // the ladder, where the only answer left is a reboot that cannot help: the file it boots from has
+        // the key in it. So the stamp is what says this phone owes a restart, and the step's own action
+        // re-makes the removal under that restart.
+        if (state.keyRemovedAtMillis != null && !restartedSince(state.keyRemovedAtMillis, state)) {
             return DfrStep.ApplyRemoval
         }
         // Armed is first because it is the only state that needs nothing: hooks in the kernel this boot

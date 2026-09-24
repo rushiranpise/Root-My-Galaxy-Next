@@ -205,6 +205,34 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         }
     }
 
+    /**
+     * The restart that makes a removal true, with the removal re-made underneath it.
+     *
+     * This is what the [DfrStep.ApplyRemoval] step's button does, and the reason it is not simply a
+     * restart is the window between the two: a clean-up left `packages.xml` without our key, and Package
+     * Manager's own rewrite of the file from its memory had the key back in it 45 s later - both measured,
+     * see the report that made this action exist. A restart asked for after that boots the file *with* the
+     * key in it, which is a restart that cannot help, and offering one is what the screen used to do.
+     *
+     * So the uninstall runs again immediately before the restart, where nothing can get between them. On a
+     * file that is still clean it writes nothing and says so - which is the same answer, for free, and it
+     * is why this does not need to ask first whether the key came back.
+     */
+    fun applyRemoval() = act("apply removal") {
+        val again = DfrInstall.run(context, DfrMode.Uninstall)
+            ?: return@act context.getString(R.string.dfr_no_root)
+        // A removal that had to be written again is a new instant, for the same reason a clean-up stamps
+        // one: this phone owes a restart for a file that changed.
+        if (again.keyTakenOut) AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
+        val outcome = runRecoveryAction(context, RecoveryTool.SoftReboot)
+        val restart = if (outcome.accepted) {
+            context.getString(R.string.recovery_action_soft_reboot)
+        } else {
+            outcome.detail
+        }
+        listOf(again.log, restart).joinToString("\n")
+    }
+
     fun cleanUp() = act("clean up") {
         // The two things this flow put on the device: the key in the shared user, and the helper
         // installed under it. The files an inject leaves in /data/system - the pre-inject copy of
@@ -406,7 +434,12 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     // This one covers three steps - both restarts and the removal a restart applies -
                     // because they are one answer with one word in this screen: [DfrStep.ApplyRemoval] is
                     // a restart.
-                    AppAction(R.string.dfr_action_reboot, roleFor(DfrAction.Reboot), enabled) { reboot() },
+                    AppAction(R.string.dfr_action_reboot, roleFor(DfrAction.Reboot), enabled) {
+                        // On the step that is a removal waiting for its restart, the restart carries the
+                        // removal with it rather than trusting the file to still be clean - see
+                        // [applyRemoval] for the two measurements that put it there.
+                        if (step == DfrStep.ApplyRemoval) applyRemoval() else reboot()
+                    },
                     // The stage-two answers share one cell rather than getting one each: no reading can
                     // have two of them true at once.
                     when (step) {

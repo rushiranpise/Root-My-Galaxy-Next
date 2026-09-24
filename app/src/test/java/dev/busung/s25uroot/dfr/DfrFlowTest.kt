@@ -358,12 +358,16 @@ class DfrFlowTest {
     }
 
     @Test
-    fun `a key that came back is the ladder, not a pending removal`() {
-        // Package Manager rewrites packages.xml from its memory, so a key can reappear after a removal.
-        // The file is then the reading that matters, and a restart would apply the key rather than the
-        // removal - so the pending step has nothing to say here.
+    fun `a key that came back after a removal still owes its restart`() {
+        // The measurement this rule comes from: a clean-up wrote packages.xml without our key at 00:08:53
+        // and Package Manager's own rewrite had it back at 00:09:38, with no restart in between - which is
+        // why the file is the one thing here a running Package Manager can undo, and the stamp is the
+        // record that survives it. The phone owes the restart, and the step re-makes the removal under it.
+        // Falling through to the ladder instead is how the screen came to offer a reboot that could not
+        // help, because the file it would boot from had the key in it.
         val back = fresh(keyInjected = true, keyRemovedAtMillis = now - 60_000)
-        assertEquals(DfrStep.Reboot, DfrFlow.next(back))
+        assertEquals(DfrStep.ApplyRemoval, DfrFlow.next(back))
+        assertNotEquals(DfrStep.Reboot, DfrFlow.next(back))
     }
 
     @Test
