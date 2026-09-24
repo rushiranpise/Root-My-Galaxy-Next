@@ -212,6 +212,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.busung.s25uroot.dfr.DfrInstall
+import dev.busung.s25uroot.dfr.DfrStageArming
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1181,6 +1183,26 @@ private fun RootApp(
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // The other half of what that tick is for: an app that has root is an app that can put the daemon back
+    // where the next boot's late-load will look for it. That file is *consumed* by every late-load - a run's
+    // and the system-uid helper's - so a phone that has root now and is restarted later can find nothing
+    // left to arm the exploit with, and what the helper says when it finds nothing is that the exploit
+    // failed. Nothing is asked of a phone without root, and an app that already armed this boot copies
+    // nothing: see [DfrInstall.armStageForNextBoot] for the check that makes that true.
+    LaunchedEffect(resumeTick) {
+        withContext(Dispatchers.IO) {
+            if (DfrInstall.armStageForNextBoot(context) == DfrStageArming.Failed) {
+                // Said, because it is the one outcome here that the next boot cannot recover from on its
+                // own: silently, the phone would simply be unrerootable after a restart.
+                AppLog.warn(
+                    AppLogTags.KERNEL_SU,
+                    "The KernelSU daemon is not staged for the next boot: a reboot without root would " +
+                        "have nothing to late-load",
+                )
+            }
+        }
     }
 
     // The bar floats over the pages rather than being handed a strip of its own. A pill that reserved its

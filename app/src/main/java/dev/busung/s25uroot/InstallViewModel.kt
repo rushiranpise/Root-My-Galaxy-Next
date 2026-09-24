@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.busung.s25uroot.dfr.DfrInstall
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1586,6 +1587,39 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         refreshed.forEach { packageName ->
             appendLog(app.getString(R.string.log_manager_refreshed, packageName))
         }
+        // The last thing the run does, and the one that makes the *next* boot work: the late-load above
+        // renamed the daemon out of the stage file, so nothing is left there for the next run - or for the
+        // system-uid helper after a reboot, which is the case that reads as the exploit having failed on a
+        // phone whose only problem is a file nobody rewrote.
+        //
+        // Through [runMaintenance] rather than the app's own root shell, because this is the moment the two
+        // transports differ: a run with Shizuku has its elevated shell, and a run without it has the
+        // bootstrap helper - while the app's own `su` grant is exactly what a first install has not been
+        // given, so asking for one here is a prompt nobody asked for, or a minute of waiting for it.
+        //
+        // No version is passed, and that is not a guess: the staging prefers a source by version only when
+        // it has one to compare, and its first source is `/data/adb/ksud` - which this run has just renamed
+        // the daemon onto. The daemon it writes back is therefore the one this boot is running.
+        val restaged = runCatching { runMaintenance(DfrInstall.stageDaemonCommand()) }.getOrNull()
+        if (restaged != null && restaged.code == 0) {
+            appendLog(
+                listOf(app.getString(R.string.log_ksu_stage_for_next_boot), restaged.output)
+                    .filter(String::isNotBlank)
+                    .joinToString("\n"),
+            )
+        } else {
+            appendLog(
+                listOf(
+                    app.getString(R.string.log_ksu_stage_for_next_boot_failed),
+                    restaged?.output.orEmpty(),
+                ).filter(String::isNotBlank).joinToString("\n"),
+            )
+            AppLog.warn(
+                AppLogTags.KERNEL_SU,
+                "The KernelSU daemon was not written back for the next boot: a reboot without root would " +
+                    "have nothing to late-load",
+            )
+        }
     }
 
     private fun detectInstalled(): Boolean {
@@ -2050,8 +2084,15 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
          */
         private const val KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
 
-        /** The copy the payload's late-load reads, and the second of the two names it owns. */
-        private const val KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
+        /**
+         * The copy the payload's late-load reads, and the second of the two names it owns.
+         *
+         * Read from the DFR side rather than spelled out again, because the second caller of this name made
+         * the difference visible: what is staged here is *consumed* by the late-load below, and what puts it
+         * back for the next boot is that side's own staging. Two spellings would be two files, each of which
+         * looks correct on its own.
+         */
+        private const val KSUD_STAGE_PATH = DfrInstall.DAEMON_STAGE_PATH
         private const val ADB_KSUD_PATH = KSUD_PATH
 
         private val MODULES_ASIDE_SCRIPT = """

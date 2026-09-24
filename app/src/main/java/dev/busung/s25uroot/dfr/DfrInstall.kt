@@ -3,8 +3,11 @@ package dev.busung.s25uroot.dfr
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.SystemClock
+import dev.busung.s25uroot.AppLog
+import dev.busung.s25uroot.AppLogTags
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
+import dev.busung.s25uroot.RootStatusProbe
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
 import dev.busung.s25uroot.ShizukuController
 import java.io.File
@@ -210,6 +213,27 @@ internal data class DfrProbe(
 
 /** Whether an action the app asked a root shell for was carried out. */
 internal data class DfrAction(val ok: Boolean, val log: String)
+
+/**
+ * What an attempt to keep the daemon stage armed for the next boot came to.
+ *
+ * Three answers rather than a boolean, because the difference between the two silent ones is the whole
+ * reason this is called from somewhere that runs on every return to the foreground: "it was already there"
+ * is what an armed phone answers and "this boot has no root" is what an unrooted one answers, and a
+ * warning about either would be a line in the log every time the app is opened. Only [Failed] is news - a
+ * boot that had root and still could not put the file in place - because that is the phone whose next
+ * restart will find nothing to late-load.
+ */
+internal enum class DfrStageArming {
+    /** The daemon is where the next boot's late-load reads it, written now or already there. */
+    Armed,
+
+    /** No root is live in this boot, so there is nothing to write with - and nothing to report. */
+    NoRoot,
+
+    /** Root was live and the file is still not in place: a restart would find nothing to late-load. */
+    Failed,
+}
 
 internal object DfrInstall {
 
@@ -438,11 +462,7 @@ internal object DfrInstall {
         expectedVersion: String? = null,
         stagePath: String = DAEMON_STAGE_PATH,
     ): String = buildString {
-        // Asked with `-V` and then `--version`, the two spellings the daemon has had, and only the first
-        // line of whatever it answers: the version is the first thing it says or it is nothing.
-        fun versionOf(source: String): String =
-            "${'$'}({ '" + source + "' -V 2>/dev/null || '" + source + "' --version 2>/dev/null; } | " +
-                "head -1)"
+        fun versionOf(source: String) = versionOfCommand(source)
 
         append("want='").append(expectedVersion?.trim().orEmpty()).append("'; src=''; got=''; alt=''; altgot=''; ")
         sources.forEach { source ->
@@ -486,12 +506,103 @@ internal object DfrInstall {
      * say whether a candidate is the right build - and it is read from the same daemon the app already
      * asks after every boot, so this costs a cached lookup rather than a new probe.
      */
-    fun stageDaemon(context: Context): DfrAction? =
-        runAction(
-            stageDaemonCommand(
-                expectedVersion = runCatching { KernelSuVersionProbe.read(context).daemon }.getOrNull(),
-            ),
+    fun stageDaemon(context: Context): DfrAction? = stageDaemonAs(runningDaemonVersion(context))
+
+    /**
+     * The staging itself, with the version already read - so a caller that needs the same answer for two
+     * questions asks the device once. See [armStageForNextBoot], which asks whether the staging can be
+     * skipped and then stages, and both halves of that are the same comparison.
+     */
+    private fun stageDaemonAs(expectedVersion: String?): DfrAction? =
+        runAction(stageDaemonCommand(expectedVersion = expectedVersion))
+
+    /**
+     * The daemon version this device is running, or null when it could not be read.
+     *
+     * Null is not a version: it is [stageDaemonCommand]'s own `want=''`, and the staging that follows still
+     * happens - from the first source there is - and says out loud that it could not compare what it staged.
+     */
+    private fun runningDaemonVersion(context: Context): String? =
+        runCatching { KernelSuVersionProbe.read(context).daemon }.getOrNull()
+
+    /**
+     * What version a candidate daemon says it is, in the two spellings it has had, first line only.
+     *
+     * One implementation for the two commands that compare a daemon now - the staging that chooses a
+     * source, and the read that decides whether the staging can be skipped - because a version asked two
+     * ways is a version that can disagree with itself.
+     */
+    private fun versionOfCommand(source: String): String =
+        "${'$'}({ '" + source + "' -V 2>/dev/null || '" + source + "' --version 2>/dev/null; } | head -1)"
+
+    /**
+     * Whether the file the daemon's own late-load renames is already this device's daemon, in one command.
+     *
+     * The staging writes two files and only one of them is read here, because only one of them is
+     * *consumed*: the late-load renames [DAEMON_STAGE_PATH] onto `/data/adb/ksud` as its first act, so it
+     * is the file whose absence stops the next boot - while [STAGED_DAEMON] is the copy the exploit execs
+     * and is rewritten on the way in by whoever is about to run it.
+     *
+     * A version and not an existence check, for the reason the staging itself prefers a source by version:
+     * a copy from another flavour is a file that is *there* and is the wrong daemon, and treating it as
+     * armed is how a boot comes to exec a daemon whose UAPI does not match the module in the kernel. The
+     * command copies nothing - it is the cheap half of [armStageForNextBoot], and the point of it is that
+     * an app that already armed this boot does not move five megabytes twice to find that out.
+     */
+    internal fun stageArmedCommand(
+        stagePath: String = DAEMON_STAGE_PATH,
+        expectedVersion: String? = null,
+    ): String = buildString {
+        append("want='").append(expectedVersion?.trim().orEmpty()).append("'; ")
+        append("if [ ! -s '").append(stagePath).append("' ]; then echo '").append(STAGE_ABSENT).append("'; ")
+        append("elif [ -z \"${'$'}want\" ]; then echo '").append(STAGE_UNCOMPARED).append("'; ")
+        append("else case \"").append(versionOfCommand(stagePath)).append("\" in ")
+            .append("*\"${'$'}want\"*) echo '").append(STAGE_ARMED)
+            .append("';; *) echo '").append(STAGE_DIFFERENT).append("';; esac; fi")
+    }
+
+    /**
+     * Whether [stageArmedCommand] said the stage file is already this device's daemon.
+     *
+     * A reader of the marker rather than of the whole answer, because the three ways of being *not* armed
+     * - missing, another build's, and a running daemon that could not be read - all lead to the same next
+     * step. The command distinguishes them anyway, and [armStageForNextBoot] puts its line in the log: on a
+     * phone that will not reroot after a restart these four words are the first thing to look at, and
+     * "the file was written again" without them is a line that cannot say why it had to be.
+     */
+    internal fun stageArmed(output: String?): Boolean = output?.contains(STAGE_ARMED) == true
+
+    /**
+     * Makes sure the daemon a late-load reads is in place for the next boot, if this boot has root.
+     *
+     * Called from the places where the app knows it has root - a load that just landed, a screen coming
+     * back to the foreground on a rooted phone - because the file it writes is *consumed* by every run that
+     * uses it: a payload's late-load and the system-uid helper's both rename it away, and nothing else puts
+     * it back. Without this the sequence "root now, reboot" leaves the next boot with a helper that starts,
+     * looks for a daemon, finds none, and aborts with "Failed to stage ksud" - which reads as the exploit
+     * having failed, on a phone whose only real problem is a file nobody rewrote.
+     *
+     * Root is asked of the authoritative reading rather than of the native paths, because the native ones
+     * can be denied by policy while root is live - and *off the main thread*, as that reading can start a
+     * process. The check comes before the write so this can be called whenever the app is resumed without
+     * copying a daemon every time; the copy itself is [stageDaemon]'s, so what is written here is exactly
+     * what a screen about to run the helper writes.
+     */
+    fun armStageForNextBoot(context: Context): DfrStageArming {
+        if (!RootStatusProbe.isActive()) return DfrStageArming.NoRoot
+        val expected = runningDaemonVersion(context)
+        val reading = KernelSuRuntime.rootShell(
+            stageArmedCommand(expectedVersion = expected),
+            TIMEOUT_SECONDS,
         )
+        // Said before it is acted on, on the same terms as the version reading above: this runs in the
+        // background on every return to the foreground, and it is the only place a phone's own answer about
+        // its stage file is written down - which is what a report of "it did not reroot" has to be argued
+        // against. Nothing is said on a phone with no root, where the question is not asked at all.
+        AppLog.debug(AppLogTags.KERNEL_SU, "Reroot staging: ${reading?.output?.trim().orEmpty()}")
+        if (stageArmed(reading?.output)) return DfrStageArming.Armed
+        return if (stageDaemonAs(expected)?.ok == true) DfrStageArming.Armed else DfrStageArming.Failed
+    }
 
     /**
      * Removes the stage two, which is the only way past an install that landed as an ordinary app:
@@ -730,6 +841,13 @@ internal object DfrInstall {
 
     /** The word `am` answers a start that did not happen with. */
     private const val LAUNCH_FAILURE = "Error"
+
+    // The four answers of [stageArmedCommand], as markers rather than as prose, because that command's
+    // output is read rather than logged - the same shape [probeCommand] uses, and for the same reason.
+    private const val STAGE_ARMED = "RMG-stage=armed"
+    private const val STAGE_ABSENT = "RMG-stage=absent"
+    private const val STAGE_DIFFERENT = "RMG-stage=different"
+    private const val STAGE_UNCOMPARED = "RMG-stage=uncompared"
 
     /** `android.uid.system`, which is what the helper's package runs as once the inject has been honoured. */
     private const val SYSTEM_UID = 1000

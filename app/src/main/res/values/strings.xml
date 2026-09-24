@@ -430,6 +430,13 @@
     <string name="log_ksu_modules_move_failed">[!] KernelSU modules could not be moved (%1$s)</string>
     <string name="log_ksu_modules_restore_failed">[!] KernelSU modules are still at %1$s. Move them back to %2$s (%3$s).</string>
     <string name="log_ksu_staged">[+] KernelSU staging complete</string>
+    <!--
+      The run's own copy of a line the app also logs when it finds root on a screen: the late-load renamed
+      the daemon out of the stage file, and the file the next boot reads has to be written back before this
+      phone is restarted.
+    -->
+    <string name="log_ksu_stage_for_next_boot">[+] KernelSU daemon written back for the next boot</string>
+    <string name="log_ksu_stage_for_next_boot_failed">[!] The KernelSU daemon could not be written back: a reboot without root would have nothing to late-load, and the system-uid helper reports that as the exploit having failed.</string>
     <string name="log_ksu_staged_early">[+] KernelSU daemon staged before the payload. It must already be in place for KernelSU to load after bootstrap root.</string>
     <string name="log_local_adb_shell_ready">[+] Local ADB shell transport ready: u:r:shell:s0</string>
     <string name="log_restart_after_root">[*] Restarting userspace so KernelSU can load the modules.</string>

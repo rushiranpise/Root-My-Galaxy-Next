@@ -202,11 +202,15 @@ class DfrDaemonPathTest {
             command.contains("'${DfrInstall.DAEMON_STAGE_PATH}'"),
         )
         // Held against the path the main install flow writes for its own late-load: one contract, two
-        // callers, and both hand their file to the same daemon code.
+        // callers, and both hand their file to the same daemon code. One constant now rather than two
+        // spellings this line kept together, because the second caller made the difference visible: the
+        // file a run consumes is the file the reroot re-arms, and a second spelling would make those two
+        // files, each of which looks correct on its own.
         assertTrue(
-            "InstallViewModel's stage path and DfrInstall's have come apart",
+            "InstallViewModel spells the stage path out again, so the file a run consumes and the file " +
+                "the reroot re-arms can come apart",
             source("app/src/main/java/dev/busung/s25uroot/InstallViewModel.kt")
-                .contains("\"${DfrInstall.DAEMON_STAGE_PATH}\""),
+                .contains("KSUD_STAGE_PATH = DfrInstall.DAEMON_STAGE_PATH"),
         )
     }
 
