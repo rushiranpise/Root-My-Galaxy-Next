@@ -811,13 +811,18 @@ private fun RootApp(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    shizukuStartResult = null
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                // A report, not a question: one answer, and it wears the filled fill because there is
+                // nothing here to choose between and a lone quiet button under a log reads as disabled.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            shizukuStartResult = null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -983,13 +988,16 @@ private fun RootApp(
             },
             text = { Text(stringResource(R.string.updater_run_in_progress)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    updateRefusedDuringRun = false
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            updateRefusedDuringRun = false
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -1063,36 +1071,35 @@ private fun RootApp(
                 )
             },
             confirmButton = {
-                FilledTonalButton(
-                    onClick = {
-                        clickHaptic(view)
-                        compatibilityWarning = when (warning) {
-                            CompatibilityWarning.Device -> if (!profile.matchesKernelVersion(device)) {
-                                CompatibilityWarning.KernelVersion
-                            } else {
-                                null
+                // Continue is the recommended answer and Back is the safe one, which is the shape this
+                // pair had already chosen when it was a tonal button beside a text button - so the tones
+                // move to the set rather than the judgement changing. Back is quiet rather than
+                // destructive: it undoes a choice, it does not take anything away.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_continue, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            compatibilityWarning = when (warning) {
+                                CompatibilityWarning.Device -> if (!profile.matchesKernelVersion(device)) {
+                                    CompatibilityWarning.KernelVersion
+                                } else {
+                                    null
+                                }
+                                CompatibilityWarning.KernelVersion -> null
                             }
-                            CompatibilityWarning.KernelVersion -> null
-                        }
-                        if (compatibilityWarning == null) {
-                            showInstallConfirmation = true
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.action_continue))
-                }
+                            if (compatibilityWarning == null) {
+                                showInstallConfirmation = true
+                            }
+                        },
+                        AppAction(R.string.action_back) {
+                            clickHaptic(view)
+                            compatibilityWarning = null
+                            showTargetPicker = true
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        compatibilityWarning = null
-                        showTargetPicker = true
-                    },
-                ) {
-                    Text(stringResource(R.string.action_back))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -1106,23 +1113,25 @@ private fun RootApp(
             },
             text = { Text(stringResource(R.string.install_confirm_body)) },
             confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    showInstallConfirmation = false
-                    openInstaller(selectedProfile?.selectionId)
-                    selectedProfile = null
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
+                // Confirm is the recommended answer and Cancel is the quiet one. Confirm is not
+                // destructive even though a run replaces the kernel: what this dialog asks is whether to
+                // start, and everything a run can report comes after it.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_confirm, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            showInstallConfirmation = false
+                            openInstaller(selectedProfile?.selectionId)
+                            selectedProfile = null
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            showInstallConfirmation = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    showInstallConfirmation = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
