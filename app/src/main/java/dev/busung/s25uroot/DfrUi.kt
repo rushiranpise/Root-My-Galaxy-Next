@@ -1,12 +1,8 @@
 package dev.busung.s25uroot
 
 import android.content.Context
-import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -14,8 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.busung.s25uroot.dfr.DfrApk
@@ -380,124 +373,75 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            // Three across and two down: six full-width rows were half the dialog in buttons, and none
-            // of the order needs a row each. Every cell is an equal third of the width, so a label that
-            // does not fit one line takes a second rather than making its own button wider than the ones
-            // beside it.
+            // Every answer this screen has, in the one set the app shows answers in - see
+            // [AppDialogActions] for the rows and the fills.
             //
-            // The grid is also the progress display: the one action the step the phone is on is waiting
-            // for is filled and everything else is muted, so the loud button *is* "press this next" and
-            // no cell has to be read to find it. Two cells are outside that rule on purpose - the
-            // clean-up keeps the error colours whatever the step is, because it is the one press here
-            // that takes the flow off the phone, and the inject is disabled rather than muted while the
-            // reading says the key is already in the list.
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(DFR_ACTION_SPACING),
-            ) {
-                val enabled = !busy
-                val asked = askedAction(step)
-                fun kindFor(action: DfrAction): DfrActionKind =
-                    if (action == asked) DfrActionKind.Next else DfrActionKind.Muted
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(DFR_ACTION_SPACING),
-                ) {
-                    // First because it is the one that changes nothing: every other button acts on what
-                    // this one reads. Not offered on a refusal, where the answer cannot change - nothing
-                    // on the phone decides whether this build carries a helper. An empty cell where it is
-                    // not offered keeps the row's other two where they belong, rather than letting them
-                    // widen into the space.
-                    if (step != DfrStep.NoHelper) {
-                        DfrActionButton(
-                            label = R.string.dfr_action_read_state,
-                            enabled = enabled,
-                            kind = kindFor(DfrAction.Read),
-                            modifier = Modifier.weight(1f),
-                            onClick = { refresh() },
-                        )
+            // The set is also what reports progress: only the answer the step the phone is on is waiting
+            // for is [AppActionRole.Priority], so "press this next" is answered by the fill before any
+            // label is read. Two answers are outside that rule on purpose - the clean-up is
+            // [AppActionRole.Destructive] whatever the step is, because it is the one press here that
+            // takes the flow off the phone, and the inject is disabled rather than quiet while the reading
+            // says the key is already in the list, where an inject could only print a refusal.
+            val enabled = !busy
+            val asked = askedAction(step)
+            fun roleFor(action: DfrAction): AppActionRole =
+                if (action == asked) AppActionRole.Priority else AppActionRole.Standard
+            AppDialogActions(
+                listOfNotNull(
+                    // First because it is the one that changes nothing: every other answer acts on what
+                    // this one read. Not offered on a refusal, where the answer cannot change - nothing on
+                    // the phone decides whether this build carries a helper.
+                    if (step == DfrStep.NoHelper) {
+                        null
                     } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    // Disabled while the reading says the key is already in the list, which is a
-                    // measurement rather than a guess: an inject refuses in that state, so the button
-                    // could only print a refusal. It is not hidden, because "there is nothing to inject"
-                    // is worth seeing.
-                    DfrActionButton(
-                        label = R.string.dfr_inject,
-                        enabled = enabled && reading?.injected != true,
-                        kind = kindFor(DfrAction.Inject),
-                        modifier = Modifier.weight(1f),
-                        onClick = { inject() },
-                    )
+                        AppAction(R.string.dfr_action_read_state, roleFor(DfrAction.Read), enabled) {
+                            refresh()
+                        }
+                    },
+                    AppAction(
+                        R.string.dfr_inject,
+                        roleFor(DfrAction.Inject),
+                        enabled && reading?.injected != true,
+                    ) { inject() },
                     // This one covers three steps - both restarts and the removal a restart applies -
-                    // because they are one action with one word in this screen: [DfrStep.ApplyRemoval] is
+                    // because they are one answer with one word in this screen: [DfrStep.ApplyRemoval] is
                     // a restart.
-                    DfrActionButton(
-                        label = R.string.dfr_action_reboot,
-                        enabled = enabled,
-                        kind = kindFor(DfrAction.Reboot),
-                        modifier = Modifier.weight(1f),
-                        onClick = { reboot() },
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(DFR_ACTION_SPACING),
-                ) {
-                    // The stage-two actions share a cell rather than getting a button each: no reading
-                    // can have two of them true at once. The empty cell they leave on the steps that are
-                    // not theirs is deliberate, for the reason above.
+                    AppAction(R.string.dfr_action_reboot, roleFor(DfrAction.Reboot), enabled) { reboot() },
+                    // The stage-two answers share one cell rather than getting one each: no reading can
+                    // have two of them true at once.
                     when (step) {
-                        DfrStep.RemoveStageTwo -> DfrActionButton(
-                            label = R.string.dfr_action_remove_stage2,
-                            enabled = enabled,
-                            kind = kindFor(DfrAction.StageTwo),
-                            modifier = Modifier.weight(1f),
-                            onClick = { removeStageTwo() },
-                        )
+                        DfrStep.RemoveStageTwo -> AppAction(
+                            R.string.dfr_action_remove_stage2,
+                            roleFor(DfrAction.StageTwo),
+                            enabled,
+                        ) { removeStageTwo() }
                         // No condition on the helper here: a build without one never reaches this step,
                         // because the flow refuses before it - see [DfrStep.NoHelper].
-                        DfrStep.InstallStageTwo -> DfrActionButton(
-                            label = R.string.dfr_action_install_stage2,
-                            enabled = enabled,
-                            kind = kindFor(DfrAction.StageTwo),
-                            modifier = Modifier.weight(1f),
-                            onClick = { install() },
-                        )
-                        DfrStep.OpenStageTwo -> DfrActionButton(
-                            label = R.string.dfr_action_open_stage2,
-                            enabled = enabled,
-                            kind = kindFor(DfrAction.StageTwo),
-                            modifier = Modifier.weight(1f),
-                            onClick = { open() },
-                        )
-                        else -> Spacer(modifier = Modifier.weight(1f))
-                    }
-                    DfrActionButton(
-                        label = R.string.dfr_clean_up,
-                        enabled = enabled,
-                        kind = DfrActionKind.Destructive,
-                        modifier = Modifier.weight(1f),
-                        onClick = { confirmCleanUp = true },
-                    )
-                    DfrActionButton(
-                        label = R.string.action_cancel,
-                        enabled = true,
-                        // Muted and not [DfrActionKind.Next] by hand rather than by the rule: dismissing
-                        // the dialog is never what a step is waiting for, so nothing can make this cell
-                        // loud. It is the way out, not the way on.
-                        kind = DfrActionKind.Muted,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            clickHaptic(view)
-                            onDismiss()
-                        },
-                    )
-                }
-            }
+                        DfrStep.InstallStageTwo -> AppAction(
+                            R.string.dfr_action_install_stage2,
+                            roleFor(DfrAction.StageTwo),
+                            enabled,
+                        ) { install() }
+                        DfrStep.OpenStageTwo -> AppAction(
+                            R.string.dfr_action_open_stage2,
+                            roleFor(DfrAction.StageTwo),
+                            enabled,
+                        ) { open() }
+                        else -> null
+                    },
+                    AppAction(R.string.dfr_clean_up, AppActionRole.Destructive, enabled) {
+                        confirmCleanUp = true
+                    },
+                    // Quiet by hand rather than by the rule: dismissing is never what a step waits for,
+                    // so nothing can make this answer loud. It is the way out, not the way on.
+                    AppAction(R.string.action_cancel, AppActionRole.Standard) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
         },
-        // Cancel is in the stack with everything else, so a second dismissal here would be the same press
+        // Cancel is in the set with everything else, so a second dismissal here would be the same press
         // twice.
         dismissButton = null,
     )
@@ -565,37 +509,13 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
 }
 
 /**
- * How tall a cell of the action grid is, and why they are all the same height.
- *
- * Two lines of [MaterialTheme.typography.labelMedium]: a third of a phone's width fits "Read again",
- * "Reboot now" and "Clean up" on one line and wraps "Install stage 2" onto two, so this has to be the
- * wrapped case - otherwise the grid would change height at the step whose button carries the longer label.
- * The value is really a budget, and [DFR_TEXT_HEIGHT] is the other side of it.
- */
-private val DFR_ACTION_HEIGHT = 44.dp
-
-/**
- * The gap between two actions, across and down, which is also what stops a red button reading as part of
- * its neighbour.
- */
-private val DFR_ACTION_SPACING = 6.dp
-
-/**
- * How much room a label is given inside its button.
- *
- * Well under the platform's own 24 dp a side, which is sized for a button that has the dialog's whole
- * width: a cell here has a third of it, and the padding comes straight out of the words.
- */
-private val DFR_ACTION_PADDING = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
-
-/**
  * How tall the dialog's own content may be before it scrolls.
  *
- * A cap rather than "whatever is left", because the actions are not in this area at all: they are the
- * AlertDialog's own, laid out below everything here, and as a grid they are two rows of
- * [DFR_ACTION_HEIGHT] rather than six. 440 dp is what is left for the step list, the measurement and the
- * log once that grid, a title and the platform's padding have taken their share of the 780 dp screen this
- * was written against - and that difference is the reason the grid is worth having.
+ * A cap rather than "whatever is left", because the answers are not in this area at all: they are the
+ * AlertDialog's own, laid out below everything here, and [AppDialogActions] puts this screen's six of them
+ * in two rows rather than six. 440 dp is what is left for the step list, the measurement and the log once
+ * those two rows, a title and the platform's padding have taken their share of the 780 dp screen this was
+ * written against - and that difference is the reason the answers are a grid at all.
  */
 private val DFR_TEXT_HEIGHT = 440.dp
 
@@ -607,16 +527,6 @@ private val DFR_TEXT_HEIGHT = 440.dp
  * worth of it. See the panel in the dialog for what it looked like as plain text.
  */
 private val DFR_LOG_HEIGHT = 140.dp
-
-/**
- * How an action in the grid is filled, which is what the grid uses to say what to press next.
- *
- * [Next] is the one action the step the phone is on is waiting for, in the theme's primary - the pale fill
- * with dark text, the loudest thing a dialog can show - and [Muted] is every other action: legible, flat
- * against the dialog, and clearly not the answer. [Destructive] is the clean-up, the one action here that
- * takes the flow off the phone, and the reason it is in the error colours instead of following the rule.
- */
-private enum class DfrActionKind { Next, Muted, Destructive }
 
 /**
  * Which of the grid's actions a step is waiting for, or null when it is waiting for none of them.
@@ -636,60 +546,13 @@ private fun askedAction(step: DfrStep?): DfrAction? = when (step) {
 }
 
 /**
- * The actions the grid offers, named so that a step's answer can be compared against them.
+ * The answers the grid offers, named so that a step's own answer can be compared against them.
  *
  * Deliberately not [DfrStep]: two of the grid's cells - the clean-up and cancel - are not steps of the
  * flow, and [StageTwo] is three steps that share one cell, so the mapping runs one way and this is what it
- * runs to.
+ * runs to. Which of these is the loud one is the dialog's decision, made from [askedAction].
  */
 private enum class DfrAction { Read, Inject, Reboot, StageTwo }
-
-/**
- * One action of the flow, one cell of the grid under the step list.
- *
- * An equal share of the width and exactly [DFR_ACTION_HEIGHT] tall, so nothing about it is sized by its
- * own label - these are the flow's own words, and a label that decided the button's geometry is how one
- * row of three comes to look like three different things. The label wraps inside that height rather than
- * being shortened, and [DFR_ACTION_PADDING] is small because the width it comes out of is a third of a
- * phone rather than all of it.
- */
-@Composable
-private fun DfrActionButton(
-    @StringRes label: Int,
-    enabled: Boolean,
-    kind: DfrActionKind,
-    modifier: Modifier,
-    onClick: () -> Unit,
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(DFR_ACTION_HEIGHT),
-        enabled = enabled,
-        contentPadding = DFR_ACTION_PADDING,
-        colors = when (kind) {
-            // Every action that is not the step's own: flat against the dialog, legible and quiet, so the
-            // one cell that is filled stands out without any cell having to be read.
-            DfrActionKind.Muted -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            DfrActionKind.Destructive -> ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            // The step's own action: the theme's primary, the pale fill - the one thing in this dialog
-            // that is asking to be pressed.
-            else -> ButtonDefaults.buttonColors()
-        },
-    ) {
-        Text(
-            stringResource(label),
-            style = MaterialTheme.typography.labelMedium,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-        )
-    }
-}
 
 /** The step the phone is on, with what was measured to decide it. */
 private class DfrReading(
