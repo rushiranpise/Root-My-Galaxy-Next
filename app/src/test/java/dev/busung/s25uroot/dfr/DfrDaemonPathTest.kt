@@ -75,15 +75,41 @@ class DfrDaemonPathTest {
     }
 
     @Test
-    fun `the flavour-correct sources are tried in order and a manager is never one of them`() {
-        // The installed daemon first - that is the one the verified load put there, and it is outside
-        // every shared directory - then the copy this app stages for its own runs.
-        val command = DfrInstall.stageDaemonCommand()
-        val installed = command.indexOf("'/data/adb/ksud'")
+    fun `this device's own daemon is the first source and an installed one the last`() {
+        // The order is the fix for a frozen phone. `/data/adb/ksud` is not this app's own work: a KernelSU
+        // manager writes its own `ksud` there - measured on this device as 5,518,544 bytes, eight off
+        // upstream v3.4.0's `ksud-aarch64-linux-android`, against the 6,407,096 this device's manifest
+        // pins - and its embedded module is the generic one for the KMI. Staging that copy is how the
+        // system-uid helper came to load a module built for another kernel: the log ends at
+        // `ksud::late_load: Loading kernelsu.ko`, the device freezes and the watchdog hard-reboots it.
+        val cached = "/data/data/dev.rushiranpise.rmgnext/files/payloads/known-good/ksud-s25u-kdp"
+        val command = DfrInstall.stageDaemonCommand(sources = DfrInstall.daemonSources(cached))
+        val payload = command.indexOf("'$cached'")
         val temp = command.indexOf("'/data/local/tmp/ksud-s25u-kdp'")
+        val installed = command.indexOf("'/data/adb/ksud'")
+        assertTrue("this device's own daemon is not a source: $command", payload >= 0)
+        assertTrue("this device's own daemon is not tried first: $command", payload < temp)
+        assertTrue("the app's own staged copy is not a source: $command", temp > payload)
         assertTrue("the installed daemon is not a source: $command", installed >= 0)
-        assertTrue("the app's own staged copy is not a source: $command", temp > installed)
+        assertTrue("the installed daemon is still preferred over this project's own copy", installed > temp)
         assertTrue("every source is checked for content, not existence", command.contains("[ -s '"))
+    }
+
+    @Test
+    fun `the daemon staged for the helper is the one this device's payload pins`() {
+        // Two callers of one rule. The screen and the boot gate resolve it from the payload this app last
+        // completed a verified run with, which is checked against the manifest before it is handed over;
+        // a run hands over the payload it just exec'd, which is the same file and needs no lookup.
+        val install = source("app/src/main/java/dev/busung/s25uroot/dfr/DfrInstall.kt")
+        assertTrue(
+            "the staging no longer resolves this device's own daemon from the payload cache",
+            install.contains("KnownGoodPayloadStore.daemon(context)"),
+        )
+        val viewModel = source("app/src/main/java/dev/busung/s25uroot/InstallViewModel.kt")
+        assertTrue(
+            "a run writes back a daemon it did not just load",
+            viewModel.contains("DfrInstall.daemonSources(payloads.kernelSu.absolutePath)"),
+        )
     }
 
     @Test

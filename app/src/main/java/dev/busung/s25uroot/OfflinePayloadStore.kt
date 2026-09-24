@@ -243,6 +243,19 @@ internal object KnownGoodPayloadStore {
     }
 
     /**
+     * The daemon the cached payload holds, or null when there is no usable cache.
+     *
+     * For the one caller that has to *stage* this device's daemon rather than run with it -
+     * `DfrInstall.daemonSources`, in the flow's own package - and read through the same checks a run makes,
+     * so a cache a run would refuse is never staged as this device's daemon either. The bytes are the
+     * ones the manifest pins for this phone, which is the whole point: what is staged here ends up in
+     * the kernel as the module a boot late-loads.
+     */
+    fun daemon(context: Context): File? = runCatching { load(context).kernelSu }
+        .getOrNull()
+        ?.takeIf { it.isFile && it.length() > 0 }
+
+    /**
      * Reads the cached payload, refusing anything that does not belong to this device and this build.
      */
     fun load(context: Context, requestedProfileId: String? = null): VerifiedPayloads {

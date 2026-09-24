@@ -199,11 +199,11 @@ class DfrStageArmingTest {
         val body = declaration(viewModelSource(), "private suspend fun installKernelSu(")
         assertTrue(
             "the run no longer writes the daemon back, so the next boot has nothing to late-load",
-            body.contains("DfrInstall.stageDaemonCommand()"),
+            body.contains("DfrInstall.stageDaemonCommand("),
         )
         assertTrue(
             "the staging no longer goes through the run's own transport",
-            body.contains("runMaintenance(DfrInstall.stageDaemonCommand())"),
+            body.contains("runMaintenance(\n") && body.contains("DfrInstall.stageDaemonCommand("),
         )
         assertFalse(
             "the run asks the app's own root shell for the staging, which on a first install is a grant " +
@@ -213,7 +213,7 @@ class DfrStageArmingTest {
         assertTrue(
             "the daemon is written back before the load was confirmed, so it is written on runs that " +
                 "loaded nothing and the file it writes is the one that run just consumed either way",
-            body.indexOf("storeInstallReceipt()") < body.indexOf("DfrInstall.stageDaemonCommand()"),
+            body.indexOf("storeInstallReceipt()") < body.indexOf("DfrInstall.stageDaemonCommand("),
         )
     }
 

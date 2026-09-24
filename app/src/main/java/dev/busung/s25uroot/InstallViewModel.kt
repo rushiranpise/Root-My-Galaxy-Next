@@ -1604,10 +1604,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // bootstrap helper - while the app's own `su` grant is exactly what a first install has not been
         // given, so asking for one here is a prompt nobody asked for, or a minute of waiting for it.
         //
-        // No version is passed, and that is not a guess: the staging prefers a source by version only when
-        // it has one to compare, and its first source is `/data/adb/ksud` - which this run has just renamed
-        // the daemon onto. The daemon it writes back is therefore the one this boot is running.
-        val restaged = runCatching { runMaintenance(DfrInstall.stageDaemonCommand()) }.getOrNull()
+        // The daemon this run's own exploit execs is passed as the source, and it is the first one: the
+        // copy already on the phone is not this project's to trust - a KernelSU manager writes its own
+        // generic `ksud` to `/data/adb/ksud`, and staging that is how the system-uid helper came to load a
+        // module built for another kernel and freeze the phone. What is written back is what this run just
+        // loaded, which is also the only file whose bytes the manifest pins for this device.
+        //
+        // No version is passed: the comparison exists to pick between sources when the payload's own
+        // daemon is not among them.
+        val restaged = runCatching {
+            runMaintenance(
+                DfrInstall.stageDaemonCommand(
+                    sources = DfrInstall.daemonSources(payloads.kernelSu.absolutePath),
+                ),
+            )
+        }.getOrNull()
         if (restaged != null && restaged.code == 0) {
             appendLog(
                 listOf(app.getString(R.string.log_ksu_stage_for_next_boot), restaged.output)

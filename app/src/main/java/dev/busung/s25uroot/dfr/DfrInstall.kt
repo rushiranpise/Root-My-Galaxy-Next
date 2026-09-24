@@ -9,6 +9,7 @@ import dev.busung.s25uroot.AppLog
 import dev.busung.s25uroot.AppLogTags
 import dev.busung.s25uroot.KernelSuFlavor
 import dev.busung.s25uroot.KernelSuRuntime
+import dev.busung.s25uroot.KnownGoodPayloadStore
 import dev.busung.s25uroot.KernelSuVersionProbe
 import dev.busung.s25uroot.RootStatusProbe
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
@@ -498,17 +499,50 @@ internal object DfrInstall {
     internal val STAGED_DAEMON: String get() = SYSTEM_STAGED_DAEMON
 
     /**
-     * The daemons this app will stage, best first, both of them the flavour this device resolved.
+     * The daemons this app will stage when it has nothing better: what it staged for its own runs, and
+     * then whatever is installed.
      *
-     * `/data/adb/ksud` is the installed daemon - the one the verified load put there, so it is the
-     * flavour-correct copy by construction and outside every shared directory. The temp copy is the one
-     * this app stages for its own runs, which is the same binary and the fallback for a boot whose
-     * installed daemon the payload has not written yet.
+     * Both are fallbacks and neither is first - see [daemonSources] for why the first place belongs to
+     * the payload this device's manifest pins.
      */
-    internal val DAEMON_SOURCES: List<String> = listOf(
-        "/data/adb/ksud",
+    internal val DAEMON_FALLBACK_SOURCES: List<String> = listOf(
         "/data/local/tmp/ksud-s25u-kdp",
+        "/data/adb/ksud",
     )
+
+    /**
+     * The daemons to stage, best first, over a cached daemon the caller has already resolved.
+     *
+     * The first source is *this device's own daemon* - the `kernelSu` artifact of the profile its
+     * manifest pins, the same bytes the app's own runs exec - and the two fallbacks follow it.
+     *
+     * `/data/adb/ksud` was first here until it was measured killing a phone, and it was first for a
+     * reason that turned out to be false: it is not this app's own work. On a phone with a KernelSU
+     * manager installed, the *manager* writes its own `ksud` there - measured on this device as
+     * 5,518,544 bytes, eight bytes off upstream KernelSU-Next v3.4.0's `ksud-aarch64-linux-android`,
+     * against the 6,407,096 bytes this device's manifest pins. Its embedded `kernelsu.ko` is the generic
+     * one for the KMI, and what the manifest pins is the build for this firmware. Staging the installed
+     * copy handed the system-uid helper that generic daemon, and its run died in the kernel: the log
+     * ends at `ksud::late_load: Loading kernelsu.ko for KMI android15-6.6`, the device freezes and the
+     * watchdog hard-reboots it. The app's own runs were never affected, because they exec the payload's
+     * own daemon - which is exactly the file that belongs here.
+     *
+     * The version preference does not save the fallback, which is the other half of the same lesson: the
+     * "daemon this device is running" is read from `/data/adb/ksud` itself, so a version check that
+     * agrees with it prefers the installed copy by construction. Both builds answer `3.4.0 (uapi: 4)`.
+     */
+    internal fun daemonSources(cachedDaemon: String?): List<String> =
+        listOfNotNull(cachedDaemon?.takeIf(String::isNotBlank)) + DAEMON_FALLBACK_SOURCES
+
+    /**
+     * The same, resolved from the payload this app last completed a verified run with.
+     *
+     * Null - a phone that has never had a run - falls back to the two paths above rather than refusing,
+     * because staging *a* daemon is what got the helper this far; it is simply no longer the first
+     * choice while the copy this project chose is on the phone.
+     */
+    internal fun daemonSources(context: Context): List<String> =
+        daemonSources(KnownGoodPayloadStore.daemon(context)?.absolutePath)
 
     /**
      * The copy the daemon's own late-load moves into place, named by its code rather than by this app.
@@ -550,7 +584,7 @@ internal object DfrInstall {
      * "Failed to stage ksud" and nothing is loaded.
      */
     internal fun stageDaemonCommand(
-        sources: List<String> = DAEMON_SOURCES,
+        sources: List<String> = DAEMON_FALLBACK_SOURCES,
         destination: String = STAGED_DAEMON,
         expectedVersion: String? = null,
         stagePath: String = DAEMON_STAGE_PATH,
@@ -599,15 +633,20 @@ internal object DfrInstall {
      * say whether a candidate is the right build - and it is read from the same daemon the app already
      * asks after every boot, so this costs a cached lookup rather than a new probe.
      */
-    fun stageDaemon(context: Context): DfrAction? = stageDaemonAs(runningDaemonVersion(context))
+    fun stageDaemon(context: Context): DfrAction? =
+        stageDaemonAs(daemonSources(context), runningDaemonVersion(context))
 
     /**
      * The staging itself, with the version already read - so a caller that needs the same answer for two
      * questions asks the device once. See [armStageForNextBoot], which asks whether the staging can be
      * skipped and then stages, and both halves of that are the same comparison.
      */
-    private fun stageDaemonAs(expectedVersion: String?): DfrAction? =
-        runAction(stageDaemonCommand(expectedVersion = expectedVersion))
+    private fun stageDaemonAs(
+        sources: List<String>,
+        expectedVersion: String?,
+    ): DfrAction? = runAction(
+        stageDaemonCommand(sources = sources, expectedVersion = expectedVersion),
+    )
 
     /**
      * The daemon version this device is running, or null when it could not be read.
@@ -732,7 +771,11 @@ internal object DfrInstall {
         // against. Nothing is said on a phone with no root, where the question is not asked at all.
         AppLog.debug(AppLogTags.KERNEL_SU, "Reroot staging: ${reading?.output?.trim().orEmpty()}")
         if (stageArmed(reading?.output)) return DfrStageArming.Armed
-        return if (stageDaemonAs(expected)?.ok == true) DfrStageArming.Armed else DfrStageArming.Failed
+        return if (stageDaemonAs(daemonSources(context), expected)?.ok == true) {
+            DfrStageArming.Armed
+        } else {
+            DfrStageArming.Failed
+        }
     }
 
     /**
