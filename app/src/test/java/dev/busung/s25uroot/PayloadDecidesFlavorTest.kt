@@ -2,6 +2,7 @@ package dev.busung.s25uroot
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -83,6 +84,26 @@ class PayloadDecidesFlavorTest {
             "the KernelSU flavour row no longer says that the payload decides it, so it reads as a " +
                 "setting someone was supposed to change",
             settings.contains("R.string.settings_ksu_flavor_from_payload"),
+        )
+    }
+
+    @Test
+    fun `the flavour row takes no tap`() {
+        // The row's own arguments: from its title up to the read that begins the manager card below it,
+        // which is the point the source stops talking about this row.
+        val row = sources.single { it.name == "MainActivity.kt" }.readText()
+            .substringAfter("title = stringResource(R.string.settings_ksu_flavor),")
+            .substringBefore("val managerOffer = offeredManager(")
+
+        assertTrue(
+            "the slice is not the flavour row, so this test is holding something else to the rule:\n$row",
+            row.contains("R.string.settings_ksu_flavor_from_payload"),
+        )
+        assertFalse(
+            "tapping the flavour row does something again. What it shows is derived, so a tap can only " +
+                "offer the sheet where a payload is picked - a choice about the next run, which belongs " +
+                "where that run is started",
+            row.contains("onClick"),
         )
     }
 

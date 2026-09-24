@@ -1287,10 +1287,6 @@ private fun RootApp(
                             onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
                             onPayloadModeChanged = onPayloadModeChanged,
                             onForgetCachedPayload = onForgetCachedPayload,
-                            onOpenPayloadSheet = {
-                                showTargetPicker = true
-                                installViewModel.loadTargetCatalog()
-                            },
                             onRequestNotificationPermission = requestNotificationPermission,
                             onRequestBatteryExemption = onRequestBatteryExemption,
                             shizukuStarting = shizukuStarting,
@@ -3581,8 +3577,6 @@ private fun SettingsPage(
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
-    /** Opens the sheet where a payload - and so the flavour - is chosen. */
-    onOpenPayloadSheet: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     /** True while an attempt to start Shizuku is in flight, which the rows report as a state. */
@@ -4717,10 +4711,9 @@ private fun SettingsPage(
                         ?.takeIf { it != kernelsuFlavor }
                         ?.let { stringResource(R.string.settings_ksu_flavor_pending, it.label) },
                     position = SettingsCardPosition.Top,
-                    // Tapping it goes where the choice is made - the payload sheet - rather than opening a
-                    // second list of the same three names. A payload of another flavour is the override,
-                    // and the sheet's rows say which KernelSU each one stages.
-                    onClick = { onOpenPayloadSheet() },
+                    // It is a readout, so it takes no tap. The only thing one could do here is open the
+                    // sheet where a payload is picked, and that is a choice about the *next* run: it is
+                    // made where that run is started rather than under the value it would change.
                 )
                 // The version this app offers, which is the KernelSU the payload for this device loads
                 // when the user has named nothing - so a manager installed from this row is the one
@@ -8150,23 +8143,22 @@ internal fun SettingsCard(
      * not work, where a dimmed row reads as a state.
      */
     enabled: Boolean = true,
-    onClick: () -> Unit,
+    /**
+     * What a tap on the row does, or null for a row that is a readout.
+     *
+     * A readout is a value this screen does not decide - the KernelSU flavour, which comes from the payload
+     * - and it takes no tap rather than a tap that does nothing: an empty handler is the same card with a
+     * ripple, a press and a touch target, which reads as a control that is broken.
+     */
+    onClick: (() -> Unit)? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
     val view = LocalView.current
-    Card(
-        enabled = enabled && !busy,
-        onClick = {
-            clickHaptic(view)
-            onClick()
-        },
-        modifier = modifier.fillMaxWidth(),
-        shape = expressiveClickableCardShape(interactionSource, position),
-        interactionSource = interactionSource,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-    ) {
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+    )
+    // The card's contents, written once and hung off whichever card this row turns out to be: the two
+    // differ in nothing but the tap, so a second copy of the body is a second place to keep them alike.
+    val content: @Composable () -> Unit = {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
         ) {
@@ -8244,6 +8236,27 @@ internal fun SettingsCard(
                 )
             }
         }
+    }
+    if (onClick == null) {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            // The shape every clickable row rests at, without the animation that only a press needs.
+            shape = settingsCardRestingShape(position),
+            colors = colors,
+        ) { content() }
+    } else {
+        val interactionSource = remember { MutableInteractionSource() }
+        Card(
+            enabled = enabled && !busy,
+            onClick = {
+                clickHaptic(view)
+                onClick()
+            },
+            modifier = modifier.fillMaxWidth(),
+            shape = expressiveClickableCardShape(interactionSource, position),
+            interactionSource = interactionSource,
+            colors = colors,
+        ) { content() }
     }
 }
 
