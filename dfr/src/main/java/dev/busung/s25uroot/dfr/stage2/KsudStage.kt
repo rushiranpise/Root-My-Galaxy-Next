@@ -31,14 +31,25 @@ import java.io.File
  *    survives both a reboot and this app's own staging sweep.
  * 3. `/data/local/tmp/ksud-s25u-kdp`, the copy the app stages for its own runs. Also flavour-correct,
  *    but usually gone: the sweep that empties that directory after every run removes it.
- * 4. The installed manager's own `libksud.so`, which is how a manager's daemon reaches the kernel. Read
- *    through the manager's package rather than from a path, because the daemon is unpacked into the
- *    app's native library directory and its name there is decided by the installer.
  *
  * Nothing is invented and nothing is patched: the bytes are copied verbatim, because a daemon is
  * version-locked to the kernel module that will load it. And nothing is downloaded: a source that is
  * absent is reported, because a missing daemon is a fact about the phone that the run's log has to
  * carry - the exploit's last step would otherwise fail with nothing to exec and nothing to say why.
+ *
+ * ## A manager's own copy is refused, and it used to be taken
+ *
+ * An installed manager bundles a `libksud.so`, and reading *that* was a fourth source here until it was
+ * measured doing harm. It looks like a good source and is the worst one: it is a daemon for whichever
+ * KernelSU that manager belongs to, which is not necessarily the one in the kernel. On the device this
+ * was found on, a KernelSU-Next 3.4.0 kernel had a daemon staged from `me.weishu.kernelsu`'s bundle -
+ * 4,892,712 bytes of the wrong line, whose UAPI is not the module's - and nothing said so, because
+ * every step up to the exec had succeeded.
+ *
+ * The two flavour-correct sources above are both files *this project* put there, so a daemon from
+ * neither of them means the app has not staged one on this boot - which is a fact worth saying out loud
+ * rather than papering over with another project's binary. So the managers are still named, as the list
+ * of copies this refused, and the run stops here instead.
  */
 internal object KsudStage {
 
@@ -59,18 +70,19 @@ internal object KsudStage {
     /**
      * The three flavours' manager packages, in the order the app offers them.
      *
-     * Hard-coded here rather than imported, because this module is a second APK that shares no code with
-     * the app - and held to the app's own table by `StageTwoDaemonSourceTest`, which reads both sources.
-     * A project renaming its manager package would otherwise leave this list naming an app that no
-     * longer exists, and the failure would be a manager that is installed and invisible.
+     * Read for one thing only now - naming, in the refusal, the copies this will not take - because a
+     * daemon out of one of these is a daemon for whichever KernelSU that manager belongs to. Kept as a
+     * list rather than inlined into that sentence so it stays checkable: it is hard-coded here because
+     * this module is a second APK that shares no code with the app, and it is held to the app's own table
+     * by `StageTwoIdentityTest`, which reads both sources. A project renaming its manager package would
+     * otherwise leave this naming an app that no longer exists - and the failure would be a manager that
+     * is installed and invisible.
      */
     private val MANAGER_PACKAGES = listOf(
         "me.weishu.kernelsu",
         "com.rifsxd.ksunext",
         "com.resukisu.resukisu",
     )
-
-    private const val LIBRARY = "libksud.so"
 
     /** 0700: readable and executable by the system, and by nothing else. */
     private const val MODE = 448
@@ -123,20 +135,28 @@ internal object KsudStage {
             log.appendLine("[*] no daemon staged by the app (${staged.path} absent)")
         }
 
-        for (packageName in MANAGER_PACKAGES) {
-            val bytes = runCatching {
-                val app = context.packageManager.getApplicationInfo(packageName, 0)
-                File(app.nativeLibraryDir, LIBRARY).readBytes()
-            }.getOrNull()
-            if (bytes != null && bytes.isNotEmpty()) return "$packageName/$LIBRARY" to bytes
+        // Named and refused rather than taken. Each of these bundles a daemon for its own KernelSU, and
+        // which one that is cannot be known from here - the kernel is the only side that knows, and this
+        // process cannot ask it. A wrong daemon is worse than none: the exploit would exec it and fail a
+        // few steps later, in the shape of the exploit having failed.
+        val installed = MANAGER_PACKAGES.filter { packageName ->
+            runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.isSuccess
         }
-        log.appendLine("[!] no manager found among ${MANAGER_PACKAGES.joinToString()}")
+        log.appendLine(
+            "[x] nothing flavour-correct to stage: no readable daemon at $LEFT_BY_THE_PAYLOAD or " +
+                "$STAGED_BY_THE_APP" +
+                if (installed.isEmpty()) {
+                    "."
+                } else {
+                    ". ${installed.joinToString()} would each bundle one, and that copy is refused: it " +
+                        "belongs to whichever KernelSU that manager is, not to the module in this kernel. " +
+                        "The app stages the right one at $DEST before it hands over - run it again from " +
+                        "the app."
+                },
+        )
         return null
     }
 
     /** Whether a daemon is already at [DEST]. */
     fun staged(): Boolean = File(DEST).isFile
-
-    /** The manager packages this reads from, for the test that holds them to the app's table. */
-    val managerPackages: List<String> get() = MANAGER_PACKAGES
 }

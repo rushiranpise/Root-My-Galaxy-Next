@@ -55,6 +55,60 @@ class DfrDaemonPathTest {
     }
 
     @Test
+    fun `the app stages the daemon at the path the exploit execs, and it is the same spelling`() {
+        // The hand-off the helper's own doc assumes and that nothing used to make: without it the helper's
+        // best source is always empty and it settles for another app's KernelSU.
+        assertEquals(constantIn(stageTwoSource(), "DEST"), DfrInstall.STAGED_DAEMON)
+        assertTrue(
+            "the staging command does not write the path stage1.S execs",
+            DfrInstall.stageDaemonCommand().contains("'${DfrInstall.STAGED_DAEMON}'"),
+        )
+    }
+
+    @Test
+    fun `the staged daemon carries the identity the module's policy expects`() {
+        // 0700 system:system, which is what the helper - running as the system uid - can read and no app
+        // can. A world-readable daemon under /data/system would be the same staging done unsafely.
+        val command = DfrInstall.stageDaemonCommand()
+        assertTrue(command.contains("chown system:system '${DfrInstall.STAGED_DAEMON}'"))
+        assertTrue(command.contains("chmod 700 '${DfrInstall.STAGED_DAEMON}'"))
+    }
+
+    @Test
+    fun `the flavour-correct sources are tried in order and a manager is never one of them`() {
+        // The installed daemon first - that is the one the verified load put there, and it is outside
+        // every shared directory - then the copy this app stages for its own runs.
+        val command = DfrInstall.stageDaemonCommand()
+        val installed = command.indexOf("'/data/adb/ksud'")
+        val temp = command.indexOf("'/data/local/tmp/ksud-s25u-kdp'")
+        assertTrue("the installed daemon is not a source: $command", installed >= 0)
+        assertTrue("the app's own staged copy is not a source: $command", temp > installed)
+        assertTrue("every source is checked for content, not existence", command.contains("[ -s '"))
+    }
+
+    @Test
+    fun `with no source to stage, the command refuses instead of guessing`() {
+        // Staging *a* daemon would be worse than staging none: the exploit would exec it and fail where
+        // nothing points at why. Exit 3 is that refusal, and it is checked before anything is written.
+        val command = DfrInstall.stageDaemonCommand()
+        assertTrue("no refusal in: $command", command.contains("no daemon to stage"))
+        assertTrue("the refusal does not come before the staging", command.indexOf("exit 3") < command.indexOf("cp -f"))
+    }
+
+    @Test
+    fun `the stage two no longer takes a daemon out of an installed manager`() {
+        // The measurement that put this rule here: a KernelSU-Next 3.4.0 kernel, and a daemon staged
+        // byte-for-byte from me.weishu.kernelsu's bundle. Reading a manager's own libksud.so is how that
+        // happened, so the read is gone and the list it used is kept only to name what was refused.
+        val source = stageTwoSource()
+        assertTrue(
+            "the stage two reads a manager's libksud.so again, which is some other KernelSU's daemon",
+            !source.contains("nativeLibraryDir"),
+        )
+        assertTrue("the refusal does not name the managers it passed over", source.contains("MANAGER_PACKAGES"))
+    }
+
+    @Test
     fun `both sources were really read`() {
         // Every assertion above passes on an empty string, so a moved file would turn this whole class
         // green. The paths are resolved rather than assumed for the same reason.

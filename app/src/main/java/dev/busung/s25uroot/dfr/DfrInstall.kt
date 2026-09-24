@@ -3,6 +3,7 @@ package dev.busung.s25uroot.dfr
 import android.content.Context
 import android.os.SystemClock
 import dev.busung.s25uroot.KernelSuRuntime
+import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
 import java.io.File
 
 /**
@@ -116,13 +117,18 @@ internal data class DfrCleanUpOutcome(val keyGone: Boolean, val helperGone: Bool
 }
 
 /**
- * What the device's own tools answered about the stage two and the kernel.
+ * What the device's own tools answered about the stage two, the kernel, and the framework.
  *
- * Three facts, and each is read from the thing that decides it rather than from this app's own records:
+ * Four facts, and each is read from the thing that decides it rather than from this app's own records:
  * whether the APK is installed and which uid it runs as (`pm list packages -U`, one line carrying both),
- * and whether the exploit has already armed its hooks this boot (the marker node). The app keeps its own
- * record of when it did each step, and that record is only ever used for ordering - never as the answer
- * to "is it done".
+ * whether the exploit has already armed its hooks this boot (the marker node), and how long the running
+ * Android framework has been up (the start time of `system_server`). The app keeps its own record of
+ * when it did each step, and that record is only ever used for ordering - never as the answer to "is it
+ * done".
+ *
+ * The framework's age is the fourth because it is the only reading that can see the restart this flow
+ * actually performs. Both steps that ask for one are satisfied by a *userspace* restart, which leaves
+ * the kernel running and its uptime untouched - see [DfrFlow.restartedSince].
  *
  * The reading is `pm list packages -U` and not `dumpsys package`, which is what this first used: the dump
  * on this device prints `uid=10555` for a package - and prints it inside a permission listing rather than
@@ -133,6 +139,16 @@ internal data class DfrProbe(
     val installed: Boolean,
     val isSystemUid: Boolean,
     val armed: Boolean,
+    /**
+     * How long the Android framework has been up, or null when it could not be read.
+     *
+     * Null is not zero and must never be read as one: the kernel clock's own postmortem in this file is
+     * the shape of that mistake - a reading that failed to zero answered "the phone rebooted" for every
+     * instant ever recorded, and the flow skipped the reboot steps it exists to insist on. A framework
+     * age of zero would say the same thing here, so an unreadable one is [DfrFlow.rebootedSince]'s
+     * question instead, which can only err toward asking for a restart.
+     */
+    val frameworkUptimeMillis: Long? = null,
 ) {
     companion object {
 
@@ -154,6 +170,10 @@ internal data class DfrProbe(
                 // install - the one mistake this whole reading exists to catch.
                 isSystemUid = SYSTEM_UID_REGEX.containsMatchIn(listing),
                 armed = armed.trim() == ARMED,
+                // Optional where the two above are required: the device can answer those and still have
+                // no framework to ask about, and a probe that refused the whole reading over an optional
+                // field would turn a readable phone into `ReadState`.
+                frameworkUptimeMillis = frameworkUptimeMillis(sections[MARK_FRAMEWORK]),
             )
         }
 
@@ -167,7 +187,7 @@ internal data class DfrProbe(
          * the section it cut belonged to the answer the whole probe exists for.
          */
         private fun sections(output: String): Map<String, String> {
-            val markers = listOf(MARK_PACKAGE, MARK_ARMED, MARK_END)
+            val markers = listOf(MARK_PACKAGE, MARK_ARMED, MARK_FRAMEWORK, MARK_END)
             val found = markers.mapNotNull { marker ->
                 val start = output.indexOf(marker)
                 if (start < 0) null else Marker(marker, start, start + marker.length)
@@ -274,7 +294,31 @@ internal object DfrInstall {
         append("echo '").append(MARK_ARMED).append("'; ")
         append("if [ -e '").append(ARMED_MARKER).append("' ]; then echo ").append(ARMED)
         append("; else echo ").append(CLEAR).append("; fi; ")
-        append("echo '").append(MARK_END).append("'")
+        append("echo '").append(MARK_FRAMEWORK).append("'; ")
+        append(frameworkSection())
+        append("; echo '").append(MARK_END).append("'")
+    }
+
+    /**
+     * The framework's age, as the two numbers it is arithmetic between.
+     *
+     * Two readings rather than the subtraction the shell could do, because the arithmetic is the part
+     * worth testing without a device - see [frameworkUptimeMillis]. `/proc/uptime`'s first field is
+     * seconds since boot; the 22nd field of `/proc/<pid>/stat` is where `system_server` started, counted
+     * from that same boot in hundredths of a second. Their difference is how long the Android framework
+     * has been up, and it is short after a restart the kernel never saw.
+     *
+     * `pidof` rather than a sweep of every `/proc/<pid>/stat`: it is the same lookup the zygote report
+     * makes, it is
+     * present in this device's own toolbox, and a name is what the process is known by here. Everything
+     * is redirected, so a device that answered none of it yields an empty section rather than an error -
+     * which is the state that has to survive as *unknown* rather than become zero.
+     */
+    internal fun frameworkSection(): String = buildString {
+        append("up=").append("${'$'}(cut -d' ' -f1 /proc/uptime 2>/dev/null); ")
+        append("rmg_ss=").append("${'$'}(pidof system_server 2>/dev/null | cut -d' ' -f1); ")
+        append("start=").append("${'$'}(awk '{print ${'$'}22}' /proc/${'$'}rmg_ss/stat 2>/dev/null); ")
+        append("echo \"up=${'$'}up start=${'$'}start\"")
     }
 
     /**
@@ -305,8 +349,68 @@ internal object DfrInstall {
     )
 
     /**
+     * Where the daemon goes: the same path stage two stages for itself, and the one the exploit execs.
+     *
+     * Written by *this* app now, not only by the helper. The helper's own first choice is this path
+     * "when the app has already put it there", and until this existed nothing ever did - so its best
+     * source was always empty and it fell through to the last one it had.
+     */
+    internal val STAGED_DAEMON: String get() = SYSTEM_STAGED_DAEMON
+
+    /**
+     * The daemons this app will stage, best first, both of them the flavour this device resolved.
+     *
+     * `/data/adb/ksud` is the installed daemon - the one the verified load put there, so it is the
+     * flavour-correct copy by construction and outside every shared directory. The temp copy is the one
+     * this app stages for its own runs, which is the same binary and the fallback for a boot whose
+     * installed daemon the payload has not written yet.
+     */
+    internal val DAEMON_SOURCES: List<String> = listOf(
+        "/data/adb/ksud",
+        "/data/local/tmp/ksud-s25u-kdp",
+    )
+
+    /**
+     * Puts the flavour's own daemon where the exploit execs it, as root.
+     *
+     * This is the hand-off the helper's own documentation assumes, and the reason it matters is that the
+     * helper cannot do it correctly by itself: it runs as the system uid, so the installed daemon - mode
+     * 0700 root - is denied to it, and its remaining sources are other apps' copies of *some* KernelSU.
+     * Measured on this device, that is what happened: nothing had staged this path, so the helper took
+     * `me.weishu.kernelsu`'s bundled `libksud.so` (4,892,712 bytes, byte-for-byte) while the module in
+     * the kernel was KernelSU-Next 3.4.0 - a daemon whose UAPI does not match the module it would be
+     * asked to drive.
+     *
+     * Written on every call rather than only when absent, which is the other half of the fix: an existing
+     * copy may be a previous flavour's, and the helper keeps whatever it finds. Rewriting it is cheap
+     * next to the run it enables, and it is what makes a flavour change safe.
+     */
+    internal fun stageDaemonCommand(
+        sources: List<String> = DAEMON_SOURCES,
+        destination: String = STAGED_DAEMON,
+    ): String = buildString {
+        append("src=''; ")
+        sources.forEach { source ->
+            append("if [ -z \"${'$'}src\" ] && [ -s '").append(source).append("' ]; then src='")
+                .append(source).append("'; fi; ")
+        }
+        // Named and refused rather than guessed: staging *a* daemon would be worse than staging none,
+        // because the exploit would exec it and fail somewhere that looks like the exploit's fault.
+        append("if [ -z \"${'$'}src\" ]; then echo '[x] no daemon to stage'").append("; exit 3; fi; ")
+        append("/system/bin/cp -f \"${'$'}src\" '").append(destination).append("' || exit 4; ")
+        // The identity the module's policy expects: the system, and nothing else.
+        append("/system/bin/chown system:system '").append(destination).append("' || exit 5; ")
+        append("/system/bin/chmod 700 '").append(destination).append("' || exit 6; ")
+        append("echo \"[+] staged ").append(destination).append(" from ${'$'}src\"")
+    }
+
+    /** Runs [stageDaemonCommand] as root, or null when no root shell answered. */
+    fun stageDaemon(context: Context): DfrAction? =
+        runAction(stageDaemonCommand())
+
+    /**
      * Removes the stage two, which is the only way past an install that landed as an ordinary app:
-     * Package Manager assigns a package's uid when it installs it and never revisits it.
+     * Package Manager assigns a package its uid when it installs it and never revisits it.
      */
     internal fun uninstallCommand(packageName: String = STAGE_TWO_PACKAGE): String =
         "/system/bin/pm uninstall --user 0 '" + packageName + "'"
@@ -362,12 +466,33 @@ internal object DfrInstall {
     private const val FAILURE = "Failure"
 }
 
+/**
+ * The framework's age in milliseconds, from the two numbers [DfrInstall.frameworkSection] printed.
+ *
+ * `USER_HZ_MILLIS` is the hundredth of a second `/proc/<pid>/stat` counts in, which is `USER_HZ` of 100
+ * on every Linux and not a per-architecture value. The subtraction is here rather than in the shell so
+ * it has exactly one implementation, and either number missing is null rather than a default: the answer
+ * decides whether a reboot is asked for, and a guessed one is a reboot that is never asked for.
+ */
+internal fun frameworkUptimeMillis(section: String?): Long? {
+    val text = section ?: return null
+    val up = Regex("up=([0-9.]+)").find(text)?.groupValues?.get(1)?.toDoubleOrNull() ?: return null
+    val start = Regex("start=([0-9]+)").find(text)?.groupValues?.get(1)?.toLongOrNull() ?: return null
+    // A negative age is a reading from a boot this one replaced - a clock that moved, not a framework
+    // younger than nothing - and belongs with the unreadable ones rather than in the rule.
+    return (up * 1000.0 - start * USER_HZ_MILLIS).takeIf { it >= 0.0 }?.toLong()
+}
+
 // The one command's markers and the words it answers with, shared by the code that writes the command
 // and the code that reads it - the two are in different objects, and a marker that drifted between them
 // would read as a device that answered nothing.
 private const val MARK_PACKAGE = "RMG-package"
 private const val MARK_ARMED = "RMG-armed"
+private const val MARK_FRAMEWORK = "RMG-framework"
 private const val MARK_END = "RMG-end"
+
+/** One hundredth of a second: what `/proc/<pid>/stat` counts its start time in. */
+private const val USER_HZ_MILLIS = 10.0
 private const val PACKAGE_PREFIX = "package:"
 private const val ARMED = "armed"
 private const val CLEAR = "clear"

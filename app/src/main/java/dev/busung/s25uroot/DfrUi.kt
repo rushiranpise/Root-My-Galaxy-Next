@@ -145,15 +145,34 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         result.log
     }
 
+    /**
+     * The flavour's daemon, where the helper will look for it, with its line for the log.
+     *
+     * Done here rather than left to the helper because the helper cannot get it right: it runs as the
+     * system uid, the installed daemon is mode 0700 root, and what is left to it is another app's copy
+     * of some other KernelSU. See [DfrInstall.stageDaemon] for the measurement.
+     */
+    fun stageDaemon(): String {
+        val action = DfrInstall.stageDaemon(context) ?: return context.getString(R.string.dfr_no_root)
+        AppLog.info(
+            AppLogTags.KERNEL_SU,
+            "system uid flow: stage daemon - ${action.log.lineSequence().lastOrNull().orEmpty()}",
+        )
+        return action.log
+    }
+
     fun install() = act("install") {
         val file = bundledApk ?: return@act context.getString(helperRefusalRes())
+        // Before the helper exists, because the helper is what would otherwise settle for the wrong
+        // daemon - it keeps whatever it finds at that path.
+        val staged = stageDaemon()
         val action = DfrInstall.runAction(DfrInstall.installCommand(file.absolutePath))
-            ?: return@act context.getString(R.string.dfr_no_root)
+            ?: return@act listOf(staged, context.getString(R.string.dfr_no_root)).joinToString("\n")
         // Stamped on the attempt, for the same reason as the inject above: `pm install` prints more than
         // one word beginning with Failure, and a stamp that only moves on a clean verdict leaves the
         // second reboot indistinguishable from one that has already happened.
         AppPreferences.setDfrInstalledAt(context, System.currentTimeMillis())
-        action.log
+        listOf(staged, action.log).joinToString("\n")
     }
 
     fun removeStageTwo() = act("remove stage two") {
@@ -164,8 +183,13 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun open() = act("open stage two") {
-        DfrInstall.runAction(DfrInstall.launchCommand())?.log
-            ?: context.getString(R.string.dfr_no_root)
+        // Rewritten on the way in as well as at the install: the helper keeps whatever it finds at that
+        // path, so this call is what makes the daemon it uses the one for this boot - and for a phone
+        // whose flavour was changed since the last run, this is the call that replaces the old one.
+        val staged = stageDaemon()
+        val action = DfrInstall.runAction(DfrInstall.launchCommand())
+            ?: return@act listOf(staged, context.getString(R.string.dfr_no_root)).joinToString("\n")
+        listOf(staged, action.log).joinToString("\n")
     }
 
     fun reboot() = act("soft reboot") {
@@ -184,12 +208,23 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // here. Deleting them is what the residue screen is for, where they are listed with everything
         // else the app left behind and can be removed one at a time or together.
         //
+        // **The helper goes first and the key comes out last, and that order is the whole of this
+        // method.** `pm uninstall` is a Package Manager write, and Package Manager writes
+        // `packages.xml` from *its own memory* - the copy it read at boot, which still holds our key -
+        // so an uninstall running after the key removal puts the key straight back into the file. That
+        // is not a theory: measured on this device, a clean-up that removed the key first and then the
+        // helper left the key in the file within the same second, the screen read the key as present
+        // and asked for the reboot step again, and the reboot could not help - the file it booted from
+        // had the key in it. The next clean-up worked only because the helper was already gone, so
+        // nothing rewrote the file after the removal. Removing the helper first makes the key's write
+        // the last one, which is the only state a restart can make true.
+        //
         // Each record is cleared by its own half of the undo and by nothing else - see
         // [DfrCleanUpOutcome]. A half that did not land, including both halves on a phone with no root
         // shell, leaves its record, so the next reading of this screen shows that step rather than the
         // first one.
-        val removed = DfrInstall.run(context, DfrMode.Uninstall)
         val helper = DfrInstall.runAction(DfrInstall.uninstallCommand())
+        val removed = DfrInstall.run(context, DfrMode.Uninstall)
         val outcome = DfrCleanUpOutcome.of(removed, helper)
         if (outcome.keyGone) AppPreferences.setDfrInjectedAt(context, null)
         if (outcome.helperGone) AppPreferences.setDfrInstalledAt(context, null)
@@ -474,13 +509,19 @@ private fun readState(context: Context, helper: DfrHelperAvailability): DfrReadi
         stageTwoArmed = probe.armed,
         // Reached only when the read said Ready, which is what got this far.
         helper = helper,
+        // The clock that can see the restart this screen's own button performs. The kernel's uptime is
+        // still read beside it, as the fallback for a device whose framework could not be asked.
+        frameworkUptimeMillis = probe.frameworkUptimeMillis,
         nowMillis = System.currentTimeMillis(),
         uptimeMillis = DfrInstall.uptimeMillis(),
     )
     AppLog.info(
         AppLogTags.KERNEL_SU,
+        // The framework's age is in the line because it is the reading that decides the restart steps:
+        // a report about this flow that omits it cannot be argued against when the step is wrong.
         "system uid flow read: key=$injected removedAt=${state.keyRemovedAtMillis} " +
-            "now=${state.nowMillis} uptime=${state.uptimeMillis} -> ${DfrFlow.next(state)}",
+            "now=${state.nowMillis} uptime=${state.uptimeMillis} " +
+            "framework=${state.frameworkUptimeMillis} -> ${DfrFlow.next(state)}",
     )
     return DfrReading(DfrFlow.next(state), probe, injected)
 }

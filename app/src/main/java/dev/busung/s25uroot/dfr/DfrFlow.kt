@@ -19,12 +19,12 @@ import dev.busung.s25uroot.R
  *
  * ## What it reads, and what it cannot
  *
- * Every field here is a measurement except one kind: the two instants. "Has this phone rebooted since
- * the inject?" is answered by comparing how long the phone has been up against how long ago the inject
- * was *recorded*, which is exact as long as the wall clock is not moved - and the wall clock can be
- * moved, so the answer is treated as evidence rather than as truth, and the one place a wrong answer
- * matters (an install that landed as an ordinary app) is caught by the measurement instead: the uid the
- * package actually runs as.
+ * Every field here is a measurement except one kind: the three instants. "Has this phone restarted since
+ * the inject?" is answered by comparing **the framework's own age** against how long ago the inject was
+ * *recorded* - see [restartedSince] - which is exact as long as the wall clock is not moved, and the wall
+ * clock can be moved, so the answer is treated as evidence rather than as truth. The one place a wrong
+ * answer matters (an install that landed as an ordinary app) is caught by the measurement instead: the uid
+ * the package actually runs as.
  *
  * The other limit is deliberate: [DfrStep.ReadState]. When no shell answered, nothing was observed, and
  * an app that guessed here would either offer an inject that refuses because the key is already there,
@@ -119,6 +119,16 @@ internal data class DfrState(
      * refusal before anything else, because every other step ends at that file.
      */
     val helper: DfrHelperAvailability = DfrHelperAvailability.Ready,
+    /**
+     * How long the Android framework has been up, or null when it could not be read.
+     *
+     * The reading that can see the restart this flow actually performs. Every step that asks for a
+     * restart is satisfied by the daemon's userspace one, which replaces the framework and leaves the
+     * kernel - and so [DfrState.uptimeMillis] - running: measured on this device, `system_server` was
+     * 2558 s old while the kernel had been up 7804 s, and the inject 3679 s earlier, so the restart had
+     * happened and the kernel clock could not say so. Null falls back to that clock.
+     */
+    val frameworkUptimeMillis: Long? = null,
     val nowMillis: Long,
     val uptimeMillis: Long,
 )
@@ -135,6 +145,29 @@ internal object DfrFlow {
     fun rebootedSince(atMillis: Long?, nowMillis: Long, uptimeMillis: Long): Boolean {
         val recorded = atMillis ?: return false
         return uptimeMillis < nowMillis - recorded
+    }
+
+    /**
+     * Whether the running Android has restarted since [atMillis], whichever kind of restart it was.
+     *
+     * The framework's own age answers both at once, and is asked first: a kernel reboot replaces the
+     * framework too, so a short framework age covers a hard reboot as well, while a kernel reboot does
+     * **not** cover a short framework age. That asymmetry is the whole bug this exists to fix - the
+     * flow's two restart steps were measured on the kernel clock, and the restart the flow performs is
+     * the daemon's userspace one, which leaves the kernel running and its uptime climbing. The step that
+     * asks for a restart could therefore never be satisfied by taking it.
+     *
+     * When the framework could not be read, the kernel clock is the question instead, and it is the safe
+     * half of the pair to fall back to: it can only answer "no restart" where one happened, which asks
+     * for a restart that is harmless, rather than answering "restart" where none did, which would skip
+     * the reboot the install depends on. Neither reading is trusted as truth - an install that landed
+     * under the wrong identity is caught by the uid it runs as, not by either clock.
+     */
+    fun restartedSince(atMillis: Long?, state: DfrState): Boolean {
+        val recorded = atMillis ?: return false
+        val frameworkUptime = state.frameworkUptimeMillis
+            ?: return rebootedSince(recorded, state.nowMillis, state.uptimeMillis)
+        return frameworkUptime < state.nowMillis - recorded
     }
 
     /** The step the phone is on, given what was observed. */
@@ -156,7 +189,7 @@ internal object DfrFlow {
         // answered only while the file really is without our key - if Package Manager's own rewrite put it
         // back, the ladder is the honest reading and this step has nothing to apply.
         if (state.keyInjected == false && state.keyRemovedAtMillis != null &&
-            !rebootedSince(state.keyRemovedAtMillis, state.nowMillis, state.uptimeMillis)
+            !restartedSince(state.keyRemovedAtMillis, state)
         ) {
             return DfrStep.ApplyRemoval
         }
@@ -168,7 +201,7 @@ internal object DfrFlow {
         // A system uid is proof the reboot happened: Package Manager applies the shared user at install
         // time, and an install before the reboot could only have produced an ordinary app.
         if (state.stageTwoIsSystemUid) {
-            return if (rebootedSince(state.installedAtMillis, state.nowMillis, state.uptimeMillis)) {
+            return if (restartedSince(state.installedAtMillis, state)) {
                 DfrStep.OpenStageTwo
             } else {
                 DfrStep.RebootAgain
@@ -178,7 +211,7 @@ internal object DfrFlow {
         // either before the reboot, or with a different key injected than the APK is signed with. PMS
         // will not re-key an installed package, so this is a removal, not another reboot.
         if (state.stageTwoInstalled) return DfrStep.RemoveStageTwo
-        if (!rebootedSince(state.injectedAtMillis, state.nowMillis, state.uptimeMillis)) return DfrStep.Reboot
+        if (!restartedSince(state.injectedAtMillis, state)) return DfrStep.Reboot
         return DfrStep.InstallStageTwo
     }
 
@@ -197,6 +230,7 @@ internal object DfrFlow {
         installedAtMillis = null,
         stageTwoArmed = false,
         helper = helper,
+        frameworkUptimeMillis = null,
         nowMillis = 0L,
         uptimeMillis = 0L,
     )

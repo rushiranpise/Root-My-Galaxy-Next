@@ -3,6 +3,7 @@ package dev.busung.s25uroot.dfr
 import dev.busung.s25uroot.dfr.DfrMode.Check
 import dev.busung.s25uroot.dfr.DfrMode.Inject
 import dev.busung.s25uroot.dfr.DfrMode.Uninstall
+import java.io.File
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -152,5 +153,45 @@ class DfrCleanUpTest {
             "and an inject's own log is not a removal",
             DfrResult(Inject, ok = true, log = removedLog()).uninstalled,
         )
+    }
+
+    /**
+     * The one thing about a clean-up that no reading can catch: the order its two writes happen in.
+     *
+     * `pm uninstall` is a Package Manager write, and Package Manager writes `packages.xml` from its own
+     * memory - the copy it read at boot, which still holds our key while a clean-up is running. So a key
+     * removal performed *before* the helper's uninstall is undone by the app's own next call, in the same
+     * second, and the screen then reads the key as present and offers the reboot step again - a step that
+     * cannot help, because the file the phone boots from has the key in it. Both halves are correct on
+     * their own and the flow's reading of each is correct; only the sequence is wrong, which is why this
+     * assertion reads the source rather than any result.
+     */
+    @Test
+    fun `the helper is uninstalled before the key comes out of the file`() {
+        val source = uiSource()
+        val start = source.indexOf("fun cleanUp()")
+        assertTrue("no `fun cleanUp()` in the screen's source", start >= 0)
+        val body = source.substring(start)
+        val helper = body.indexOf("DfrInstall.runAction(DfrInstall.uninstallCommand())")
+        val key = body.indexOf("DfrInstall.run(context, DfrMode.Uninstall)")
+        assertTrue("the clean-up does not uninstall the helper", helper >= 0)
+        assertTrue("the clean-up does not remove the key", key >= 0)
+        assertTrue(
+            "the helper's uninstall runs after the key removal, so Package Manager rewrites the file " +
+                "from the memory that still holds the key and the removal never lands",
+            helper < key,
+        )
+        assertTrue(
+            "the removal is recorded before the last write to packages.xml, so the instant it stamps is " +
+                "not the one the phone has to restart past",
+            key < body.indexOf("setDfrKeyRemovedAt"),
+        )
+    }
+
+    /** The screen's own source, wherever the test JVM was started from. */
+    private fun uiSource(): String {
+        val relative = "app/src/main/java/dev/busung/s25uroot/DfrUi.kt"
+        return listOf(File(relative), File("../$relative")).firstOrNull { it.isFile }?.readText()
+            ?: error("neither $relative nor ../$relative exists, so this test read nothing")
     }
 }

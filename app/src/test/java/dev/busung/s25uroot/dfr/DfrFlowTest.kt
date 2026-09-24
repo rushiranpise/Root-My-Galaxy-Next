@@ -29,6 +29,7 @@ class DfrFlowTest {
         keyRemovedAtMillis: Long? = null,
         stageTwoArmed: Boolean = false,
         helper: DfrHelperAvailability = DfrHelperAvailability.Ready,
+        frameworkUptimeMillis: Long? = null,
         uptimeMillis: Long = 4 * 60 * 60 * 1000L,
     ) = DfrState(
         keyInjected = keyInjected,
@@ -39,6 +40,7 @@ class DfrFlowTest {
         keyRemovedAtMillis = keyRemovedAtMillis,
         stageTwoArmed = stageTwoArmed,
         helper = helper,
+        frameworkUptimeMillis = frameworkUptimeMillis,
         nowMillis = now,
         uptimeMillis = uptimeMillis,
     )
@@ -194,6 +196,93 @@ class DfrFlowTest {
     }
 
     @Test
+    fun `the restart the flow performs is a userspace one, and the kernel clock cannot see it`() {
+        // The bug this flow shipped with, in the numbers the phone reported: the kernel had been up
+        // 7804 s, the framework 2558 s, and the inject was 3679 s ago - so the restart had happened, the
+        // framework had started after the inject, and the kernel's own uptime said "not since" for ever.
+        // The step that asks for a restart could not be satisfied by taking it.
+        val state = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 3_679_000L,
+            frameworkUptimeMillis = 2_558_110L,
+            uptimeMillis = 7_804_000L,
+        )
+        assertEquals(DfrStep.InstallStageTwo, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `a framework that started before the inject is not a restart`() {
+        // The other half of the same reading, and the one that keeps the gate honest: a framework older
+        // than the inject has not restarted since it, whatever the kernel's uptime says.
+        val state = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 30 * 60 * 1000L,
+            frameworkUptimeMillis = 4 * 60 * 60 * 1000L,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.Reboot, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `an unreadable framework leaves the kernel clock answering`() {
+        // The fallback, and the direction it is safe in: with no framework age the rule is the kernel's
+        // own, which can only fail to notice a restart - asking for one that costs fifteen seconds -
+        // rather than inventing one and skipping the reboot the install depends on.
+        assertEquals(
+            DfrStep.Reboot,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 60_000L,
+                    frameworkUptimeMillis = null,
+                    uptimeMillis = 4 * 60 * 60 * 1000L,
+                ),
+            ),
+        )
+        assertEquals(
+            DfrStep.InstallStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = true,
+                    injectedAtMillis = now - 30 * 60 * 1000L,
+                    frameworkUptimeMillis = null,
+                    uptimeMillis = 5 * 60 * 1000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `the second restart is satisfied by a userspace restart as well`() {
+        // Both restart steps rest on the same reading, so the one after the install cannot be stuck on
+        // the kernel clock either - that is the same bug one rung further down the ladder.
+        val state = fresh(
+            keyInjected = true,
+            injectedAtMillis = now - 2 * 60 * 60 * 1000L,
+            stageTwoInstalled = true,
+            stageTwoIsSystemUid = true,
+            installedAtMillis = now - 30 * 60 * 1000L,
+            frameworkUptimeMillis = 5 * 60 * 1000L,
+            uptimeMillis = 4 * 60 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.OpenStageTwo, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `a removal waiting on a restart is applied by a userspace restart too`() {
+        // The third place the same clock was asked, and the one with the worst failure: a clean-up whose
+        // restart never counted would keep offering the restart instead of the inject that comes next.
+        val applied = fresh(
+            keyInjected = false,
+            keyRemovedAtMillis = now - 60_000L,
+            frameworkUptimeMillis = 10_000L,
+            uptimeMillis = 4 * 60 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.Inject, DfrFlow.next(applied))
+        assertNotEquals(DfrStep.ApplyRemoval, DfrFlow.next(applied))
+    }
+
+    @Test
     fun `an install that landed as an ordinary app asks to be removed`() {
         // The failure this model exists for: installed, working, and not privileged. Another reboot
         // changes nothing, because Package Manager does not re-key a package it has already installed.
@@ -296,6 +385,21 @@ class DfrFlowTest {
     fun `an inject with no record of when it happened asks for the reboot`() {
         val state = fresh(keyInjected = true, injectedAtMillis = null)
         assertEquals(DfrStep.Reboot, DfrFlow.next(state))
+    }
+
+    @Test
+    fun `a framework younger than the elapsed time is what a restart looks like`() {
+        // The rule [DfrFlow.next] uses, tested where it is defined: it is the kernel's own rule with the
+        // framework's age in place of the kernel's uptime, and it answers for both kinds of restart.
+        val restarted = fresh(keyInjected = true, injectedAtMillis = now - 60_000L)
+        assertTrue(DfrFlow.restartedSince(now - 60_000L, restarted.copy(frameworkUptimeMillis = 5_000L)))
+        assertFalse(
+            DfrFlow.restartedSince(
+                now - 60_000L,
+                restarted.copy(frameworkUptimeMillis = 4 * 60 * 60 * 1000L),
+            ),
+        )
+        assertFalse("no record of the action at all is not a restart", DfrFlow.restartedSince(null, restarted))
     }
 
     @Test
