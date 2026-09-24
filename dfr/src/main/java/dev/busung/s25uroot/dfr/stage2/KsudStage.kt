@@ -68,20 +68,24 @@ internal object KsudStage {
     private const val STAGED_BY_THE_APP = "/data/local/tmp/ksud-s25u-kdp"
 
     /**
-     * The three flavours' manager packages, in the order the app offers them.
+     * The three flavours, as the app offers them: the id it names one by, what a person calls it, and the
+     * manager package that flavour publishes.
      *
-     * Read for one thing only now - naming, in the refusal, the copies this will not take - because a
-     * daemon out of one of these is a daemon for whichever KernelSU that manager belongs to. Kept as a
-     * list rather than inlined into that sentence so it stays checkable: it is hard-coded here because
-     * this module is a second APK that shares no code with the app, and it is held to the app's own table
-     * by `StageTwoIdentityTest`, which reads both sources. A project renaming its manager package would
-     * otherwise leave this naming an app that no longer exists - and the failure would be a manager that
-     * is installed and invisible.
+     * Two readers now, and they were one before. The refusal below names the copies this will not take - a
+     * daemon out of a manager is a daemon for whichever KernelSU that manager belongs to - and the screen
+     * uses the same table the other way round: told which flavour this run loads, it finds that flavour's
+     * manager by package so it can say whether it is installed and open it.
+     *
+     * Hard-coded because this module is a second APK that shares no code with the app, and held to the
+     * app's own table - all three fields, not only the package - by `StageTwoIdentityTest`, which reads
+     * both sources. A project renaming its manager package would otherwise leave this naming an app that no
+     * longer exists, and a manager that is installed but invisible is exactly the state this list exists to
+     * end.
      */
-    private val MANAGER_PACKAGES = listOf(
-        "me.weishu.kernelsu",
-        "com.rifsxd.ksunext",
-        "com.resukisu.resukisu",
+    val MANAGER_FLAVORS: List<ManagerFlavor> = listOf(
+        ManagerFlavor(id = "kernelsu", label = "KernelSU", packageName = "me.weishu.kernelsu"),
+        ManagerFlavor(id = "kernelsu-next", label = "KernelSU-Next", packageName = "com.rifsxd.ksunext"),
+        ManagerFlavor(id = "resukisu", label = "ReSukiSU", packageName = "com.resukisu.resukisu"),
     )
 
     /** 0700: readable and executable by the system, and by nothing else. */
@@ -139,9 +143,7 @@ internal object KsudStage {
         // which one that is cannot be known from here - the kernel is the only side that knows, and this
         // process cannot ask it. A wrong daemon is worse than none: the exploit would exec it and fail a
         // few steps later, in the shape of the exploit having failed.
-        val installed = MANAGER_PACKAGES.filter { packageName ->
-            runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.isSuccess
-        }
+        val installed = installedFlavors(context).map { it.packageName }
         log.appendLine(
             "[x] nothing flavour-correct to stage: no readable daemon at $LEFT_BY_THE_PAYLOAD or " +
                 "$STAGED_BY_THE_APP" +
@@ -163,13 +165,46 @@ internal object KsudStage {
     /**
      * Which of the three managers this phone has, for the screen that reports it.
      *
-     * The same list the refusal above names, read for a different reason: a run whose last step fails
-     * is most often a daemon built for a different KernelSU than the module in the kernel, and the
-     * manager that is installed is the one thing on the device that says which flavour this phone is
-     * meant to run. Exposed rather than repeated so the two readings cannot disagree about which
-     * packages count as a manager.
+     * The same table the refusal above names, read for a different reason: a run whose last step fails is
+     * most often a daemon built for a different KernelSU than the module in the kernel, and the manager
+     * that is installed is the one thing on the device that says which flavour this phone is meant to run.
+     *
+     * All three rather than the one the app named, because "which manager is installed" and "which manager
+     * this run loads" are different questions and the screen asks both: the app's own flavour can be absent
+     * from a phone that has another, and that is the state a wrong-daemon failure looks like.
      */
-    fun installedManagers(context: Context): List<String> = MANAGER_PACKAGES.filter { packageName ->
-        runCatching { context.packageManager.getApplicationInfo(packageName, 0) }.isSuccess
+    fun installedFlavors(context: Context): List<ManagerFlavor> =
+        MANAGER_FLAVORS.filter { flavor -> isInstalled(context, flavor) }
+
+    /** Whether one flavour's manager is on the phone. */
+    fun isInstalled(context: Context, flavor: ManagerFlavor): Boolean = runCatching {
+        context.packageManager.getApplicationInfo(flavor.packageName, 0)
+    }.isSuccess
+
+    /**
+     * The flavour an id from the app names, or null when it is not one this APK knows.
+     *
+     * Null rather than a fallback, and the two failures it covers are deliberately the same answer: an id
+     * from a newer app than this helper, and an id mangled on the way through `am`. Either way the screen
+     * has been told something it cannot act on, and the honest reading is the one it falls back to without
+     * the extra at all - the managers that are installed, with no claim about which one this run loads.
+     */
+    fun flavorOf(id: String?): ManagerFlavor? {
+        val wanted = id?.trim().orEmpty()
+        if (wanted.isEmpty()) return null
+        return MANAGER_FLAVORS.firstOrNull { it.id.equals(wanted, ignoreCase = true) }
     }
 }
+
+/**
+ * One KernelSU flavour's manager: the id the app names it by, the name people use, and its package.
+ *
+ * The id is the app's feed id (`kernelsu-next`) rather than a package name, because that is what the app
+ * can send without this APK knowing anything about how a manager is distributed - and it is what the
+ * screen holds in its hand when it has been told which flavour this run loads.
+ */
+internal class ManagerFlavor(
+    val id: String,
+    val label: String,
+    val packageName: String,
+)

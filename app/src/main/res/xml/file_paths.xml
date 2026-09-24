@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="updates" path="updates/" />
+    <!-- Where a manager APK is downloaded for the phone's own installer. Its own directory rather than
+         the updater's, because the two are different files with different lifetimes: this one is kept per
+         version, and the app's own update is one file overwritten on every check. -->
+    <cache-path name="managers" path="managers/" />
 </paths>

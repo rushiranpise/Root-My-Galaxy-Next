@@ -216,6 +216,10 @@ class DfrBootService : Service() {
             // Told, so the helper's own boot row can say what this app's setting is. It is this app's
             // setting: the boot receipt and the once-per-boot rule are on this side.
             rerootAtBoot = AppPreferences.rerootAtBoot(this),
+            // And the flavour, for the same reason and a different subject: which KernelSU this boot ends
+            // up carrying is a fact about the payload this app resolved, so the helper's own manager row
+            // has to be told it rather than left to guess between three installed managers.
+            flavor = AppPreferences.kernelsuFlavor(this),
         )
         if (launch == null) {
             AppLog.warn(AppLogTags.BOOT, "Reroot at boot could not start the helper: no shell answered")

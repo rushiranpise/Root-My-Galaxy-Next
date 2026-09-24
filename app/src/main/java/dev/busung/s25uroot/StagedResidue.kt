@@ -80,6 +80,17 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
      */
     HelperApk(R.string.residue_role_helper_apk),
 
+    /**
+     * A copy of a manager APK, left where the `shell` user can install it from.
+     *
+     * [HelperApk]'s sibling for the same reason and a different app: `pm install` reads the APK as whoever
+     * asked for it, this app's own storage is mode 0700 under its own uid, and the `shell` user therefore
+     * needs a copy in the directory it owns. What it holds is one of the three KernelSU managers rather
+     * than anything of this project's, which is worth saying in the list: the file is a download, and the
+     * one thing a reader should know about it is which app it would install.
+     */
+    ManagerApk(R.string.residue_role_manager_apk),
+
     /** The exploit payload itself. */
     Payload(R.string.residue_role_payload),
 
@@ -382,6 +393,9 @@ internal object StagedResidue {
         // this path is a shell-readable copy of the helper APK, and the reason it may not drift is that
         // the install that reads it and the list that reports it would otherwise disagree silently.
         StagedPath(DfrInstall.SHELL_INSTALL_PATH, ResidueRole.HelperApk),
+        // Named from the code that writes it, like the line above: the install that reads this file and
+        // the list that reports it would otherwise be able to disagree, silently, about one path.
+        StagedPath(ManagerInstall.SHELL_APK_PATH, ResidueRole.ManagerApk),
         StagedPath("/data/local/tmp/rmgnext-shizuku-payload", ResidueRole.Payload),
         StagedPath("/data/local/tmp/rmgnext-shizuku-exploit.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/rmgnext-ksud-helper", ResidueRole.Helper),

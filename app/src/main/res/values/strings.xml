@@ -104,6 +104,7 @@
     <string name="residue_role_daemon">KernelSU daemon</string>
     <string name="residue_role_helper">root helper</string>
     <string name="residue_role_helper_apk">helper app copy</string>
+    <string name="residue_role_manager_apk">manager app copy</string>
     <string name="residue_role_payload">exploit payload</string>
     <string name="residue_role_script">repair script</string>
     <string name="residue_role_log">script log</string>
@@ -476,6 +477,34 @@
     <string name="stage_exploit">Running kernel exploit</string>
     <string name="stage_kernel_su">Loading KernelSU</string>
     <string name="stage_verify">Verifying KernelSU control channel</string>
+    <!--
+      The manager step of a run: the manager app of the flavour the payload loads, which is what drives the
+      loaded KernelSU afterwards. Named by route, because "installed" with no "by what" is not a report.
+    -->
+    <string name="manager_route_root">root</string>
+    <string name="manager_route_shell">Shizuku</string>
+    <string name="manager_route_wireless">the wireless debugging pairing</string>
+    <string name="manager_route_installer">the phone\'s installer</string>
+    <string name="manager_downloading">Downloading the %1$s %2$s manager</string>
+    <string name="manager_handing_over">Opening the phone\'s installer for the %1$s manager; the run waits for it</string>
+    <string name="manager_waiting">Waiting for the %1$s manager install (%2$d s left)</string>
+    <string name="manager_error_no_release">no %1$s %2$s release could be read, so there is nothing to download</string>
+    <string name="manager_error_download">the APK could not be downloaded</string>
+    <string name="manager_error_no_shell">no shell can install it on this phone</string>
+    <string name="manager_error_no_installer">this phone has nothing that will open an APK</string>
+    <string name="manager_error_not_installed_yet">the %1$s manager was not installed in the %2$d seconds a run waits</string>
+    <string name="manager_present">The %1$s manager is already installed (%2$s)</string>
+    <string name="manager_version_unread">version could not be read</string>
+    <string name="manager_installed_toast">The %1$s manager is installed</string>
+    <string name="manager_handed_over_toast">The phone\'s installer is open. Finish it, then run.</string>
+    <string name="manager_failed_toast">The %1$s manager could not be installed: %2$s</string>
+    <string name="log_manager_present">[*] %1$s</string>
+    <string name="log_manager_installed">[+] Installed the %1$s %2$s manager with %3$s</string>
+    <string name="log_manager_failed">[!] Continuing without a %1$s manager: %2$s. Install it from Settings when you can, or the root this run obtains will have nothing to drive it.</string>
+    <string name="status_manager_check">Checking the %1$s manager</string>
+    <string name="install_confirm_manager">The %1$s manager is not installed. This run installs it first.</string>
+    <string name="install_confirm_manager_ready">The %1$s manager is on the phone.</string>
+    <string name="action_install_manager">Install manager</string>
     <string name="status_stage_failed">Failed at: %1$s</string>
     <string name="failure_stage">Stage</string>
     <string name="failure_reason">Reason</string>

@@ -105,7 +105,7 @@ class DfrDaemonPathTest {
             "the stage two reads a manager's libksud.so again, which is some other KernelSU's daemon",
             !source.contains("nativeLibraryDir"),
         )
-        assertTrue("the refusal does not name the managers it passed over", source.contains("MANAGER_PACKAGES"))
+        assertTrue("the refusal does not name the managers it passed over", source.contains("MANAGER_FLAVORS"))
     }
 
     @Test

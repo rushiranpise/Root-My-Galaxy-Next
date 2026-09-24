@@ -82,6 +82,7 @@ class Stage2Activity : Activity() {
     private lateinit var hookView: TextView
     private lateinit var daemonView: TextView
     private lateinit var managerView: TextView
+    private lateinit var openManagerButton: Button
     private lateinit var startedView: TextView
     private lateinit var bootView: TextView
     private lateinit var outcomeView: TextView
@@ -103,11 +104,22 @@ class Stage2Activity : Activity() {
     /** What the app's own reroot-at-boot setting was, or null when the app did not say. */
     private var rerootAtBoot: Boolean? = null
 
+    /**
+     * Which flavour this run loads, as the app named it, or null when the app did not say.
+     *
+     * The one fact about the payload this process cannot work out for itself: three managers can be
+     * installed at once, they belong to three different projects, and which of them drives the daemon this
+     * boot will exec is a fact about the payload the app resolved. So it is told - see
+     * `DfrInstall.STAGE_TWO_FLAVOR_EXTRA` - and an id this APK does not know reads the same as no id at all.
+     */
+    private var payloadFlavor: ManagerFlavor? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         autorun = intent?.getBooleanExtra(EXTRA_AUTORUN, false) == true
         rerootAtBoot = intent?.takeIf { it.hasExtra(EXTRA_REROOT_AT_BOOT) }
             ?.getBooleanExtra(EXTRA_REROOT_AT_BOOT, false)
+        payloadFlavor = KsudStage.flavorOf(intent?.getStringExtra(EXTRA_FLAVOR))
         palette = Palette(this)
         setContentView(buildScreen())
         dressWindow()
@@ -317,13 +329,38 @@ class Stage2Activity : Activity() {
             }
     }
 
-    /** Which KernelSU is installed, which is what a wrong-flavour daemon is measured against. */
+    /**
+     * Which manager this run's kernel will be driven by, and what else is on the phone.
+     *
+     * Two readings in one field, because the second is what makes the first diagnosable. The flavour the
+     * app named is the answer - it comes from the payload this run loads, which is the only side that knows
+     * - and whether its manager is installed is the thing a person needs before they start: a run that
+     * succeeds with no manager leaves root nothing on the phone can use. The list under it is what a
+     * wrong-daemon failure is measured against, and it is also the fallback when the app did not say.
+     */
     private fun managers(): String {
-        val installed = KsudStage.installedManagers(this)
-        return if (installed.isEmpty()) {
-            "none of the three flavours is installed"
-        } else {
-            installed.joinToString("\n")
+        val installed = KsudStage.installedFlavors(this)
+        val told = payloadFlavor
+        if (told == null) {
+            val others = if (installed.isEmpty()) {
+                "none of the three flavours is installed"
+            } else {
+                installed.joinToString("\n") { "${it.label}  ${it.packageName}" }
+            }
+            return "the app did not say which flavour this run loads\n$others"
+        }
+        val here = KsudStage.isInstalled(this, told)
+        return buildString {
+            append(told.label).append("  ").append(told.packageName).append('\n')
+            append(if (here) "installed - this is the manager for the daemon above" else "not installed")
+            val others = installed.filter { it.id != told.id }
+            if (others.isNotEmpty()) {
+                append("\n")
+                append(others.joinToString("\n") { "${it.label}  ${it.packageName} is also here" })
+            }
+            if (!here) {
+                append("\nthe kernel this run loads would have nothing to drive it")
+            }
         }
     }
 
@@ -352,6 +389,7 @@ class Stage2Activity : Activity() {
         hookView.setTextColor(if (isArmed) palette.warning else palette.onSurface)
         daemonView.text = daemon()
         managerView.text = managers()
+        refreshManagerAction()
         startedView.text = if (autorun) {
             "the app, with the boot: this run started by itself"
         } else {
@@ -403,6 +441,9 @@ class Stage2Activity : Activity() {
         hookView = value()
         daemonView = value()
         managerView = value()
+        openManagerButton = answer("Open manager", loud = false).apply {
+            setOnClickListener { openManager() }
+        }
         column.addView(
             card(
                 sectionLabel("Status"),
@@ -411,6 +452,10 @@ class Stage2Activity : Activity() {
                 field("Hooks in this kernel", hookView),
                 field("Daemon for this boot", daemonView),
                 field("KernelSU installed", managerView),
+                // The action for that reading, under it, which is the shape the app's own readings cards
+                // use for the same reason: this is the one thing on this screen that another app owns, and
+                // being told which manager this run loads is only half of what to do with it.
+                openManagerButton,
             ),
         )
 
@@ -492,6 +537,60 @@ class Stage2Activity : Activity() {
             }
         }
         return card(header, logScroll)
+    }
+
+    /**
+     * The manager this screen's one action opens, or null when there is nothing it could open.
+     *
+     * The flavour the app named wins, and it wins **even when it is not installed**: the reading under it
+     * already says so, and a button that quietly opened somebody else's manager because the right one was
+     * missing would be this screen making up the answer it was sent. When the app said nothing, a single
+     * installed manager is unambiguous and the button opens that one; two of them are a question this
+     * screen cannot answer, and it asks nothing rather than guessing.
+     */
+    private fun managerTarget(): ManagerFlavor? =
+        payloadFlavor ?: KsudStage.installedFlavors(this).singleOrNull()
+
+    /**
+     * The button, from the reading above it: its name is the manager it would open, and it is live only
+     * when that app is really there.
+     */
+    private fun refreshManagerAction() {
+        val target = managerTarget()
+        openManagerButton.visibility = if (target == null) View.GONE else View.VISIBLE
+        if (target == null) return
+        val installed = KsudStage.isInstalled(this, target)
+        openManagerButton.text = "Open ${target.label} manager"
+        openManagerButton.isEnabled = installed
+    }
+
+    /**
+     * Opens the KernelSU manager, which is the app that can actually act on what this run achieves.
+     *
+     * This screen can say what the phone is and start the exploit; everything a person wants after that -
+     * granting an app root, mounting a module, reading why a load failed - lives in the manager, and until
+     * now the only way to it from here was to know which app to look for and find it in the launcher.
+     *
+     * A manager that is not installed is reported here rather than passed to the platform, because this is
+     * also the state that says what the run in front of it will not be able to do.
+     */
+    private fun openManager() {
+        val target = managerTarget()
+        if (target == null) {
+            outcomeView.text = "no manager to open: the app did not say which flavour this run loads, " +
+                "and no single manager is installed"
+            outcomeView.setTextColor(palette.onSurfaceVariant)
+            return
+        }
+        val launch = packageManager.getLaunchIntentForPackage(target.packageName)
+        if (launch == null) {
+            outcomeView.text = "no ${target.label} manager at ${target.packageName}"
+            outcomeView.setTextColor(palette.error)
+            append("[!] ${target.packageName} is not installed, so there is nothing to open")
+            return
+        }
+        append("[*] opening the ${target.label} manager (${target.packageName})")
+        startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun openAppButton(): Button {
@@ -617,6 +716,16 @@ class Stage2Activity : Activity() {
          * is the honest answer for a helper the app did not start.
          */
         const val EXTRA_REROOT_AT_BOOT = "rmg.rerootAtBoot"
+
+        /**
+         * Which KernelSU this run loads, as the app names it - held to
+         * `DfrInstall.STAGE_TWO_FLAVOR_EXTRA` by the test that owns every shared name.
+         *
+         * Optional like the one above, and absent means absent: this screen has no way to work out which
+         * flavour the payload loads, so without it the manager row says so and the action falls back to a
+         * manager that is installed and unambiguous.
+         */
+        const val EXTRA_FLAVOR = "rmg.flavor"
 
         /**
          * The app, by its application id.

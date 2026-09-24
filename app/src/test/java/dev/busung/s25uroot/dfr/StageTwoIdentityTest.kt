@@ -51,19 +51,77 @@ class StageTwoIdentityTest {
     }
 
     @Test
-    fun `the daemon the helper reads comes from the manager packages the app knows`() {
-        // As sets and not as lists: the helper's order is its own business - the app's table is what
-        // decides which manager a flavour installs - but a package missing from either side is a
-        // flavour whose manager would never be found.
-        val flavourPackages = Regex("""managerPackage = "([^"]+)"""")
-            .findAll(flavourSource())
-            .map { it.groupValues[1] }
-            .toSet()
+    fun `the helper's flavour table is the app's flavour table`() {
+        // All three fields and not only the package, because the helper now does three things with them:
+        // it names the manager a person should look for, it opens it by package, and it is told which one
+        // this run loads by the app's own id - so an id that drifted would be a manager row about no flavour
+        // at all, and a label that drifted would be a button naming an app nobody has.
+        //
+        // Sorted by id, so a reordering on either side is not a failure: the app's order is what its rows
+        // are drawn in, and the helper's is not a decision at all.
         assertEquals(
-            "the helper looks for a manager under a different package than the app installs, so that " +
-                "flavour's daemon would be unfindable on a phone that has it",
-            flavourPackages,
-            daemonPackagesIn(stageTwoSource()),
+            "the helper's own table of the three flavours is not the app's, so one of the two would name " +
+                "or open the wrong manager for a payload",
+            appFlavors().sortedBy { it.first },
+            helperFlavors().sortedBy { it.first },
+        )
+        assertEquals(
+            "a flavour appears twice in one of the two tables, so a lookup by id or package would answer " +
+                "with whichever came first",
+            helperFlavors().map { it.first }.toSet().size,
+            helperFlavors().size,
+        )
+    }
+
+    @Test
+    fun `the flavour the app sends is the flavour the helper reads`() {
+        // The one fact about the payload the helper cannot work out for itself: three managers can be
+        // installed at once and only the app knows which one this boot's kernel belongs to. An extra spelled
+        // differently on the two sides is a helper that always falls back - which looks like a phone with no
+        // manager rather than like a name that drifted.
+        assertEquals(
+            "the app sends the payload's flavour under an extra the helper does not read, so its manager " +
+                "row would always fall back to guessing between the managers that are installed",
+            DfrInstall.STAGE_TWO_FLAVOR_EXTRA,
+            constantIn(stageTwoActivity(), "EXTRA_FLAVOR"),
+        )
+        assertTrue(
+            "the helper declares the flavour extra but never asks the intent for it",
+            stageTwoActivity().contains("getStringExtra(EXTRA_FLAVOR)"),
+        )
+        // The helper resolves the id through the same table the test above holds to the app's, so the
+        // fallback for an id from a newer app is a reading with no flavour in it - not a guess.
+        assertTrue(
+            "the helper no longer resolves the flavour id it is given through its own table, so an unknown " +
+                "id would be able to claim a manager",
+            stageTwoActivity().contains("KsudStage.flavorOf("),
+        )
+    }
+
+    @Test
+    fun `the helper's manager action opens the manager of the flavour it was told`() {
+        // The action the screen gained: a button under that reading, disabled when the manager is not there,
+        // and pointed at the package of the flavour this run loads rather than at whichever one answers.
+        val activity = stageTwoActivity()
+        assertTrue(
+            "the helper's manager reading has no action under it, so the one app a person needs next on " +
+                "that screen is still only reachable from the launcher",
+            activity.contains("openManagerButton"),
+        )
+        assertTrue(
+            "opening a manager no longer goes through the platform's own launch intent, so the button " +
+                "would open something of this APK's instead of another app",
+            activity.contains("getLaunchIntentForPackage(target.packageName)"),
+        )
+        assertTrue(
+            "the button's own name is no longer the manager it opens, so a screen told one flavour could " +
+                "offer another",
+            activity.contains("\"Open \${target.label} manager\""),
+        )
+        assertTrue(
+            "the action is live whether or not that manager is installed, so it would be a button that " +
+                "opens nothing",
+            activity.contains("openManagerButton.isEnabled = installed"),
         )
     }
 
@@ -243,16 +301,46 @@ class StageTwoIdentityTest {
             ?: error("no rootProject res.srcDir in the module's build file")
 
     /**
-     * The quoted names inside `MANAGER_PACKAGES`, read from the block rather than from the whole file:
-     * the surrounding prose names packages too, and a search over the whole file would pick those up and
-     * make this test pass on a list that had been emptied.
+     * The helper's flavour table, as (id, label, package) triples.
+     *
+     * Read from the `ManagerFlavor(...)` calls rather than from the block around them: the block is full of
+     * prose that names both managers and projects, and a harvest of every quoted string in it would pass on
+     * a table whose fields had been shuffled between entries.
      */
-    private fun daemonPackagesIn(text: String): Set<String> {
-        val start = text.indexOf("MANAGER_PACKAGES = listOf(")
-        assertTrue("no MANAGER_PACKAGES list in the stage two's source", start >= 0)
-        val block = text.substring(start, text.indexOf(")", start + 1).takeIf { it > 0 } ?: text.length)
-        return Regex(""""([^"]+)"""").findAll(block).map { it.groupValues[1] }.toSet()
+    private fun helperFlavors(): List<Triple<String, String, String>> {
+        val triples = Regex(
+            """ManagerFlavor\(id = "([^"]+)", label = "([^"]+)", packageName = "([^"]+)"\)""",
+        ).findAll(stageTwoSource())
+            .map { Triple(it.groupValues[1], it.groupValues[2], it.groupValues[3]) }
+            .toList()
+        assertTrue("no flavour table in the stage two's source", triples.isNotEmpty())
+        return triples
     }
+
+    /**
+     * The app's own flavour table, from the three fields each entry declares.
+     *
+     * Zipped rather than matched per entry, because the entries are enum constants with several fields and
+     * only these three are quoted: each appears exactly once per entry, in the same order, which is what
+     * makes the zip the same pairing the compiler sees. The two size checks are the guard - a field added
+     * between them, or an entry that stopped declaring one, would otherwise shift every pairing by one and
+     * make this test compare the wrong things quietly.
+     */
+    private fun appFlavors(): List<Triple<String, String, String>> {
+        val text = flavourSource()
+        val ids = quoted("""\bid = "([^"]+)""", text)
+        val labels = quoted("""\blabel = "([^"]+)""", text)
+        val packages = quoted("""\bmanagerPackage = "([^"]+)""", text)
+        assertTrue(
+            "the app's flavour table does not declare one id, label and package per entry " +
+                "(${ids.size}/${labels.size}/${packages.size}), so this test is comparing the wrong fields",
+            ids.size == labels.size && labels.size == packages.size && ids.isNotEmpty(),
+        )
+        return ids.zip(labels).zip(packages) { (id, label), packageName -> Triple(id, label, packageName) }
+    }
+
+    private fun quoted(pattern: String, text: String): List<String> =
+        Regex(pattern).findAll(text).map { it.groupValues[1] }.toList()
 
     private fun source(relative: String): String =
         candidates(relative).firstOrNull { it.isFile }?.readText()

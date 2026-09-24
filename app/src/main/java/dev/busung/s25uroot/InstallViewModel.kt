@@ -914,6 +914,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     app.getString(R.string.error_pipe_budget_spent)
                 }
 
+                // The manager, and on this side of the settle below rather than after it. An install is
+                // network, `installd` and dexopt work, and the settle exists to let this boot go quiet
+                // before the exploit runs - so the churn belongs in front of the wait, not in the exploit's
+                // window. This is also why it is not left to the run-plan sheet alone: a run asked for from
+                // a notification, the boot gate or an armed retry never passes that sheet.
+                ensureManager(profile.flavor, unattended)
+
                 // Before the download, so the wait is the first thing the screen reports rather than
                 // something that appears after the payload is already staged.
                 awaitBootSettle(AppPreferences.bootSettleSeconds(app))
@@ -1857,6 +1864,91 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      */
     private fun payloadQuietWindowSeconds(): Int =
         BootSettle.payloadQuietWindowSeconds(bootSettleRequiredSeconds, bootSettleOverridden)
+
+    /**
+     * Puts the payload's own manager on the phone when there is none, before the payload runs.
+     *
+     * The kernel does not need it - the manager is a plain app that talks to the loaded module over
+     * KernelSU's socket, and any version of it drives any daemon - but everything *after* a run does: a phone
+     * rooted with no manager anywhere is a phone whose root nothing on it can use, and the state this exists
+     * for is a fresh install with nothing of this flavour on it. That is why it runs here and not only on the
+     * sheet that starts a run: a run asked for from a notification, the boot gate or an armed retry never
+     * passes that sheet, and it is asking exactly the same question.
+     *
+     * **Nothing in here can fail the run.** The two outcomes that are not an install are both reported and
+     * then stepped over - a manager can be installed any time afterwards from Settings, and refusing to root
+     * a phone because an app beside it would not download would be refusing the thing the user asked for.
+     * The one state that leaves a mark is a run that finishes with no manager, which is why it is a warning
+     * rather than a note in the log nobody reads: the exploit will have worked and the phone will not be
+     * usable as rooted until that app is on it.
+     *
+     * [unattended] is the run nobody is watching. It does not open the phone's installer - a dialog on a
+     * phone with its screen off, waiting for a tap that is not coming - and it does not wait for one either.
+     * What it does do is install silently whenever a shell answers, which on the boot gate is the usual case:
+     * the gate waited for Shizuku before the run began.
+     */
+    private suspend fun ensureManager(flavor: KernelSuFlavor, unattended: Boolean) {
+        setPhase(InstallPhase.Checking, app.getString(R.string.status_manager_check, flavor.label))
+        val outcome = runCatching {
+            ManagerInstall.install(
+                context = app,
+                flavor = flavor,
+                // Deliberately false: this step sits immediately before a payload whose timing is delicate,
+                // and bringing wireless debugging up - a device setting, and a second adbd - is not something
+                // to do beside it. The two shell routes are tried, and the phone's installer is the fallback.
+                allowWirelessAdb = false,
+                handToInstaller = !unattended,
+                waitForInstall = !unattended,
+                onLog = { line -> appendLog("[*] $line") },
+            )
+        }.getOrElse { error ->
+            ManagerInstallOutcome(
+                flavor = flavor,
+                verdict = ManagerInstallVerdict.Failed,
+                detail = error.message ?: error.javaClass.simpleName,
+            )
+        }
+        val line = when (outcome.verdict) {
+            ManagerInstallVerdict.AlreadyInstalled -> app.getString(
+                R.string.log_manager_present,
+                app.getString(
+                    R.string.manager_present,
+                    flavor.label,
+                    outcome.version ?: app.getString(R.string.manager_version_unread),
+                ),
+            )
+            ManagerInstallVerdict.Installed -> app.getString(
+                R.string.log_manager_installed,
+                flavor.label,
+                outcome.version.orEmpty(),
+                app.getString(outcome.route?.prose ?: R.string.manager_route_root),
+            )
+            // The phone's installer was opened and no package has appeared yet. Two shapes of that, and
+            // [ManagerInstallOutcome.detail] is what tells them apart: null is an installer this run did not
+            // stay to watch, and a sentence is a wait that ran out - which is a manager this run went on
+            // without, so it is reported as one.
+            ManagerInstallVerdict.Requested -> outcome.detail?.let { reason ->
+                app.getString(R.string.log_manager_failed, flavor.label, reason)
+            } ?: app.getString(R.string.manager_handing_over, flavor.label)
+            ManagerInstallVerdict.Failed -> app.getString(
+                R.string.log_manager_failed,
+                flavor.label,
+                outcome.detail.orEmpty(),
+            )
+        }
+        appendLog(line)
+        val summary = "Manager step: ${outcome.verdict} via ${outcome.route?.name ?: "none"} " +
+            "(${flavor.label}${outcome.version?.let { " $it" }.orEmpty()})"
+        // A run that finished with no manager is the one outcome here worth a warning: everything else is
+        // either nothing to do or a manager now on the phone.
+        if (outcome.verdict == ManagerInstallVerdict.Failed ||
+            (outcome.verdict == ManagerInstallVerdict.Requested && outcome.detail != null)
+        ) {
+            AppLog.warn(RUN_LOG_TAG, "$summary - ${outcome.detail}")
+        } else {
+            AppLog.info(RUN_LOG_TAG, summary)
+        }
+    }
 
     /**
      * Holds the run until the device has been up long enough, reporting the remaining time as it goes.

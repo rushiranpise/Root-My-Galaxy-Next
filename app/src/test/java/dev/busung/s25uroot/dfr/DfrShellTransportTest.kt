@@ -198,7 +198,10 @@ class DfrShellTransportTest {
         // The screen's three actions and the shells they use, which is where a second, root-only call would
         // silently put the flow back to refusing on a boot with no root.
         val open = declaration(uiSource(), "fun open() =")
-        assertTrue("opening the helper no longer goes through DfrInstall.launch", open.contains("DfrInstall.launch()"))
+        assertTrue(
+            "opening the helper no longer goes through DfrInstall.launch",
+            open.contains("DfrInstall.launch(flavor = "),
+        )
         val remove = declaration(uiSource(), "fun removeStageTwo() =")
         assertTrue(
             "removing the helper no longer goes through the shell-capable uninstall",

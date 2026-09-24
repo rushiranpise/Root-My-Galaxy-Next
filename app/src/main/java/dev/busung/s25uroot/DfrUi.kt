@@ -221,7 +221,10 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // unsaid. What matters is that the line under it is a launch rather than a second refusal - the
         // helper is what puts root back, so on a boot that has none this press is the way out of it.
         val staged = stageDaemon()
-        val action = DfrInstall.launch()
+        // The flavour goes with it, because the helper's manager row and its one action are about the
+        // KernelSU this phone is set to run - which is this side's fact. Opening the helper by hand and
+        // getting a manager row about a flavour the next run would not load would be worse than no row.
+        val action = DfrInstall.launch(flavor = AppPreferences.kernelsuFlavor(context))
             ?: return@act listOf(staged, context.getString(R.string.dfr_no_shell)).joinToString("\n")
         listOf(staged, action.log).joinToString("\n")
     }

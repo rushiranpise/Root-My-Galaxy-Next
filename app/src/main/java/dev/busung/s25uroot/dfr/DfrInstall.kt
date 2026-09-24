@@ -7,6 +7,7 @@ import androidx.annotation.StringRes
 import dev.busung.s25uroot.R
 import dev.busung.s25uroot.AppLog
 import dev.busung.s25uroot.AppLogTags
+import dev.busung.s25uroot.KernelSuFlavor
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
 import dev.busung.s25uroot.RootStatusProbe
@@ -313,6 +314,17 @@ internal object DfrInstall {
      * extra is how that screen says "the app did not start me", which is a different answer from "off".
      */
     const val STAGE_TWO_REROOT_EXTRA = "rmg.rerootAtBoot"
+
+    /**
+     * Which KernelSU this run loads, so the helper can name and open that flavour's manager.
+     *
+     * The helper cannot work this out on its own: three managers can be installed at once, they are three
+     * different projects' apps, and the only side that knows which one drives the daemon this boot will
+     * exec is the app - it is the side that resolved the payload. So it is told, and it is told the feed's
+     * own id (`kernelsu-next`) rather than a package, because the id is the name the extra can be held to
+     * by a test while a package is a fact about somebody else's repository.
+     */
+    const val STAGE_TWO_FLAVOR_EXTRA = "rmg.flavor"
 
     /** The compiled-in marker the exploit's module creates, and the kernel clears it on a hard reboot. */
     const val ARMED_MARKER = "/dev/df"
@@ -802,11 +814,17 @@ internal object DfrInstall {
         activity: String = STAGE_TWO_ACTIVITY,
         autorun: Boolean = false,
         rerootAtBoot: Boolean? = null,
+        flavor: KernelSuFlavor? = null,
     ): String = buildString {
         append("/system/bin/am start -n '").append(packageName).append("/").append(activity).append('\'')
         if (autorun) append(" --ez ").append(STAGE_TWO_AUTORUN_EXTRA).append(" true")
         if (rerootAtBoot != null) {
             append(" --ez ").append(STAGE_TWO_REROOT_EXTRA).append(' ').append(rerootAtBoot)
+        }
+        // `--es` rather than `--ez`: this is a string, and `am` reads a missing `--es` as an empty one -
+        // which is why the helper treats "absent" and "blank" as the same answer and says so.
+        if (flavor != null) {
+            append(" --es ").append(STAGE_TWO_FLAVOR_EXTRA).append(' ').append(flavor.id)
         }
     }
 
@@ -902,8 +920,14 @@ internal object DfrInstall {
      * some builds while saying so on its first line, and a run that was never started being read as started
      * is exactly the failure the notification must not report.
      */
-    internal fun launchWithoutRoot(autorun: Boolean, rerootAtBoot: Boolean?): DfrAction? = verdictFor(
-        KernelSuRuntime.unprivilegedShell(launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot)),
+    internal fun launchWithoutRoot(
+        autorun: Boolean,
+        rerootAtBoot: Boolean?,
+        flavor: KernelSuFlavor? = null,
+    ): DfrAction? = verdictFor(
+        KernelSuRuntime.unprivilegedShell(
+            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor),
+        ),
         LAUNCH_FAILURE,
     )
 
@@ -917,8 +941,15 @@ internal object DfrInstall {
      * refusal waiting to happen - the extra round trip through the root half is only what keeps a rooted
      * phone off Shizuku entirely.
      */
-    internal fun launch(autorun: Boolean = false, rerootAtBoot: Boolean? = null): DfrAction? = verdictFor(
-        runOnEitherShell(launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot), TIMEOUT_SECONDS),
+    internal fun launch(
+        autorun: Boolean = false,
+        rerootAtBoot: Boolean? = null,
+        flavor: KernelSuFlavor? = null,
+    ): DfrAction? = verdictFor(
+        runOnEitherShell(
+            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor),
+            TIMEOUT_SECONDS,
+        ),
         LAUNCH_FAILURE,
     )
 

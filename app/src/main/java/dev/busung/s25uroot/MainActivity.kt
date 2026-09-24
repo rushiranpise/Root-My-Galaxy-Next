@@ -1116,6 +1116,36 @@ private fun RootApp(
         )
     }
 
+    // Declared by the shell rather than by a page, because two pages read the phone's state and both
+    // go stale on the same event: coming back to the foreground. A manager is installed by another
+    // app's installer, a Shizuku grant is made in another app, and each page that kept its own counter
+    // would be a second place to remember the same thing.
+    //
+    // Declared above the sheet below rather than beside the pages that read it, because that sheet reads it
+    // too: the manager this app would install for the payload's flavour is another app's business, and the
+    // sheet that offers to install it has to be right about it when the app comes back from the installer.
+    var resumeTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            // A tick rather than a read here, so the work still happens off the main thread.
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // The manager this app would install for the payload's flavour, and whether one is already there.
+    //
+    // [managerTick] is the other way this reading changes, and the other way is this app's own doing: an
+    // install it performed itself. A tick rather than a second read, so that the one place this question is
+    // asked stays one place.
+    var managerTick by remember { mutableStateOf(0) }
+    var managerInstalling by remember { mutableStateOf(false) }
+    val managerInstalled = remember(kernelsuFlavor, resumeTick, managerTick) {
+        KernelSuManager.installedFor(context, kernelsuFlavor)
+    }
+
     if (showInstallConfirmation) {
         AlertDialog(
             onDismissRequest = { showInstallConfirmation = false },
@@ -1124,7 +1154,65 @@ private fun RootApp(
                 DialogDimAmount(0.34f)
                 Text(stringResource(R.string.install_confirm_title))
             },
-            text = { Text(stringResource(R.string.install_confirm_body)) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.install_confirm_body))
+                    // What the run will do about the manager before it does anything else, said here rather
+                    // than discovered mid-run: a run installs the flavour's manager when there is none, and
+                    // that can be a download plus a tap on the phone's installer. The offer under it is the
+                    // same install, asked for early - so a phone with no manager can have one before the run
+                    // is handed the phone, and a phone that gets one here is a run with nothing to do.
+                    Text(
+                        text = if (managerInstalled == null) {
+                            stringResource(R.string.install_confirm_manager, kernelsuFlavor.label)
+                        } else {
+                            stringResource(R.string.install_confirm_manager_ready, kernelsuFlavor.label)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (managerInstalled == null) {
+                        // The link shape, because this is not the dialog's answer: the answers are below, and
+                        // pressing this one leaves the question standing - the run is still the run, and it
+                        // will install the manager itself if this is skipped.
+                        AppTextAction(
+                            AppAction(
+                                label = R.string.action_install_manager,
+                                progress = managerInstalling,
+                            ) {
+                                clickHaptic(view)
+                                managerInstalling = true
+                                scope.launch {
+                                    val outcome = withContext(Dispatchers.IO) {
+                                        ManagerInstall.install(
+                                            context = context,
+                                            flavor = kernelsuFlavor,
+                                            // True here, unlike in a run: nothing delicate is in flight yet,
+                                            // and on a phone whose only shell is the pairing that pairing is
+                                            // the whole point of asking before the run.
+                                            allowWirelessAdb = true,
+                                            handToInstaller = true,
+                                            // Not waited for: the dialog reports what happened and stays open,
+                                            // and the person pressing through the installer comes back to it.
+                                            waitForInstall = false,
+                                            onLog = { line ->
+                                                AppLog.info(AppLogTags.KERNEL_SU, line)
+                                            },
+                                        )
+                                    }
+                                    managerInstalling = false
+                                    managerTick++
+                                    Toast.makeText(
+                                        context,
+                                        managerOutcomeMessage(context, outcome),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            },
+                        )
+                    }
+                }
+            },
             confirmButton = {
                 // Confirm is the recommended answer and Cancel is the quiet one. Confirm is not
                 // destructive even though a run replaces the kernel: what this dialog asks is whether to
@@ -1170,21 +1258,6 @@ private fun RootApp(
     // to the screen that just left, and the one arriving has not been scrolled at all.
     LaunchedEffect(selectedPage, stepOwnsWindow) { navBarScrolledAway = false }
     val density = LocalDensity.current
-
-    // Declared by the shell rather than by a page, because two pages read the phone's state and both
-    // go stale on the same event: coming back to the foreground. A manager is installed by another
-    // app's installer, a Shizuku grant is made in another app, and each page that kept its own counter
-    // would be a second place to remember the same thing.
-    var resumeTick by remember { mutableStateOf(0) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            // A tick rather than a read here, so the work still happens off the main thread.
-            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
     // The other half of what that tick is for: an app that has root is an app that can put the daemon back
     // where the next boot's late-load will look for it. That file is *consumed* by every late-load - a run's
