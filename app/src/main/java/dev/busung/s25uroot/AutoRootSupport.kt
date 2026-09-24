@@ -138,6 +138,20 @@ internal object AutoRootSupport {
     private const val LAST_BOOT_COMPLETED_TOKEN = "last_boot_completed_boot_id"
     private const val LAST_ATTEMPT_TOKEN = "last_attempt_boot_id"
 
+    /**
+     * The reroot's own attempt, in the same store and with the same meaning as the payload install's.
+     *
+     * Two tokens rather than one, and the reason is [claimAttempt]'s last line: spending the payload
+     * install's attempt is what *consumes an armed retry*, and a reroot is not an install. A boot that
+     * rerooted and also ate the retry the user armed for it would have taken back a request it never
+     * honoured.
+     *
+     * What the two do share is the rule, which is the one that matters here: one attempt per kernel boot,
+     * keyed by the boot id rather than by a timestamp, so the userspace restarts that re-emit
+     * `BOOT_COMPLETED` cannot spend it twice.
+     */
+    private const val LAST_REROOT_ATTEMPT_TOKEN = "last_reroot_attempt_boot_id"
+
     fun currentBootToken(): String? = kernelBootToken()
 
     /** Whether an install has been verified on this device at all, which is what a boot run needs. */
@@ -224,6 +238,29 @@ internal object AutoRootSupport {
         // install it was not otherwise owed", and it has now been given one.
         if (stored) AppPreferences.setRetryAfterReboot(context, null)
         return stored
+    }
+
+    /** Whether this boot has already asked the helper for a reroot. */
+    fun hasAttemptedRerootBoot(context: Context, bootToken: String): Boolean =
+        context.getSharedPreferences(STATE, Context.MODE_PRIVATE)
+            .getString(LAST_REROOT_ATTEMPT_TOKEN, null) == bootToken
+
+    /**
+     * Claims this boot's single reroot attempt.
+     *
+     * Claimed at the moment the helper is actually started rather than when the boot is first considered,
+     * which is the one place this differs from the install above: a boot whose attempt went to a launch that
+     * never happened - no shell up yet, the setting turned off while the gate waited - has spent nothing, and
+     * the boot service is the only thing that can tell those apart. What it buys is that a boot where the
+     * automation could not start is a boot that can still be started by hand from the notification.
+     */
+    @Synchronized
+    fun claimRerootAttempt(context: Context, bootToken: String): Boolean {
+        val preferences = context.getSharedPreferences(STATE, Context.MODE_PRIVATE)
+        if (preferences.getString(LAST_REROOT_ATTEMPT_TOKEN, null) == bootToken) return false
+        return preferences.edit()
+            .putString(LAST_REROOT_ATTEMPT_TOKEN, bootToken)
+            .commit()
     }
 
     /**

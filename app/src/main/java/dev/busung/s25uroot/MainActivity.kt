@@ -85,6 +85,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Bolt
@@ -237,6 +238,7 @@ class MainActivity : ComponentActivity() {
     private var shizukuMode by mutableStateOf(false)
     private var payloadSources by mutableStateOf<List<PayloadSource>>(emptyList())
     private var bootRootMode by mutableStateOf(false)
+    private var rerootAtBoot by mutableStateOf(false)
     private var armedRetry by mutableStateOf<ArmedRetry?>(null)
 
     /**
@@ -378,6 +380,7 @@ class MainActivity : ComponentActivity() {
         shizukuMode = AppPreferences.shizukuMode(this)
         payloadSources = AppPreferences.payloadSources(this)
         bootRootMode = AppPreferences.bootRootMode(this)
+        rerootAtBoot = AppPreferences.rerootAtBoot(this)
         armedRetry = readArmedRetry()
         retryPayload = readArmedRetryPayload()
         restartAfterRoot = AppPreferences.restartAfterRoot(this)
@@ -406,6 +409,7 @@ class MainActivity : ComponentActivity() {
                     shizukuMode = shizukuMode,
                     payloadSources = payloadSources,
                     bootRootMode = bootRootMode,
+                    rerootAtBoot = rerootAtBoot,
                     armedRetry = armedRetry,
                     retryPayload = retryPayload,
                     restartAfterRoot = restartAfterRoot,
@@ -470,6 +474,14 @@ class MainActivity : ComponentActivity() {
                     onRestartAfterRootChanged = { enabled ->
                         AppPreferences.setRestartAfterRoot(this, enabled)
                         restartAfterRoot = enabled
+                    },
+                    onRerootAtBootChanged = { enabled ->
+                        AppPreferences.setRerootAtBoot(this, enabled)
+                        rerootAtBoot = enabled
+                        // The same reach the install gate's own toggle has, for the same reason: a gate
+                        // that is already waiting on a shell would otherwise start the helper minutes
+                        // after the user turned the setting that asked for it off.
+                        if (!enabled) DfrBootService.stop(this)
                     },
                     onBootSettleChanged = { seconds ->
                         AppPreferences.setBootSettleSeconds(this, seconds)
@@ -659,6 +671,7 @@ private fun RootApp(
     shizukuMode: Boolean,
     payloadSources: List<PayloadSource>,
     bootRootMode: Boolean,
+    rerootAtBoot: Boolean,
     armedRetry: ArmedRetry?,
     retryPayload: CachedPayload?,
     restartAfterRoot: Boolean,
@@ -678,6 +691,7 @@ private fun RootApp(
     onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
+    onRerootAtBootChanged: (Boolean) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -1254,6 +1268,7 @@ private fun RootApp(
                             shizukuMode = shizukuMode,
                             payloadSources = payloadSources,
                             bootRootMode = bootRootMode,
+                            rerootAtBoot = rerootAtBoot,
                             restartAfterRoot = restartAfterRoot,
                             shizukuBootMode = shizukuBootMode,
                             bootSettleSeconds = bootSettleSeconds,
@@ -1270,6 +1285,7 @@ private fun RootApp(
                             onAdvancedModeChanged = onAdvancedModeChanged,
                             onDisableKsuModulesChanged = onDisableKsuModulesChanged,
                             onLoadKernelSuChanged = onLoadKernelSuChanged,
+                            onRerootAtBootChanged = onRerootAtBootChanged,
                             onManagerVersionChanged = onManagerVersionChanged,
                             onShizukuModeChanged = onShizukuModeChanged,
                             onPayloadSourcesChanged = onPayloadSourcesChanged,
@@ -3551,6 +3567,7 @@ private fun SettingsPage(
     shizukuMode: Boolean,
     payloadSources: List<PayloadSource>,
     bootRootMode: Boolean,
+    rerootAtBoot: Boolean,
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
     bootSettleSeconds: Int,
@@ -3575,6 +3592,7 @@ private fun SettingsPage(
     onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
+    onRerootAtBootChanged: (Boolean) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -4978,6 +4996,26 @@ private fun SettingsPage(
                     onClick = {
                         clickHaptic(view)
                         showDfrInstall = true
+                    },
+                )
+                // Under the flow rather than next to root on boot, because what it starts *is* the
+                // flow's helper: the two rows above are about installing it, and this is the only thing
+                // that ever starts it with nobody watching. Its icon is the circle of arrows rather
+                // than root on boot's bolt - the bolt row means "this app loads KernelSU by itself",
+                // and two rows meaning that would read as one setting drawn twice.
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Autorenew,
+                    title = stringResource(R.string.dfr_reroot_at_boot),
+                    description = stringResource(R.string.dfr_reroot_at_boot_detail),
+                    checked = rerootAtBoot,
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = { enabled ->
+                        clickHaptic(view)
+                        // The reroot's whole account is its notification - there is no screen in the
+                        // loop, because the point of it is that nobody is there - so the permission is
+                        // asked for at the moment the setting is turned on, on root on boot's terms.
+                        if (enabled) onRequestNotificationPermission()
+                        onRerootAtBootChanged(enabled)
                     },
                 )
                 SettingsCard(

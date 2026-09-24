@@ -574,6 +574,72 @@ internal object DfrInstall {
         return DfrProbe.parse(result.output)
     }
 
+    /**
+     * The same reading through the plain Shizuku shell, which is the only one a boot with no root has.
+     *
+     * Every part of [probeCommand] is a thing the `shell` user may do: `pm list packages` is a read, the
+     * marker is one `test -e` in a directory anything may search, and the framework section is `cut`, `pidof`
+     * and `awk` over `/proc`. That is why the boot path can answer the same questions the screen does - and
+     * `armed` is the one it cannot do without: it is what tells a boot whether the kernel has already been
+     * patched this boot, which is the difference between a rerun and a second attempt.
+     *
+     * Null when Shizuku is not usable, and null is not "not armed": a boot that could not ask has spent
+     * nothing, and [dfrBootDecision] answers it with its own reason instead of a guess.
+     */
+    fun probeWithoutRoot(): DfrProbe? {
+        val result = KernelSuRuntime.unprivilegedShell(probeCommand()) ?: return null
+        return DfrProbe.parse(result.output)
+    }
+
+    /**
+     * Starts the helper's own run through the plain Shizuku shell, with no screen and nobody watching.
+     *
+     * The same command the screen sends - see [launchCommand] - so a boot rerun and a hand-started one cannot
+     * come apart: the difference is only in the extras, which is where the difference belongs.
+     *
+     * The verdict is the shell's exit code and the word `am` uses for a refusal, which is `Error` rather than
+     * the `Failure` the package manager prints: an `am start` that could not reach the component exits zero on
+     * some builds while saying so on its first line, and a run that was never started being read as started
+     * is exactly the failure the notification must not report.
+     */
+    internal fun launchWithoutRoot(autorun: Boolean, rerootAtBoot: Boolean?): DfrAction? {
+        val result = KernelSuRuntime.unprivilegedShell(
+            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot),
+        ) ?: return null
+        val log = result.output
+        return DfrAction(result.exitCode == 0 && !log.contains(LAUNCH_FAILURE), log)
+    }
+
+    /**
+     * What the phone has installed as the helper, from Package Manager alone.
+     *
+     * No shell, which matters more than it looks: this is a question a boot can answer before anything on the
+     * device can run a command, and it is the one part of the boot decision that is about the phone rather
+     * than about this boot.
+     *
+     * The uid comes from the running package rather than from `pm list packages -U`, and the difference is
+     * not a preference: the list command is a shell tool, and this reading is deliberately shell-free. It is
+     * also not the trap the probe's own uid reading was - `applicationInfo.uid` *is* the package's identity,
+     * where the `dumpsys` line that misled it was a number inside a permission listing.
+     *
+     * [bundled] is the unpacked asset [DfrApk.bundled] wrote, or null when it could not be unpacked: with
+     * nothing to compare against, a helper that is installed as the system uid is reported as
+     * [DfrHelperStanding.System], because the standing the boot can act on is whether the exploit can run
+     * where it has to - and "this build's helper" is a claim this cannot make without the file.
+     */
+    internal fun helperStanding(context: Context, bundled: File?): DfrHelperStanding {
+        val info = runCatching {
+            context.packageManager.getPackageInfo(STAGE_TWO_PACKAGE, 0)
+        }.getOrNull() ?: return DfrHelperStanding.Missing
+        if (info.applicationInfo?.uid != SYSTEM_UID) return DfrHelperStanding.Ordinary
+        val bundledCode = bundled?.let { archiveVersion(context.packageManager, it.absolutePath) }
+        return if (bundledCode != null && info.longVersionCode != bundledCode) {
+            DfrHelperStanding.Stale
+        } else {
+            DfrHelperStanding.System
+        }
+    }
+
     /** Runs one of the actions above as root. */
     fun runAction(command: String): DfrAction? {
         val result = KernelSuRuntime.rootShell(command, TIMEOUT_SECONDS) ?: return null
@@ -595,6 +661,12 @@ internal object DfrInstall {
     private const val PROBE_TIMEOUT_SECONDS = 30L
 
     private const val FAILURE = "Failure"
+
+    /** The word `am` answers a start that did not happen with. */
+    private const val LAUNCH_FAILURE = "Error"
+
+    /** `android.uid.system`, which is what the helper's package runs as once the inject has been honoured. */
+    private const val SYSTEM_UID = 1000
 }
 
 /**

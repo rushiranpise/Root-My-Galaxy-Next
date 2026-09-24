@@ -57,6 +57,7 @@ object AppPreferences {
     private const val EXPLOIT_OVERRIDE_ATTEMPT_TIMEOUT = "exploit_override_attempt_timeout"
     private const val EXPLOIT_OVERRIDE_SLIDE_ROUTE = "exploit_override_slide_route"
     private const val AUTO_ROOT_SETTLE_SECONDS = "auto_root_settle_seconds"
+    private const val DFR_REROOT_AT_BOOT = "dfr_reroot_at_boot"
     private const val SHIZUKU_AUTOMATION_TOKEN = "shizuku_automation_token"
     private const val PARTITION_READ_ONLY_MODE = "partition_read_only_mode"
     private const val READ_ONLY_PROTECTED_BOOT = "partition_read_only_protected_boot"
@@ -367,6 +368,25 @@ object AppPreferences {
     fun setBootRootMode(context: Context, enabled: Boolean) {
         prefs(context).edit()
             .putBoolean(BOOT_ROOT_MODE, enabled)
+            .apply()
+    }
+
+    /**
+     * Whether a boot with no root should ask the stage-two helper to reroot.
+     *
+     * Off by default, and separate from [bootRootMode] rather than folded into it, because the two are
+     * different ways to gain root and only one of them is an install: root on boot loads the payload this
+     * app would load from the payload sheet, while this one starts the helper - which is the phone this
+     * setting exists for, where the KernelSU in the kernel comes from the exploit the helper runs. A
+     * device that wants both is a device that has to say so twice, which is honest: each is unattended
+     * behaviour with its own failure to report.
+     */
+    fun rerootAtBoot(context: Context): Boolean =
+        prefs(context).getBoolean(DFR_REROOT_AT_BOOT, false)
+
+    fun setRerootAtBoot(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(DFR_REROOT_AT_BOOT, enabled)
             .apply()
     }
 

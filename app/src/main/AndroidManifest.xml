@@ -86,6 +86,16 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
+        <!--
+          The reroot gate, in the same process as the install gate: both are started by the same boot
+          broadcast, both wait, and a process that outlives the app's own is what a boot path needs.
+        -->
+        <service
+            android:name=".DfrBootService"
+            android:exported="false"
+            android:process=":autoroot_gate"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
         <receiver
             android:name=".AutoRootBootReceiver"
             android:exported="false">
@@ -95,6 +105,9 @@
         </receiver>
         <receiver
             android:name=".AutoRootActionReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".DfrBootActionReceiver"
             android:exported="false" />
         <receiver
             android:name=".RunActionReceiver"
