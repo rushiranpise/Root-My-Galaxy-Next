@@ -52,6 +52,13 @@ import kotlinx.coroutines.withContext
  * phone, names the step it is on, and offers that step's action instead of describing the order and
  * leaving it to the user. The two reboots are the app's too, on the soft-reboot path it already uses.
  *
+ * **What it can still do with no root.** The readings and two of the actions here are commands the `shell`
+ * user holds by itself, so they are taken through Shizuku when KernelSU answers nothing - and that matters
+ * most on this screen of all of them, because the phone this flow produces has no root at all after a
+ * reboot, and opening the helper by hand is the one press that puts it back. The two writes are the ones
+ * that genuinely need root, and the inject and the key removal still refuse with a sentence rather than
+ * being retried somewhere they cannot land.
+ *
  * The step list is shown in full, because the value of this screen is knowing where you are: five of these
  * six steps fail in a way that looks like a different problem, and the one that fails silently - an app
  * installed under a shared user before its key was in the list - is indistinguishable from success
@@ -182,7 +189,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     }
 
     fun removeStageTwo() = act("remove stage two") {
-        val action = DfrInstall.runAction(DfrInstall.uninstallCommand())
+        // Through whichever shell this phone has, which on a boot with no root is Shizuku's: `pm uninstall`
+        // is a delete the shell user holds, and the helper being removed is often refused to an app that
+        // cannot escalate - so refusing this for want of root would be refusing it for a permission the
+        // command never needed.
+        val action = DfrInstall.uninstallStageTwo()
             ?: return@act context.getString(R.string.dfr_no_root)
         if (action.ok) AppPreferences.setDfrInstalledAt(context, null)
         action.log
@@ -192,8 +203,13 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // Rewritten on the way in as well as at the install: the helper keeps whatever it finds at that
         // path, so this call is what makes the daemon it uses the one for this boot - and for a phone
         // whose flavour was changed since the last run, this is the call that replaces the old one.
+        //
+        // Staged first even on a phone with no root, where it can only refuse: the refusal is a line in the
+        // log this action already shows, and skipping the step would leave the one thing the run needs
+        // unsaid. What matters is that the line under it is a launch rather than a second refusal - the
+        // helper is what puts root back, so on a boot that has none this press is the way out of it.
         val staged = stageDaemon()
-        val action = DfrInstall.runAction(DfrInstall.launchCommand())
+        val action = DfrInstall.launch()
             ?: return@act listOf(staged, context.getString(R.string.dfr_no_root)).joinToString("\n")
         listOf(staged, action.log).joinToString("\n")
     }
@@ -257,7 +273,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // [DfrCleanUpOutcome]. A half that did not land, including both halves on a phone with no root
         // shell, leaves its record, so the next reading of this screen shows that step rather than the
         // first one.
-        val helper = DfrInstall.runAction(DfrInstall.uninstallCommand())
+        // Through the shell the command belongs to, so the half of a clean-up that does not need root can
+        // land on a phone that has none: a phone that has not been rerooted yet can still have this app's
+        // helper taken off it. The key half below is the one that still refuses there, and its record is
+        // kept until it lands - see [DfrCleanUpOutcome].
+        val helper = DfrInstall.uninstallStageTwo()
         val removed = DfrInstall.run(context, DfrMode.Uninstall)
         val outcome = DfrCleanUpOutcome.of(removed, helper)
         if (outcome.keyGone) AppPreferences.setDfrInjectedAt(context, null)
@@ -632,7 +652,8 @@ private class DfrReading(
 )
 
 /**
- * Measures the phone and asks the flow what is next, or null when no root shell answered at all.
+ * Measures the phone and asks the flow what is next, or null when no shell answered at all - root or the
+ * plain one Shizuku offers, since every reading here is a thing the `shell` user may do itself.
  *
  * The probe and the inject check are separate commands because they are separate questions - one is
  * Package Manager's view of an installed app, the other is a parser's view of a file - and a device can

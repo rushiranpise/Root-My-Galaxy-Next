@@ -161,7 +161,7 @@ class DfrBootTest {
         // the reroot is decided at all rather than refused on a boot where Shizuku is not up yet. A shell
         // read here would turn a missing helper into "no shell", which is the wrong sentence and, worse,
         // the one the gate answers by waiting two minutes.
-        val body = functionBody(dfrInstallSource(), "internal fun helperStanding(")
+        val body = declaration(dfrInstallSource(), "internal fun helperStanding(")
         assertFalse("the standing is read through a shell", body.contains("unprivilegedShell"))
         assertFalse("the standing is read as root", body.contains("rootShell"))
         assertTrue("the standing is no longer read from Package Manager", body.contains("packageManager"))
@@ -169,7 +169,7 @@ class DfrBootTest {
 
     @Test
     fun `the launch at boot is the screen's own command through the plain shell`() {
-        val body = functionBody(dfrInstallSource(), "internal fun launchWithoutRoot(")
+        val body = declaration(dfrInstallSource(), "internal fun launchWithoutRoot(")
         assertTrue(
             "the boot rerun no longer sends the command the screen sends, so the two can drift apart",
             body.contains("launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot)"),
@@ -250,7 +250,7 @@ class DfrBootTest {
         // The `when` in the gate has no `else`, so a reason added to the vocabulary cannot reach a
         // notification with nothing to say. An `else` would compile just as well and say "Nothing to do in
         // this boot" about a boot that could not do anything - which is the confusion this refuses.
-        val body = functionBody(serviceSource(), "private fun reasonFor(")
+        val body = declaration(serviceSource(), "private fun reasonFor(")
         assertFalse(
             "a reason added later would be reported as \"nothing to do\", which reads as the boot working",
             body.contains("else ->"),
@@ -263,7 +263,10 @@ class DfrBootTest {
         // The reroot's attempt is its own token, and the reason is the install's claim: claiming that one is
         // what consumes an armed retry, so a boot that rerooted and also ate the retry the user armed for it
         // would have taken back a request it never honoured.
-        val body = functionBody(source("src/main/java/dev/busung/s25uroot/AutoRootSupport.kt"), "fun claimRerootAttempt(")
+        val body = declaration(
+            source("src/main/java/dev/busung/s25uroot/AutoRootSupport.kt"),
+            "fun claimRerootAttempt(",
+        )
         assertFalse("the reroot's claim spends the install's attempt", body.contains("LAST_ATTEMPT_TOKEN"))
         assertFalse("the reroot's claim touches the armed retry", body.contains("RETRY"))
         assertTrue("the reroot no longer keeps an attempt of its own", body.contains("LAST_REROOT_ATTEMPT_TOKEN"))
@@ -301,26 +304,30 @@ class DfrBootTest {
         ?: throw AssertionError("$relativeToApp was not found from ${File(".").absolutePath}")
 
     /**
-     * The text of one function, from its braces to the matching close.
+     * One declaration's own text: the function at [signature], up to the next thing declared beside it.
      *
      * Position assertions are what the rest of this file is made of, and they are only worth anything if the
      * text between them is the function: `indexOf` over the whole file happily finds a call in the wrong
      * function, which is exactly the mistake these guards exist to catch.
+     *
+     * The boundary is the next declaration at the *same indentation* rather than the function's closing
+     * brace, and the reason is a shape several of these have: an expression-bodied one-liner has no braces of
+     * its own, and a search for its first `{` would run on into the next function and assert about the wrong
+     * code while looking like it passed. It is not simply "the next line that is not indented further"
+     * either, because a signature wrapped over several lines ends with a line at the same indentation.
      */
-    private fun functionBody(source: String, signature: String): String {
+    private fun declaration(source: String, signature: String): String {
         val start = source.indexOf(signature)
-        assertTrue("$signature was not found", source.indices.contains(start))
-        val open = source.indexOf('{', start)
-        var depth = 0
-        for (index in open until source.length) {
-            when (source[index]) {
-                '{' -> depth++
-                '}' -> {
-                    depth--
-                    if (depth == 0) return source.substring(open, index + 1)
-                }
-            }
-        }
-        throw AssertionError("$signature has no body")
+        assertTrue("$signature was not found in the source", start >= 0)
+        val lineStart = source.lastIndexOf('\n', start).let { if (it < 0) 0 else it + 1 }
+        val indent = source.substring(lineStart, start).takeWhile { it == ' ' || it == '\t' }
+        val match = Regex(
+            "\n" + Regex.escape(indent) +
+                "(?:@|/\\*\\*|(?:internal |private |public )?(?:fun|val|var|const|object|class|enum|data) )",
+        ).find(source, start + signature.length) ?: throw AssertionError(
+            "no declaration follows $signature, so this slice would have run to the end of the file - and " +
+                "every assertion made about it could then pass by reading somebody else's code",
+        )
+        return source.substring(start, match.range.first)
     }
 }

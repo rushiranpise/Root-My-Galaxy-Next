@@ -28,7 +28,10 @@ import dev.busung.s25uroot.R
  *
  * The other limit is deliberate: [DfrStep.ReadState]. When no shell answered, nothing was observed, and
  * an app that guessed here would either offer an inject that refuses because the key is already there,
- * or hide a step that has not happened. So "could not read" is its own step, and it says so.
+ * or hide a step that has not happened. So "could not read" is its own step, and it says so - with one
+ * exception, made where the missing reading is not the deciding evidence: a helper the phone has already
+ * given the system's own uid is proof of what that reading is for, and a boot with no root is exactly the
+ * phone that cannot take it and exactly the phone that still has to be opened at that step.
  *
  * ## The one thing that is this app's own state
  *
@@ -286,7 +289,21 @@ internal object DfrFlow {
         // Armed is first because it is the only state that needs nothing: hooks in the kernel this boot
         // mean the flow already completed, whatever any file says about how it started.
         if (state.stageTwoArmed) return DfrStep.Ready
-        val injected = state.keyInjected ?: return DfrStep.ReadState
+        // The key could not be read, which is not a step in itself: parsing `packages.xml` needs a root
+        // shell, and the phone this flow is opened on most often after a reboot is one with no root at all.
+        // So the question the missing reading would have answered is asked of the evidence that is already
+        // here instead - and only where that evidence decides it. A helper installed as the shared user is
+        // proof this app's certificate was in the list when it was installed and that the phone rebooted
+        // after it, because Package Manager applies the shared user at install time and never revisits the
+        // decision; so the step that follows is to open the helper, or to restart into it, and nothing about
+        // the file can change that. Everywhere else the unreadable key is still [DfrStep.ReadState], because
+        // a phone with nothing under the shared user and no readable key is a phone this has no evidence
+        // about - and a screen that guessed there would offer an inject that refuses because it is done.
+        val injected = state.keyInjected ?: return when {
+            !state.stageTwoIsSystemUid -> DfrStep.ReadState
+            restartedSince(state.installedAtMillis, state) -> DfrStep.OpenStageTwo
+            else -> DfrStep.RebootAgain
+        }
         if (!injected) return DfrStep.Inject
         // A system uid is proof the reboot happened: Package Manager applies the shared user at install
         // time, and an install before the reboot could only have produced an ordinary app.

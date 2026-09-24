@@ -6,6 +6,7 @@ import android.os.SystemClock
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
+import dev.busung.s25uroot.ShizukuController
 import java.io.File
 
 /**
@@ -500,6 +501,18 @@ internal object DfrInstall {
         "/system/bin/pm uninstall --user 0 '" + packageName + "'"
 
     /**
+     * Removes the helper, on whichever shell this phone has.
+     *
+     * `pm uninstall` is a delete the `shell` user holds, which makes this the other half of the flow that
+     * survives a phone with no root - the one a setup is undone from before it has ever been rerooted. It is
+     * deliberately **not** the whole clean-up: taking this app's certificate back out of `packages.xml` is a
+     * write only root can make, so that half still refuses, and the screen's clean-up keeps its record until
+     * it lands - see [DfrCleanUpOutcome].
+     */
+    internal fun uninstallStageTwo(): DfrAction? =
+        verdictFor(runOnEitherShell(uninstallCommand(), TIMEOUT_SECONDS), FAILURE)
+
+    /**
      * Starts the stage two's own screen, where the run button is - or, with [autorun], starts the run.
      *
      * [rerootAtBoot] is passed only when this app has a value to give, so that the helper can tell "the
@@ -568,11 +581,17 @@ internal object DfrInstall {
         packageManager.getPackageArchiveInfo(apkPath, 0)?.longVersionCode
     }.getOrNull()
 
-    /** Reads the three facts, or null when no root shell answered. */
-    fun probe(): DfrProbe? {
-        val result = KernelSuRuntime.rootShell(probeCommand(), PROBE_TIMEOUT_SECONDS) ?: return null
-        return DfrProbe.parse(result.output)
-    }
+    /**
+     * Reads the three facts, on whichever shell this phone has.
+     *
+     * Root first and Shizuku's plain shell when root does not answer, and that fallback is the difference
+     * between a screen that reports and a screen that says it could not look: every part of [probeCommand]
+     * is something the `shell` user may do itself, and the phone this flow is opened on most often is one
+     * that has just rebooted with no root at all - the state the whole system-uid setup exists to be woken
+     * out of. Null only when neither shell answered, which is still the one case the flow will not guess
+     * about.
+     */
+    fun probe(): DfrProbe? = probeOf(runOnEitherShell(probeCommand(), PROBE_TIMEOUT_SECONDS))
 
     /**
      * The same reading through the plain Shizuku shell, which is the only one a boot with no root has.
@@ -585,11 +604,13 @@ internal object DfrInstall {
      *
      * Null when Shizuku is not usable, and null is not "not armed": a boot that could not ask has spent
      * nothing, and [dfrBootDecision] answers it with its own reason instead of a guess.
+     *
+     * A boot is given this reading rather than [probe]'s fallback, and the difference is what the root half
+     * of that fallback can do on a boot: a `su` that exists but is waiting on a grant prompt nobody is at
+     * the screen to answer, with [PROBE_TIMEOUT_SECONDS] of waiting in front of it. A screen can afford to
+     * find out that it has no root; a boot that is deciding whether to spend its one attempt cannot.
      */
-    fun probeWithoutRoot(): DfrProbe? {
-        val result = KernelSuRuntime.unprivilegedShell(probeCommand()) ?: return null
-        return DfrProbe.parse(result.output)
-    }
+    fun probeWithoutRoot(): DfrProbe? = probeOf(KernelSuRuntime.unprivilegedShell(probeCommand()))
 
     /**
      * Starts the helper's own run through the plain Shizuku shell, with no screen and nobody watching.
@@ -602,13 +623,25 @@ internal object DfrInstall {
      * some builds while saying so on its first line, and a run that was never started being read as started
      * is exactly the failure the notification must not report.
      */
-    internal fun launchWithoutRoot(autorun: Boolean, rerootAtBoot: Boolean?): DfrAction? {
-        val result = KernelSuRuntime.unprivilegedShell(
-            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot),
-        ) ?: return null
-        val log = result.output
-        return DfrAction(result.exitCode == 0 && !log.contains(LAUNCH_FAILURE), log)
-    }
+    internal fun launchWithoutRoot(autorun: Boolean, rerootAtBoot: Boolean?): DfrAction? = verdictFor(
+        KernelSuRuntime.unprivilegedShell(launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot)),
+        LAUNCH_FAILURE,
+    )
+
+    /**
+     * Starts the helper's own screen - or, with [autorun], its run - on whichever shell this phone has.
+     *
+     * The same command as [launchWithoutRoot] through the same fallback [probe] describes, and the reason a
+     * screen gets the fallback is what opening the helper is *for* on a phone with no root: the helper is
+     * the thing that puts root back, so "start it by hand from the app" is the one action the flow can still
+     * take on a boot that has none. `am start` is a thing the `shell` user may do itself, so this is not a
+     * refusal waiting to happen - the extra round trip through the root half is only what keeps a rooted
+     * phone off Shizuku entirely.
+     */
+    internal fun launch(autorun: Boolean = false, rerootAtBoot: Boolean? = null): DfrAction? = verdictFor(
+        runOnEitherShell(launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot), TIMEOUT_SECONDS),
+        LAUNCH_FAILURE,
+    )
 
     /**
      * What the phone has installed as the helper, from Package Manager alone.
@@ -640,15 +673,48 @@ internal object DfrInstall {
         }
     }
 
-    /** Runs one of the actions above as root. */
-    fun runAction(command: String): DfrAction? {
-        val result = KernelSuRuntime.rootShell(command, TIMEOUT_SECONDS) ?: return null
-        val log = result.output
-        // `pm` answers with a line that begins with Success or Failure; am answers with an Error or a
-        // Starting line. Both are reported as text, and the verdict is the one word they use.
-        val ok = result.exitCode == 0 && !log.contains(FAILURE)
-        return DfrAction(ok, log)
-    }
+    /**
+     * Runs one of the actions above as root, which is what the ones that write need.
+     *
+     * `pm install` is the only caller left, and it is left here on purpose rather than by omission: whether
+     * the `shell` user may put an APK that declares the system's own shared user onto this phone has not
+     * been measured, and a wrong answer is worse than a refusal - an install that lands as an ordinary app
+     * is the exact state [DfrStep.RemoveStageTwo] exists to undo. See [uninstallStageTwo] and [launch] for
+     * the two commands that are the shell's own.
+     */
+    fun runAction(command: String): DfrAction? =
+        verdictFor(KernelSuRuntime.rootShell(command, TIMEOUT_SECONDS), FAILURE)
+
+    /**
+     * A command the `shell` user may run itself, on whichever shell this phone has.
+     *
+     * Root first, and Shizuku's plain shell when root did not answer - the chain this app uses wherever the
+     * command is one the shell user holds, and what makes the system-uid flow readable and drivable on a
+     * phone that has rebooted into no root: `pm list packages`, one `test -e`, `am start` and `pm uninstall`
+     * are all the shell user's own, and root is only ever the *cheaper* of the two here, because it needs
+     * nothing else running.
+     *
+     * The two readings the boot gate makes - [probeWithoutRoot] and [launchWithoutRoot] - deliberately do not
+     * come through here: see [probeWithoutRoot] for the `su` a boot must not wait on.
+     */
+    private fun runOnEitherShell(command: String, timeoutSeconds: Long): ShizukuController.ShellResult? =
+        KernelSuRuntime.rootShell(command, timeoutSeconds) ?: KernelSuRuntime.unprivilegedShell(command)
+
+    /** A probe from whatever a shell answered, or null when no shell did. */
+    private fun probeOf(result: ShizukuController.ShellResult?): DfrProbe? =
+        result?.let { DfrProbe.parse(it.output) }
+
+    /**
+     * The verdict for a shell command, from the word the tool refuses with.
+     *
+     * The word is the caller's rather than one word for both tools: `pm` answers with Success or Failure
+     * while `am` answers with a Starting line or an Error, and neither word means anything to the other. The
+     * exit code is required as well as the word, because both tools have printed their own refusal and
+     * exited zero on some builds - and a command that never ran being read as one that did is the failure
+     * this whole reading exists to catch.
+     */
+    private fun verdictFor(result: ShizukuController.ShellResult?, refusal: String): DfrAction? =
+        result?.let { DfrAction(it.exitCode == 0 && !it.output.contains(refusal), it.output) }
 
     /**
      * Longer than the app's usual shell window: this process builds a framework context and parses a

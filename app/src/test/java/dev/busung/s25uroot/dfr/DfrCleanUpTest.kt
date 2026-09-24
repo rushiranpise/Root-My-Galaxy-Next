@@ -172,7 +172,7 @@ class DfrCleanUpTest {
         val start = source.indexOf("fun cleanUp()")
         assertTrue("no `fun cleanUp()` in the screen's source", start >= 0)
         val body = source.substring(start)
-        val helper = body.indexOf("DfrInstall.runAction(DfrInstall.uninstallCommand())")
+        val helper = body.indexOf("DfrInstall.uninstallStageTwo()")
         val key = body.indexOf("DfrInstall.run(context, DfrMode.Uninstall)")
         assertTrue("the clean-up does not uninstall the helper", helper >= 0)
         assertTrue("the clean-up does not remove the key", key >= 0)

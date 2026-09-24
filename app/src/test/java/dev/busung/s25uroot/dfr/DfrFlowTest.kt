@@ -302,6 +302,76 @@ class DfrFlowTest {
     }
 
     @Test
+    fun `a phone with no root and a helper under the shared user is opened rather than sent to read again`() {
+        // The boot this flow is opened on most often: no root at all, so `packages.xml` cannot be parsed and
+        // the key reading comes back null. The helper's own uid is the evidence that outranks it - Package
+        // Manager gives a package the shared user at install time and never revisits it, so a system uid
+        // could not have been reached before this app's certificate was in the list or before the reboot the
+        // list is read at. Read first, this phone was sent to a "read again" that can never answer, because
+        // the reading it waits for is the one a phone with no root cannot take.
+        assertEquals(
+            DfrStep.OpenStageTwo,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = null,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 10 * 60 * 1000L,
+                    frameworkUptimeMillis = 60 * 1000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `the missing key reading still stops the flow where nothing else is evidence`() {
+        // The exception is the system uid and nothing wider: an ordinary install, or no install at all,
+        // leaves the flow with no evidence about the file, and guessing there is what the step exists for.
+        assertEquals(
+            DfrStep.ReadState,
+            DfrFlow.next(fresh(keyInjected = null, stageTwoInstalled = true)),
+        )
+        assertEquals(DfrStep.ReadState, DfrFlow.next(fresh(keyInjected = null)))
+    }
+
+    @Test
+    fun `an unreadable key does not stand in for the restart either`() {
+        // A system-uid helper installed inside the running framework is still waiting for the restart the
+        // install depends on, and the key being unreadable says nothing about that. Restarting is the safe
+        // answer: it costs a minute, and the alternative is opening a helper Package Manager has not yet
+        // been told about.
+        assertEquals(
+            DfrStep.RebootAgain,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = null,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 10 * 60 * 1000L,
+                    frameworkUptimeMillis = 60 * 60 * 1000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `a key that could be read is not second-guessed`() {
+        // The exception is the *unreadable* key and only that one: a file that was parsed and has no such
+        // certificate is still an inject, however convincing the helper's uid looks.
+        assertEquals(
+            DfrStep.Inject,
+            DfrFlow.next(
+                fresh(
+                    keyInjected = false,
+                    stageTwoInstalled = true,
+                    stageTwoIsSystemUid = true,
+                    installedAtMillis = now - 10 * 60 * 1000L,
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun `an inject with no reboot after it asks for the reboot`() {
         val state = fresh(keyInjected = true, injectedAtMillis = now - 60_000)
         // Up for four hours and injected a minute ago: the phone has not restarted since.
