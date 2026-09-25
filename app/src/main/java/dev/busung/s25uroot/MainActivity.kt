@@ -1201,13 +1201,6 @@ private fun RootApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // The manager this app would install for the payload's flavour, and whether one is already there.
-    // Nothing here installs it: a run does that itself when there is none, so this reading is only what
-    // the confirmation dialog says about the phone before the run is handed it.
-    val managerInstalled = remember(kernelsuFlavor, resumeTick) {
-        KernelSuManager.installedFor(context, kernelsuFlavor)
-    }
-
     if (showInstallConfirmation) {
         AlertDialog(
             onDismissRequest = { showInstallConfirmation = false },
@@ -1218,21 +1211,12 @@ private fun RootApp(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Nothing is said about the manager, in either state. The run installs the
+                    // flavour's manager itself when the phone has none, so this dialog could only state
+                    // that fact twice: once as an offer, which is the run's step and not the dialog's,
+                    // and once as a reading, which the home card already carries for the payload the
+                    // person just picked.
                     Text(stringResource(R.string.install_confirm_body))
-                    // What the run will do about the manager before it does anything else, said here rather
-                    // than discovered mid-run: a run installs the flavour's manager when there is none, and
-                    // that can be a download plus a tap on the phone's installer. Nothing is offered for it
-                    // here: the run performs that install, so an offer beside this text would only be the
-                    // same install asked for a second time.
-                    Text(
-                        text = if (managerInstalled == null) {
-                            stringResource(R.string.install_confirm_manager, kernelsuFlavor.label)
-                        } else {
-                            stringResource(R.string.install_confirm_manager_ready, kernelsuFlavor.label)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             },
             confirmButton = {

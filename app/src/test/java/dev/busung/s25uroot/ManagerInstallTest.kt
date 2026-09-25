@@ -168,11 +168,12 @@ class ManagerInstallTest {
     }
 
     @Test
-    fun `the sheet that starts a run says what the run will do about the manager, and installs nothing`() {
-        // The sheet used to carry its own offer to install the manager. A run installs that manager itself
-        // before it does anything else, so the offer was the same install asked for a second time - and it
-        // was asked for before the run had said what it was going to do, which is the one place this is
-        // decided. The sheet states the state; the run acts on it.
+    fun `the sheet that starts a run installs nothing and says nothing about the manager`() {
+        // The sheet used to offer the manager install and to state which of the two states the phone was
+        // in. A run installs that manager itself before it does anything else, so both were the same fact
+        // said a second time: the offer was the run's own step asked for early, and the reading is what the
+        // home card already carries for the payload the person just picked. The sheet asks whether to
+        // start; everything about the manager belongs to the run that follows.
         val activity = appSource()
         assertTrue(
             "the sheet offers to install the manager again, so a phone with none is asked the same question " +
@@ -184,10 +185,9 @@ class ManagerInstallTest {
             !activity.contains("ManagerInstall.install("),
         )
         assertTrue(
-            "the sheet no longer says which of the two states the phone is in, so a run that will stop to " +
-                "install an app would look like any other",
-            activity.contains("R.string.install_confirm_manager,") &&
-                activity.contains("R.string.install_confirm_manager_ready,"),
+            "the sheet names one of the manager states again, so the dialog repeats a reading the home " +
+                "card already carries - and would be the one to go stale if the run decided differently",
+            !activity.contains("R.string.install_confirm_manager"),
         )
     }
 
