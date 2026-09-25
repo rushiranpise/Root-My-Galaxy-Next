@@ -101,6 +101,8 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Difference
+import androidx.compose.material.icons.rounded.MenuBook
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Folder
@@ -210,6 +212,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -297,6 +300,7 @@ class MainActivity : ComponentActivity() {
     private var exploitOverride by mutableStateOf(ExploitOverride.defaults())
     private var shizukuToken by mutableStateOf("")
     private var partitionReadOnly by mutableStateOf(false)
+    private var screenOffDuringRun by mutableStateOf(true)
     private var payloadMode by mutableStateOf(PayloadMode.Online)
     private var notificationPermissionAsked = false
     private var batteryUnrestricted by mutableStateOf(false)
@@ -393,6 +397,7 @@ class MainActivity : ComponentActivity() {
         exploitOverride = AppPreferences.exploitOverride(this)
         shizukuToken = AppPreferences.shizukuAutomationToken(this)
         partitionReadOnly = AppPreferences.partitionReadOnlyMode(this)
+        screenOffDuringRun = AppPreferences.screenOffDuringRun(this)
         payloadMode = AppPreferences.payloadMode(this)
         settingsTarget = SettingsTarget.named(intent?.getStringExtra(SettingsTarget.EXTRA))
         openedRunId = intent?.getStringExtra(EXTRA_RUN_ID)
@@ -422,6 +427,7 @@ class MainActivity : ComponentActivity() {
                     exploitOverride = exploitOverride,
                     shizukuToken = shizukuToken,
                     partitionReadOnly = partitionReadOnly,
+                    screenOffDuringRun = screenOffDuringRun,
                     payloadMode = payloadMode,
                     batteryUnrestricted = batteryUnrestricted,
                     onStartArmedRetry = ::startArmedRetry,
@@ -515,6 +521,10 @@ class MainActivity : ComponentActivity() {
                     onPartitionReadOnlyChanged = { enabled ->
                         AppPreferences.setPartitionReadOnlyMode(this, enabled)
                         partitionReadOnly = enabled
+                    },
+                    onScreenOffDuringRunChanged = { enabled ->
+                        AppPreferences.setScreenOffDuringRun(this, enabled)
+                        screenOffDuringRun = enabled
                     },
                     onPayloadModeChanged = { mode ->
                         AppPreferences.setPayloadMode(this, mode)
@@ -752,6 +762,7 @@ private fun RootApp(
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
     partitionReadOnly: Boolean,
+    screenOffDuringRun: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
     onStartArmedRetry: () -> Unit,
@@ -773,6 +784,7 @@ private fun RootApp(
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
+    onScreenOffDuringRunChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
     /** The flavour of the payload that has just become the one a run would use. */
@@ -1382,6 +1394,7 @@ private fun RootApp(
                             exploitOverride = exploitOverride,
                             shizukuToken = shizukuToken,
                             partitionReadOnly = partitionReadOnly,
+                            screenOffDuringRun = screenOffDuringRun,
                             payloadMode = payloadMode,
                             batteryUnrestricted = batteryUnrestricted,
                             resumeTick = resumeTick,
@@ -1402,6 +1415,7 @@ private fun RootApp(
                             onExploitOverrideChanged = onExploitOverrideChanged,
                             onShizukuTokenChanged = onShizukuTokenChanged,
                             onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
+                            onScreenOffDuringRunChanged = onScreenOffDuringRunChanged,
                             onPayloadModeChanged = onPayloadModeChanged,
                             onForgetCachedPayload = onForgetCachedPayload,
                             onRequestNotificationPermission = requestNotificationPermission,
@@ -1649,6 +1663,11 @@ private fun OverviewPage(
     // Reachable from here as well as from Settings: the version and the links are what a reader wants
     // after a run, which is the one thing this screen is about.
     var showAbout by remember { mutableStateOf(false) }
+    var showFaq by remember { mutableStateOf(false) }
+    // Read once, at the first composition of this page, because that is the moment a launch begins: the
+    // guide is for the phone that has never been through it, and it is stored rather than derived so a
+    // re-read from Home cannot bring it back on its own.
+    var showGuide by remember { mutableStateOf(!AppPreferences.guideAccepted(context)) }
     // A report is two dozen readings and a log file, so the row says it is working rather than looking
     // like a tap that did nothing.
     LaunchedEffect(installState.phase, resumeTick) {
@@ -1803,6 +1822,18 @@ private fun OverviewPage(
                     },
                 )
                 HomeLinkRow(
+                    icon = Icons.Rounded.MenuBook,
+                    title = stringResource(R.string.guide_reread),
+                    position = SettingsCardPosition.Middle,
+                    onClick = { showGuide = true },
+                )
+                HomeLinkRow(
+                    icon = Icons.Rounded.QuestionAnswer,
+                    title = stringResource(R.string.faq_title),
+                    position = SettingsCardPosition.Middle,
+                    onClick = { showFaq = true },
+                )
+                HomeLinkRow(
                     icon = Icons.Rounded.Info,
                     title = stringResource(R.string.about),
                     position = SettingsCardPosition.Bottom,
@@ -1813,6 +1844,20 @@ private fun OverviewPage(
     }
     if (showAbout) {
         AboutDialog(onDismiss = { showAbout = false })
+    }
+    if (showFaq) {
+        FaqDialog(onDismiss = { showFaq = false })
+    }
+    if (showGuide) {
+        GuideDialog(
+            onFinish = {
+                AppPreferences.setGuideAccepted(context, true)
+                showGuide = false
+            },
+            // A guide opened from Home is not a first launch: it already happened, and the notification
+            // is asked for by the step it has rather than again here.
+            alreadyAccepted = AppPreferences.guideAccepted(context),
+        )
     }
 }
 
@@ -3693,6 +3738,7 @@ private fun SettingsPage(
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
     partitionReadOnly: Boolean,
+    screenOffDuringRun: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
     /**
@@ -3721,6 +3767,7 @@ private fun SettingsPage(
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
+    onScreenOffDuringRunChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -4539,6 +4586,19 @@ private fun SettingsPage(
                         },
                     )
                 }
+                SettingsSwitchCard(
+                    // A moon, which is what the row is about rather than a picture of the setting: the
+                    // screen is out for the run and the result arrives somewhere else.
+                    icon = Icons.Rounded.DarkMode,
+                    title = stringResource(R.string.settings_screen_off_during_run),
+                    description = stringResource(R.string.settings_screen_off_during_run_summary),
+                    checked = screenOffDuringRun,
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = {
+                        clickHaptic(view)
+                        onScreenOffDuringRunChanged(it)
+                    },
+                )
                 SettingsCard(
                     modifier = Modifier.onGloballyPositioned { coordinates ->
                         bootSettleMenuTop = with(density) { coordinates.positionInWindow().y.toDp() }
@@ -8984,6 +9044,172 @@ private fun ThemeModeSelector(
             }
         }
     }
+}
+
+/** One question and its answer, in the order they are read. */
+private data class FaqEntry(@StringRes val question: Int, @StringRes val answer: Int)
+
+/**
+ * The questions this app is asked, and the answers, in the order a reader meets them.
+ *
+ * Pairs rather than a page of prose, because somebody opens this holding one of them and the answer to
+ * that one is the whole of what they need - and because a FAQ written as paragraphs is one nobody reads
+ * to the end of.
+ */
+private val faqEntries = listOf(
+    FaqEntry(R.string.faq_keep_q, R.string.faq_keep_a),
+    FaqEntry(R.string.faq_again_q, R.string.faq_again_a),
+    FaqEntry(R.string.faq_fails_q, R.string.faq_fails_a),
+    FaqEntry(R.string.faq_screen_q, R.string.faq_screen_a),
+    FaqEntry(R.string.faq_helper_q, R.string.faq_helper_a),
+    FaqEntry(R.string.faq_after_q, R.string.faq_after_a),
+    FaqEntry(R.string.faq_undo_q, R.string.faq_undo_a),
+    FaqEntry(R.string.faq_which_q, R.string.faq_which_a),
+    FaqEntry(R.string.faq_shell_q, R.string.faq_shell_a),
+)
+
+/**
+ * The questions, in the shade, over whatever screen asked for them.
+ *
+ * Scrolled rather than shortened: the list is short on purpose and the answers are sentences, but a
+ * dialog whose content can outgrow it would push its own Close button off the screen - and the answers
+ * are worth more than the button is.
+ */
+@Composable
+private fun FaqDialog(onDismiss: () -> Unit) {
+    val view = LocalView.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            DialogDimAmount(0.34f)
+            Text(stringResource(R.string.faq_title))
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                faqEntries.forEach { entry ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(stringResource(entry.question), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            stringResource(entry.answer),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
+        },
+    )
+}
+
+/**
+ * The guide, and the one thing it asks for after saying what the app does.
+ *
+ * Two steps in one dialog rather than a flow of its own: what it is for is a first launch that cannot
+ * follow the app's steps until it has been read, and a page of a flow would need the flow - a position, a
+ * back behaviour, a way back into it - for text that is read once. The second step is the notification,
+ * and it is second because the first is what says why the notification matters: a run turns the screen
+ * off, so how it went arrives there rather than on a screen nobody is looking at.
+ *
+ * Not dismissable from outside or by Back on a first launch, where [alreadyAccepted] is false: the flow
+ * behind it is a sequence with two restarts in it, and somebody who skipped the one thing that says so
+ * would be following it blind. Opened again from Home it is a page of prose, and closes like one.
+ */
+@Composable
+private fun GuideDialog(onFinish: () -> Unit, alreadyAccepted: Boolean) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val needsNotification = Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
+    var step by remember { mutableStateOf(0) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { onFinish() }
+    AlertDialog(
+        onDismissRequest = { if (alreadyAccepted) onFinish() },
+        properties = DialogProperties(
+            dismissOnBackPress = alreadyAccepted,
+            dismissOnClickOutside = alreadyAccepted,
+        ),
+        title = {
+            DialogDimAmount(0.34f)
+            Text(
+                stringResource(
+                    if (step == 0) R.string.guide_title else R.string.guide_notifications_title,
+                ),
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (step == 0) {
+                    listOf(
+                        R.string.guide_what,
+                        R.string.guide_helper,
+                        R.string.guide_permanent,
+                        R.string.guide_boot,
+                        R.string.guide_screen,
+                        R.string.guide_manager,
+                    ).forEach { line -> Text(stringResource(line)) }
+                } else {
+                    Text(stringResource(R.string.guide_notifications_body))
+                }
+            }
+        },
+        confirmButton = {
+            if (step == 0) {
+                AppDialogActions(
+                    listOf(
+                        AppAction(
+                            if (alreadyAccepted) R.string.action_close else R.string.guide_accept,
+                            AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            when {
+                                // A re-read is not a first launch: it closes, and does not push the
+                                // notification step at somebody who has already answered for it.
+                                alreadyAccepted -> onFinish()
+                                needsNotification -> step = 1
+                                else -> onFinish()
+                            }
+                        },
+                    ),
+                )
+            } else {
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.guide_notifications_allow, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        },
+                        AppAction(R.string.guide_notifications_later, AppActionRole.Standard) {
+                            clickHaptic(view)
+                            onFinish()
+                        },
+                    ),
+                )
+            }
+        },
+    )
 }
 
 @Composable

@@ -381,6 +381,47 @@
     <string name="action_copy_log">Copy log</string>
     <string name="log_copied">Log copied</string>
     <string name="about">About</string>
+    <!--
+      The guide, and the two steps it is: what this app does, then the notification it needs. Six short
+      statements rather than the paragraphs this could be, because it is read once, on a phone, by
+      somebody who wants to get on with it - and because each one is a thing they may act on later.
+    -->
+    <string name="guide_title">Read this first</string>
+    <string name="guide_what">This app uses a bug in the kernel to load KernelSU. It is temporary: a restart puts the phone back the way it was.</string>
+    <string name="guide_helper">It installs a small helper app as a system app, and that helper is what does the work. Home says which step the phone is on, one step at a time.</string>
+    <string name="guide_permanent">Nothing here is permanent. No bootloader is unlocked and nothing is re-signed, and the helper and this app\'s key come off again in the System UID section.</string>
+    <string name="guide_boot">Root lasts one boot. After a restart, run it again to load KernelSU.</string>
+    <string name="guide_screen">A run turns the screen off, because the display waking up is what most often kills the exploit. The result comes to the notification.</string>
+    <string name="guide_manager">KernelSU\'s manager is for approving apps. Anything it offers to install permanently is not what this app does.</string>
+    <string name="guide_accept">I understand</string>
+    <string name="guide_notifications_title">Allow notifications</string>
+    <string name="guide_notifications_body">A run turns the screen off and keeps its log in the app, so the notification is where you see how it went.</string>
+    <string name="guide_notifications_allow">Allow notifications</string>
+    <string name="guide_notifications_later">Not now</string>
+    <string name="guide_reread">Read the guide again</string>
+    <!--
+      The questions this app is actually asked, one pair each. Short answers, because somebody who opens
+      this has one of them and the answer to that one is the whole of what they need.
+    -->
+    <string name="faq_title">Questions people ask</string>
+    <string name="faq_keep_q">Does this change the phone for good?</string>
+    <string name="faq_keep_a">No. Root lasts until the next restart, and nothing on the phone is re-signed or unlocked.</string>
+    <string name="faq_again_q">Do I have to do it again after a restart?</string>
+    <string name="faq_again_a">Yes. KernelSU is loaded into the kernel afresh every boot, so run it again to get root back.</string>
+    <string name="faq_fails_q">Why does a run fail sometimes?</string>
+    <string name="faq_fails_a">The exploit races the kernel, so it does not always win. Try again, and restart the phone first if several runs in a row fail.</string>
+    <string name="faq_screen_q">Why did the screen go off?</string>
+    <string name="faq_screen_a">A run turns the screen off so nothing else wakes the phone up while the exploit runs. The result comes to the notification.</string>
+    <string name="faq_helper_q">Why was a second app installed?</string>
+    <string name="faq_helper_a">That is the helper, and it is the app that does the work as the phone\'s own system user. Removing it undoes the install.</string>
+    <string name="faq_after_q">What should I do once root works?</string>
+    <string name="faq_after_a">Open the KernelSU manager and approve the apps you want root for. Restart the phone when you are done.</string>
+    <string name="faq_undo_q">How do I undo all of it?</string>
+    <string name="faq_undo_a">Clean up in the System UID section removes the helper and this app\'s key. A restart clears the rest.</string>
+    <string name="faq_which_q">Which phones does this work on?</string>
+    <string name="faq_which_a">The ones the payload repository lists for this exact model and kernel. The app refuses anything else.</string>
+    <string name="faq_shell_q">Do I need Shizuku?</string>
+    <string name="faq_shell_a">Some steps need a shell on the phone, and Shizuku is one way to get one. The app can also pair with the phone\'s own wireless debugging.</string>
     <string name="about_title">About Root My Galaxy Next</string>
     <string name="about_description">Information about Root My Galaxy Next</string>
     <string name="about_body">Root supported Samsung Galaxy phones using a kernel exploit.</string>
@@ -587,6 +628,14 @@
     <string name="disable_ksu_modules">Disable KernelSU modules</string>
     <string name="disable_ksu_modules_description">Temporarily disable modules while KernelSU loads</string>
     <string name="disable_ksu_modules_needs_load">Only applies when KernelSU is loaded</string>
+    <string name="settings_screen_off_during_run">Turn the screen off during a run</string>
+    <string name="settings_screen_off_during_run_summary">A run turns the screen off before it starts, and the result comes to the notification.</string>
+    <string name="log_screen_off_for_the_run">Screen off for the run. Press power to look, or wait for the notification.</string>
+    <string name="log_screen_off_already_out">The screen was already off, so this run left it that way.</string>
+    <string name="log_screen_off_no_shell">This run has no shell, so it cannot press the power key; the screen stays on.</string>
+    <string name="log_screen_off_failed">The screen could not be turned off; the run carries on with it on.</string>
+    <string name="log_screen_on_again">Screen back on.</string>
+    <string name="log_screen_still_off">The screen is still off. Press power to wake it.</string>
     <string name="partition_read_only">Protect system partitions</string>
     <!--
         What a failure this protection caused says. The switch is named from its own label rather than

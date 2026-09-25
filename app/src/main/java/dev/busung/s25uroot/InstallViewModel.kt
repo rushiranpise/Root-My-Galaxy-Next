@@ -2,6 +2,7 @@ package dev.busung.s25uroot
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -249,6 +250,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     /** Which transport this run's payload goes through, frozen when the run starts. */
     @Volatile
     private var activeRunTransport: RunTransport? = null
+
+    /**
+     * Whether this run put the screen out, so that exactly one wake is asked for at its end.
+     *
+     * Volatile because the press happens on the transport's own thread while the wake is read here, where
+     * the run ends: the two are one fact, and a stale read would either leave the screen dark or press a
+     * key nobody asked for.
+     */
+    @Volatile
+    private var screenWasPutOut = false
 
     /**
      * The ceilings this run is being held to, resolved when it started.
@@ -1186,6 +1197,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                 }
+                // Last, and in its own time: the record is written and the result is in the shade by the
+                // time this starts, so the screen coming back is not part of any of it.
+                wakeTheScreenAgain()
             }
         }
     }
@@ -1307,6 +1321,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
+        // Before the payload starts, which is before the race it is entering: the display waking up again is
+        // the largest thing on this phone that can reach a worklist while the exploit holds a kernel page it
+        // has already freed. See [RunScreenOff].
+        putTheScreenOut(
+            press = if (shizuku) {
+                {
+                    ShizukuController.shell(
+                        RunScreenOff.POWER_KEY_COMMAND,
+                        RunScreenOff.POWER_KEY_TIMEOUT_MILLIS,
+                    )?.exitCode
+                }
+            } else {
+                null
+            },
+        )
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
             ShizukuController.exec(
@@ -1447,6 +1476,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     throw IllegalStateException(app.getString(R.string.error_local_adb_shell, reason))
                 }
                 appendLog(app.getString(R.string.log_local_adb_shell_ready))
+                // Through the session this run is already holding rather than a second one: the key is one
+                // command, and the window in which wireless debugging is on is the expensive part.
+                putTheScreenOut(press = { session.shell(RunScreenOff.POWER_KEY_COMMAND).exitCode })
                 session.push(helper, ADB_HELPER_PATH, executable = true)
                 session.push(payload, ADB_PAYLOAD_PATH)
                 // Ahead of the payload for the same reason as the Shizuku route: the load happens
@@ -1800,6 +1832,82 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // boot is a different process from this run, and without this it could only guess whether the
         // wall it just hit was this app's.
         AppPreferences.setReadOnlyProtectedDevices(app, kernelBootToken(), count)
+    }
+
+    /**
+     * Puts the screen out for the exploit, when the settings ask for it and this run can press the key.
+     *
+     * [press] is the way this run can press it - Shizuku's shell, or the ADB session the local run already
+     * has open - and it is the caller's because the two run paths have nothing in common but the key they
+     * send. Null is a run going the app's own way, which has no shell at all: sending an input event is the
+     * system's to allow, so a run in the app's own domain keeps its screen and the log says so rather than
+     * the setting quietly doing nothing.
+     *
+     * Never for an unattended run: nobody asked for the phone to be dark, and the boot this gate runs in
+     * may well have left the screen out already.
+     */
+    private suspend fun putTheScreenOut(press: (() -> Int?)?) {
+        if (runIsUnattended || !AppPreferences.screenOffDuringRun(app)) return
+        when (RunScreenOff.decision(interactive = screenIsInteractive(), canPress = press != null)) {
+            RunScreenOff.Decision.NoShell -> appendLog(app.getString(R.string.log_screen_off_no_shell))
+            RunScreenOff.Decision.AlreadyOut ->
+                appendLog(app.getString(R.string.log_screen_off_already_out))
+
+            RunScreenOff.Decision.Press -> {
+                // Off the run's own dispatcher, because the transport behind this is a socket or a binder
+                // and the run itself is driven from the main one.
+                val exitCode = runCatching { withContext(Dispatchers.IO) { press?.invoke() } }.getOrNull()
+                if (exitCode == 0) {
+                    screenWasPutOut = true
+                    appendLog(app.getString(R.string.log_screen_off_for_the_run))
+                } else {
+                    appendLog(app.getString(R.string.log_screen_off_failed))
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether the screen is on, which is what makes each press of the power key mean one thing.
+     *
+     * True when it cannot be read, because that is the answer that presses the key the run asked for: a
+     * screen state this could not read is one it cannot decide for, and the setting was a decision already
+     * made.
+     */
+    private fun screenIsInteractive(): Boolean =
+        runCatching { app.getSystemService(PowerManager::class.java)?.isInteractive == true }
+            .getOrDefault(true)
+
+    /**
+     * Brings the screen back after a run that put it out, in a coroutine of its own.
+     *
+     * Its own coroutine because none of this belongs to the run's completion: the record is written and the
+     * notification posted before this starts, and a transport that has to be opened again must not hold up
+     * the screen that says the run is over - nor throw where the run's own ending is unwinding. KernelSU
+     * first and Shizuku second, because a run that has just loaded KernelSU has the cheaper of the two.
+     */
+    private fun wakeTheScreenAgain() {
+        if (!screenWasPutOut) return
+        screenWasPutOut = false
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!RunScreenOff.shouldWake(interactive = screenIsInteractive())) {
+                // Somebody looked at the phone while the run finished, so there is nothing to wake - and a
+                // press now would put it out again.
+                return@launch
+            }
+            val woke = runCatching {
+                if (KernelSuRuntime.rootShell(RunScreenOff.POWER_KEY_COMMAND)?.exitCode == 0) {
+                    return@runCatching true
+                }
+                ShizukuController.shell(
+                    RunScreenOff.POWER_KEY_COMMAND,
+                    RunScreenOff.POWER_KEY_TIMEOUT_MILLIS,
+                )?.exitCode == 0
+            }.getOrDefault(false)
+            appendLog(
+                app.getString(if (woke) R.string.log_screen_on_again else R.string.log_screen_still_off),
+            )
+        }
     }
 
     private suspend fun runMaintenance(command: String): CommandResult {

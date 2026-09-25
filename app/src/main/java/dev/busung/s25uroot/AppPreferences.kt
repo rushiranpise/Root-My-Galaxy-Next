@@ -70,6 +70,8 @@ object AppPreferences {
     private const val AUTO_ROOT_SETTLE_SECONDS = "auto_root_settle_seconds"
     private const val DFR_REROOT_AT_BOOT = "dfr_reroot_at_boot"
     private const val SHIZUKU_AUTOMATION_TOKEN = "shizuku_automation_token"
+    private const val SCREEN_OFF_DURING_RUN = "screen_off_during_run"
+    private const val GUIDE_ACCEPTED = "guide_accepted"
     private const val PARTITION_READ_ONLY_MODE = "partition_read_only_mode"
     private const val READ_ONLY_PROTECTED_BOOT = "partition_read_only_protected_boot"
     private const val READ_ONLY_PROTECTED_DEVICES = "partition_read_only_protected_devices"
@@ -665,6 +667,40 @@ object AppPreferences {
      * recovered from download mode. Turning it off is a decision about the device, so an existing
      * choice is never overwritten: a stored value wins over this default.
      */
+    /**
+     * Whether the guide has been accepted, which is what makes the first launch the only time it appears.
+     *
+     * Stored rather than derived from anything about the phone, because what it records is a reading: the
+     * guide is a wall of text in front of a flow that cannot be followed until it is out of the way, and
+     * the one thing worse than showing it twice is not showing it at all. It stays re-readable from Home.
+     */
+    fun guideAccepted(context: Context): Boolean = prefs(context).getBoolean(GUIDE_ACCEPTED, false)
+
+    fun setGuideAccepted(context: Context, accepted: Boolean) {
+        prefs(context).edit()
+            .putBoolean(GUIDE_ACCEPTED, accepted)
+            .apply()
+    }
+
+    /**
+     * Whether a run puts the screen out before the exploit starts.
+     *
+     * On by default, which is not the cautious default: the reason it exists is that an awake display is
+     * the largest thing on a phone that can wake a worklist while the exploit is holding a kernel page it
+     * has freed, and a run that dies there costs the whole boot. The project this is ported from drove the
+     * same payload family and put that at the top of its crash causes. [RunScreenOff] is where the two
+     * presses happen, and a run with no shell cannot press at all - which is said in the log rather than
+     * left to look like the setting doing nothing.
+     */
+    fun screenOffDuringRun(context: Context): Boolean =
+        prefs(context).getBoolean(SCREEN_OFF_DURING_RUN, true)
+
+    fun setScreenOffDuringRun(context: Context, enabled: Boolean) {
+        prefs(context).edit()
+            .putBoolean(SCREEN_OFF_DURING_RUN, enabled)
+            .apply()
+    }
+
     fun partitionReadOnlyMode(context: Context): Boolean =
         prefs(context).getBoolean(PARTITION_READ_ONLY_MODE, true)
 
