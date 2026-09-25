@@ -5491,7 +5491,7 @@ private fun StagedResidueDialog(
                                     {
                                         pendingFolderClear = PendingFolderClear(
                                             folder = ResidueScope.TempDirectory,
-                                            byGlob = true,
+                                            byGlob = ResidueScope.TempDirectory.emptiedByGlob,
                                             paths = emptyList(),
                                             body = ResidueFolderSummary(
                                                 R.string.residue_folder_clear_glob,
@@ -5577,7 +5577,7 @@ private fun StagedResidueDialog(
                                         {
                                             pendingFolderClear = PendingFolderClear(
                                                 folder = section.scope,
-                                                byGlob = false,
+                                                byGlob = section.scope.emptiedByGlob,
                                                 paths = section.deletablePaths,
                                                 body = ResidueFolderSummary(
                                                     R.string.residue_folder_clear_named,
@@ -5777,7 +5777,22 @@ private fun StagedResidueDialog(
     pendingFolderClear?.let { pending ->
         AlertDialog(
             onDismissRequest = { pendingFolderClear = null },
-            title = { Text(stringResource(R.string.residue_folder_clear, pending.folder.path)) },
+            // Two titles, because the two routes are not the same promise: the temp directory is emptied
+            // whole, while a named list is only the paths this app wrote. One title for both read as
+            // "delete everything in /data/system", which is the one thing this button must never be
+            // taken to mean.
+            title = {
+                Text(
+                    stringResource(
+                        if (pending.byGlob) {
+                            R.string.residue_folder_clear
+                        } else {
+                            R.string.residue_folder_clear_named_title
+                        },
+                        pending.folder.path,
+                    ),
+                )
+            },
             // What it removes and what it does not. This button sits in a heading beside two other
             // headings, and the one thing to know before pressing it is that the other two directories
             // are not part of it - the two routes say it in their own words, because one of them takes
@@ -6038,7 +6053,14 @@ private fun ResidueFolderHeading(
             }
             delete?.let { onDelete ->
                 ResidueDeleteButton(
-                    description = stringResource(R.string.residue_folder_clear_desc, folder.path),
+                    description = stringResource(
+                        if (folder.emptiedByGlob) {
+                            R.string.residue_folder_clear_desc
+                        } else {
+                            R.string.residue_folder_clear_named_desc
+                        },
+                        folder.path,
+                    ),
                     enabled = deleteEnabled,
                     onDelete = onDelete,
                 )

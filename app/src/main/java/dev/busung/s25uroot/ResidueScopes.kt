@@ -39,6 +39,16 @@ internal enum class ResidueScope(
     val path: String,
     /** Whether a row here can be removed from this app. */
     val deletable: Boolean,
+    /**
+     * Whether this directory is cleaned by emptying it, rather than by naming paths in it.
+     *
+     * True for the temp directory alone. It is the one place holding names this app cannot account for,
+     * so there is no catalogue to delete from: everything there belongs to somebody, and the sweep that
+     * empties it takes the names it did not write along with its own. Everywhere else a delete names
+     * paths, which is what keeps the rest of a platform directory - `/data/system` above all - out of it,
+     * and why the button that names paths must not be described as emptying the directory.
+     */
+    val emptiedByGlob: Boolean,
     /** What a listed name here is, for the row that names it. */
     @StringRes val roleRes: Int,
 ) {
@@ -47,6 +57,7 @@ internal enum class ResidueScope(
         bodyRes = R.string.residue_scope_temp_body,
         path = StagedResidue.DIRECTORY,
         deletable = true,
+        emptiedByGlob = true,
         roleRes = R.string.residue_role_other,
     ),
     SystemDirectory(
@@ -54,6 +65,7 @@ internal enum class ResidueScope(
         bodyRes = R.string.residue_scope_helper_body,
         path = SYSTEM_DIRECTORY,
         deletable = true,
+        emptiedByGlob = false,
         roleRes = R.string.residue_role_system,
     ),
     AdbDirectory(
@@ -61,6 +73,7 @@ internal enum class ResidueScope(
         bodyRes = R.string.residue_scope_adb_body,
         path = ADB_DIRECTORY,
         deletable = false,
+        emptiedByGlob = false,
         roleRes = R.string.residue_role_kernelsu,
     ),
     ;

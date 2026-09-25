@@ -78,6 +78,8 @@
     <string name="residue_folder_clear_desc">Delete everything in %1$s</string>
     <string name="residue_folder_clear_glob">This empties %1$s, %2$d entries that aren\'t this app\'s included. The other two directories are untouched.</string>
     <string name="residue_folder_clear_named">This removes the %1$d paths this app lists for %2$s. The other two directories are untouched.</string>
+    <string name="residue_folder_clear_named_title">Delete the paths this app lists in %1$s?</string>
+    <string name="residue_folder_clear_named_desc">Delete the paths this app lists in %1$s</string>
     <string name="residue_clear_done">Deleted %1$d item(s).</string>
     <string name="residue_clear_left">%1$d could not be deleted; they are still listed above.</string>
     <string name="residue_clear_refused">The shell rejected some of them: %1$s</string>
