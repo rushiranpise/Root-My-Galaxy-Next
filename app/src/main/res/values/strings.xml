@@ -661,10 +661,13 @@
     <string name="run_limits_helper_note">How long one helper command may run. This is mainly an internal setting.</string>
     <string name="run_limits_payload_note">The payload profile controls the number of tries, time limits, and exploit method. Leave this off unless you are testing an unsupported device.</string>
     <string name="run_limits_override">Override payload settings</string>
-    <string name="run_limits_override_note">Uses the app\'s numbers for attempts, per-attempt timeout, and slide route instead of the profile\'s. Useful for testing a build the feed doesn\'t support yet, and it can make a working target fail. The run plan says which side each of the three came from. A fresh-session profile still gets one attempt, whatever is set here.</string>
+    <string name="run_limits_override_note">Uses the app\'s numbers for attempts, per-attempt timeout, slide route, and the p0 window base instead of the profile\'s. Useful for testing a build the feed doesn\'t support yet, and it can make a working target fail. The run plan says which side each of them came from. A fresh-session profile still gets one attempt, whatever is set here.</string>
     <string name="run_limits_override_attempts">Attempts</string>
     <string name="run_limits_override_timeout">Timeout for each attempt</string>
     <string name="run_limits_override_route">Exploit route</string>
+    <string name="run_limits_override_window">P0 window base</string>
+    <string name="run_limits_window_default">Payload\'s own</string>
+    <string name="run_limits_window_value">%1$d ms</string>
     <string name="run_limits_route_default">Payload\'s own</string>
     <string name="run_limits_route_auto">auto</string>
     <string name="run_limits_route_tracefs">tracefs</string>
@@ -676,6 +679,8 @@
     <string name="run_plan_attempts">Attempts</string>
     <string name="run_plan_attempt_timeout">Timeout for each attempt</string>
     <string name="run_plan_slide_route">Exploit route</string>
+    <string name="run_plan_p0_window">P0 window base</string>
+    <string name="run_plan_p0_window_value">%1$d ms base</string>
     <string name="run_plan_value_not_applied">Not applied</string>
     <string name="run_plan_value_payload_default">Payload decides</string>
     <string name="run_plan_from_payload">From the payload profile</string>

@@ -2306,6 +2306,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", routePolicy.attemptTimeoutSec.toString())
             }
             routePolicy.slideRoute.env?.let { put(ExploitRoutePolicy.SLIDE_SOURCE_ENV, it) }
+            // The p0 window's base, when the policy names one - which today means a user moved it in Run
+            // limits, since the feed carries no such field. This one is unlike the three above in a way
+            // worth stating: leaving it out is not "the payload decides", it is the payload forking every
+            // attempt with the supervisor's own base (20000 us), which is what every shipped target has
+            // ever run with and no profile can change.
+            routePolicy.p0WindowDelayUsec?.let {
+                put(ExploitRoutePolicy.P0_WINDOW_DELAY_ENV, it.toString())
+            }
             // SLIDE_P0_OFFSET is deliberately never set, whatever the profile's `p0OffsetCache` says.
             //
             // The payload can learn the slide two ways: it can find it, or it can be told it. Being

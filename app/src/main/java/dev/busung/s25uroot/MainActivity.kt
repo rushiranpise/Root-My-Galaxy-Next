@@ -6659,7 +6659,7 @@ private fun RunPlanDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // The three a user can move, as rows carrying the side that chose them - the half of the
+                // The values a user can move, as rows carrying the side that chose them - the half of the
                 // answer the raw variables below cannot give. Their values still come from the
                 // environment the run is handed, so a row cannot show a number the payload never gets.
                 val policy = display.plan.routePolicy
@@ -6680,6 +6680,17 @@ private fun RunPlanDialog(
                     display.plan.environment["SLIDE_SOURCE"]
                         ?: stringResource(R.string.run_plan_value_payload_default),
                     note = originNote(policy.slideRouteOrigin),
+                )
+                // Read out of the environment rather than out of the policy like the attempts row is,
+                // because "the payload's own" has no number to print: the row's two states are a base in
+                // milliseconds and the absence of a base, and the environment is where that absence is.
+                val windowUsec = display.plan.environment[ExploitRoutePolicy.P0_WINDOW_DELAY_ENV]
+                    ?.toIntOrNull()
+                RunPlanRow(
+                    stringResource(R.string.run_plan_p0_window),
+                    windowUsec?.let { stringResource(R.string.run_plan_p0_window_value, it / 1000) }
+                        ?: stringResource(R.string.run_plan_value_payload_default),
+                    note = originNote(policy.p0WindowOrigin),
                 )
                 val otherVariables = display.plan.environment
                     .filterKeys { it !in ExploitRoutePolicy.OVERRIDABLE_ENV_NAMES }
@@ -6928,6 +6939,13 @@ private fun ExploitOverrideGroup(
             label = { stringResource(routeLabelRes(it)) },
             onSelected = { onChanged(override.copy(slideRoute = it)) },
         )
+        OverrideChoiceGroup(
+            title = stringResource(R.string.run_limits_override_window),
+            options = ExploitOverride.p0WindowDelayChoices,
+            selected = override.p0WindowDelayUsec,
+            label = { p0WindowDelayLabel(it) },
+            onSelected = { onChanged(override.copy(p0WindowDelayUsec = it)) },
+        )
     }
 }
 
@@ -6970,6 +6988,20 @@ private fun originNote(origin: PolicyOrigin): String = stringResource(
         PolicyOrigin.FreshSession -> R.string.run_plan_from_fresh_session
     },
 )
+
+/**
+ * The settings label for a p0 window base: the payload's own, or the base in milliseconds.
+ *
+ * Milliseconds rather than the microseconds the payload takes, because 50000 is a number nobody reads
+ * and 50 ms is the pacing everyone already talks about. The value handed over is still the microsecond
+ * one - this is the label, and the plan prints the number the run actually gets.
+ */
+@Composable
+private fun p0WindowDelayLabel(usec: Int?): String = if (usec == null) {
+    stringResource(R.string.run_limits_window_default)
+} else {
+    stringResource(R.string.run_limits_window_value, usec / 1000)
+}
 
 /** The settings label for a route: the two raw tokens stay as the payload spells them. */
 private fun routeLabelRes(route: SlideRoute): Int = when (route) {

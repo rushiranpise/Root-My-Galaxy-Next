@@ -55,6 +55,16 @@ object AppPreferences {
     private const val EXPLOIT_OVERRIDE_ATTEMPTS = "exploit_override_attempts"
     private const val EXPLOIT_OVERRIDE_ATTEMPT_TIMEOUT = "exploit_override_attempt_timeout"
     private const val EXPLOIT_OVERRIDE_SLIDE_ROUTE = "exploit_override_slide_route"
+    private const val EXPLOIT_OVERRIDE_P0_WINDOW = "exploit_override_p0_window"
+
+    /**
+     * What the stored p0 window says when the user left it on the payload's own.
+     *
+     * A separate sentinel rather than 0, because 0 is a value the payload accepts and a base of zero
+     * microseconds is a different experiment from not making one. Kept private to this file: nothing
+     * outside it should be able to write a preference that means "chosen" for a value nobody chose.
+     */
+    private const val P0_WINDOW_NOT_CHOSEN = -1
     // Both boot gates' floor. The key predates the second gate and keeps its name on purpose: see
     // [bootGateSettleSeconds].
     private const val AUTO_ROOT_SETTLE_SECONDS = "auto_root_settle_seconds"
@@ -568,6 +578,9 @@ object AppPreferences {
             slideRoute = ExploitOverride.normalizeRoute(
                 SlideRoute.parse(stored.getString(EXPLOIT_OVERRIDE_SLIDE_ROUTE, null)),
             ),
+            p0WindowDelayUsec = stored.getInt(EXPLOIT_OVERRIDE_P0_WINDOW, P0_WINDOW_NOT_CHOSEN)
+                .takeIf { it != P0_WINDOW_NOT_CHOSEN }
+                ?.let(ExploitOverride::normalizeP0WindowDelay),
         )
     }
 
@@ -582,6 +595,11 @@ object AppPreferences {
             .putString(
                 EXPLOIT_OVERRIDE_SLIDE_ROUTE,
                 ExploitOverride.normalizeRoute(override.slideRoute).name,
+            )
+            .putInt(
+                EXPLOIT_OVERRIDE_P0_WINDOW,
+                ExploitOverride.normalizeP0WindowDelay(override.p0WindowDelayUsec)
+                    ?: P0_WINDOW_NOT_CHOSEN,
             )
             .apply()
     }
