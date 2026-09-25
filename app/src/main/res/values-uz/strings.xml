@@ -133,8 +133,6 @@
     <string name="action_continue">Baribir davom etish</string>
     <string name="action_next">Keyingisi</string>
     <string name="advanced">Kengaytirilgan</string>
-    <string name="advanced_mode">Kengaytirilgan rejim</string>
-    <string name="advanced_mode_description">O\'rnatish vaqtida qurilmaga mos paketni (payload) qo\'lda tanlash</string>
     <string name="shizuku_mode">Shizuku\'dan foydalanish</string>
     <string name="shizuku_mode_description">Paketni ishga tushirish uchun Shizuku\'dan foydalaning. Bu o\'rnatishning ishonchliligini oshirishi mumkin.</string>
     <string name="shizuku_not_running_title">Shizuku ishlamayapti</string>

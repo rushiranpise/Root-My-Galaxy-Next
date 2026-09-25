@@ -235,7 +235,6 @@ class MainActivity : ComponentActivity() {
     private var resumedOnce = false
     private var accentColor by mutableStateOf(AccentColor.Dynamic)
     private var themeMode by mutableStateOf(AppThemeMode.System)
-    private var advancedMode by mutableStateOf(false)
 	private var disableKsuModules by mutableStateOf(false)
     private var loadKernelSu by mutableStateOf(true)
     private var kernelsuFlavor by mutableStateOf(KernelSuFlavor.Default)
@@ -377,7 +376,6 @@ class MainActivity : ComponentActivity() {
         window.isNavigationBarContrastEnforced = false
         accentColor = AppPreferences.accentColor(this)
         themeMode = AppPreferences.themeMode(this)
-        advancedMode = AppPreferences.advancedMode(this)
 		disableKsuModules = AppPreferences.disableKsuModules(this)
         loadKernelSu = AppPreferences.loadKernelSu(this)
         kernelsuFlavor = AppPreferences.kernelsuFlavor(this)
@@ -407,7 +405,6 @@ class MainActivity : ComponentActivity() {
                     installViewModel = installViewModel,
                     accentColor = accentColor,
                     themeMode = themeMode,
-                    advancedMode = advancedMode,
 					disableKsuModules = disableKsuModules,
                     loadKernelSu = loadKernelSu,
                     kernelsuFlavor = kernelsuFlavor,
@@ -438,10 +435,6 @@ class MainActivity : ComponentActivity() {
                     onThemeModeChanged = { mode ->
                         AppPreferences.setThemeMode(this, mode)
                         themeMode = mode
-                    },
-                    onAdvancedModeChanged = { enabled ->
-                        AppPreferences.setAdvancedMode(this, enabled)
-                        advancedMode = enabled
                     },
 					onDisableKsuModulesChanged = { enabled ->
 						AppPreferences.setDisableKsuModules(this, enabled)
@@ -742,7 +735,6 @@ private fun RootApp(
     installViewModel: InstallViewModel,
     accentColor: AccentColor,
     themeMode: AppThemeMode,
-    advancedMode: Boolean,
 	disableKsuModules: Boolean,
     loadKernelSu: Boolean,
     kernelsuFlavor: KernelSuFlavor,
@@ -766,7 +758,6 @@ private fun RootApp(
     onCancelArmedRetry: () -> Unit,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
-    onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
     onRerootAtBootChanged: (Boolean) -> Unit,
@@ -1362,14 +1353,14 @@ private fun RootApp(
                                 showRebootSheet = true
                             },
                             resumeTick = resumeTick,
+                            // One press, one question: which payload this run spends. The picker is the
+                            // only way into a run, because the payload is the one thing about it a person
+                            // can still get wrong - and the confirmation that follows states the choice
+                            // rather than asking for it a second time.
                             onInstall = {
                                 selectedProfile = null
-                                if (advancedMode) {
-                                    showTargetPicker = true
-                                    installViewModel.loadTargetCatalog()
-                                } else {
-                                    showInstallConfirmation = true
-                                }
+                                showTargetPicker = true
+                                installViewModel.loadTargetCatalog()
                             },
                         )
                         AppPage.History -> HistoryPage(
@@ -1389,7 +1380,6 @@ private fun RootApp(
                             device = device,
                             accentColor = accentColor,
                             themeMode = themeMode,
-                            advancedMode = advancedMode,
                             disableKsuModules = disableKsuModules,
                             loadKernelSu = loadKernelSu,
                             kernelsuFlavor = kernelsuFlavor,
@@ -1410,7 +1400,6 @@ private fun RootApp(
                             resumeTick = resumeTick,
                             onAccentColorChanged = onAccentColorChanged,
                             onThemeModeChanged = onThemeModeChanged,
-                            onAdvancedModeChanged = onAdvancedModeChanged,
                             onDisableKsuModulesChanged = onDisableKsuModulesChanged,
                             onLoadKernelSuChanged = onLoadKernelSuChanged,
                             onRerootAtBootChanged = onRerootAtBootChanged,
@@ -3702,7 +3691,6 @@ private fun SettingsPage(
     device: DeviceSnapshot,
     accentColor: AccentColor,
     themeMode: AppThemeMode,
-    advancedMode: Boolean,
 	disableKsuModules: Boolean,
     loadKernelSu: Boolean,
     kernelsuFlavor: KernelSuFlavor,
@@ -3731,7 +3719,6 @@ private fun SettingsPage(
     resumeTick: Int,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
-    onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
     onRerootAtBootChanged: (Boolean) -> Unit,
@@ -4508,19 +4495,9 @@ private fun SettingsPage(
         if (SettingsSection.Run in openSections) item(key = SettingsTarget.PartitionReadOnly) {
             SettingsSectionBody {
                 SettingsSwitchCard(
-                    // Sliders, not the memory chip this had: the chip is the kernel module the KernelSU
-                    // row below is about, and this row reveals rows rather than touching a kernel.
-                    icon = Icons.Rounded.Tune,
-                    title = stringResource(R.string.advanced_mode),
-                    description = stringResource(R.string.advanced_mode_description),
-                    checked = advancedMode,
-                    position = SettingsCardPosition.Top,
-                    onCheckedChange = {
-                        clickHaptic(view)
-                        onAdvancedModeChanged(it)
-                    },
-                )
-                SettingsSwitchCard(
+                    // Security, which is what the row is about: the module set is the one thing about a
+                    // load that can be moved aside, and the card says so rather than wearing the kernel
+                    // chip the KernelSU row below already has.
                     icon = Icons.Rounded.Security,
                     title = stringResource(R.string.disable_ksu_modules),
                     // Moving the modules aside is something a run does *around the load*, so with no
@@ -4534,7 +4511,7 @@ private fun SettingsPage(
                         },
                     ),
                     checked = disableKsuModules,
-                    position = SettingsCardPosition.Middle,
+                    position = SettingsCardPosition.Top,
                     enabled = loadKernelSu,
                     onCheckedChange = {
                         clickHaptic(view)

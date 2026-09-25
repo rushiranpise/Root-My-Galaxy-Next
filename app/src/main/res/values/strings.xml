@@ -566,8 +566,6 @@
     <string name="action_continue">Continue anyway</string>
     <string name="action_next">Next</string>
     <string name="advanced">Advanced</string>
-    <string name="advanced_mode">Advanced mode</string>
-    <string name="advanced_mode_description">Choose the payload yourself during installation.</string>
     <string name="disable_ksu_modules">Disable KernelSU modules</string>
     <string name="disable_ksu_modules_description">Temporarily disable modules while KernelSU loads</string>
     <string name="disable_ksu_modules_needs_load">Only applies when KernelSU is loaded</string>
@@ -984,7 +982,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="show_my_device_only">Show only my device</string>
     <string name="no_matching_devices">No payload supports this model and kernel version.</string>
     <string name="no_matching_devices_flavor">No payload in the enabled sources stages %1$s.</string>
-    <string name="target_flavor_any">Any KernelSU</string>
+    <string name="target_flavor_any">All</string>
     <string name="device_mismatch_title">Device doesn\'t match</string>
     <string name="device_mismatch_body">This phone is %1$s, but the selected payload supports %2$s. Running it may crash or damage the device.</string>
     <string name="kernel_version_mismatch_title">Kernel version doesn\'t match</string>

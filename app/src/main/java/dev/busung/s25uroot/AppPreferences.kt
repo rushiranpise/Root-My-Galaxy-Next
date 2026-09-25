@@ -34,7 +34,6 @@ object AppPreferences {
     private const val PREFERENCES = "appearance"
     private const val ACCENT_COLOR = "accent_color"
     private const val THEME_MODE = "theme_mode"
-    private const val ADVANCED_MODE = "advanced_mode"
     private const val DISABLE_KSU_MODULES = "disable_ksu_modules"
     private const val LOAD_KERNEL_SU = "load_kernel_su"
     private const val KERNEL_SU_FLAVOR = "kernel_su_flavor"
@@ -203,22 +202,6 @@ object AppPreferences {
     fun setThemeMode(context: Context, themeMode: AppThemeMode) {
         prefs(context).edit()
             .putString(THEME_MODE, themeMode.storedValue)
-            .apply()
-    }
-
-    /**
-     * On unless it was turned off.
-     *
-     * The picker is the honest default: a run spends the payload the phone has for this boot, and a
-     * plain confirmation hides which one that is. Off is the choice for someone who has already
-     * picked and wants the shorter path back.
-     */
-    fun advancedMode(context: Context): Boolean =
-        prefs(context).getBoolean(ADVANCED_MODE, true)
-
-    fun setAdvancedMode(context: Context, enabled: Boolean) {
-        prefs(context).edit()
-            .putBoolean(ADVANCED_MODE, enabled)
             .apply()
     }
 

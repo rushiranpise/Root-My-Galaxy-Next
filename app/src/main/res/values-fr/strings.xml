@@ -116,8 +116,6 @@
     <string name="action_continue">Continuer quand même</string>
     <string name="action_next">Suivant</string>
     <string name="advanced">Avancé</string>
-    <string name="advanced_mode">Mode avancé</string>
-    <string name="advanced_mode_description">Choisir manuellement une charge utile compatible avec l\'appareil lors de l\'installation</string>
     <string name="shizuku_mode">Utiliser Shizuku</string>
     <string name="shizuku_mode_description">Utiliser Shizuku pour exécuter la charge utile. Cela peut améliorer la fiabilité.</string>
     <string name="shizuku_not_running_title">Shizuku n\'est pas en cours d\'exécution</string>
