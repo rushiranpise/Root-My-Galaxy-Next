@@ -264,12 +264,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var bootSettleOverridden = false
 
     /**
-     * The settle this run was held to, so the payload's own window can be derived from the decision
-     * the run actually made. A second setting would be a second thing to keep in step.
-     */
-    private var bootSettleRequiredSeconds = BootSettle.DEFAULT_SECONDS
-
-    /**
      * Set when the user stops the run, so its cancellation is not read as a failure.
      *
      * A cancellation is delivered as an exception in the run's own coroutine, which is the same shape
@@ -1334,12 +1328,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 logFile.absolutePath,
             ).redirectErrorStream(true)
             processBuilder.environment().putAll(
-                exploitEnvironment(
-                    requiresFreshP0Session,
-                    cachedP0Offset,
-                    routePolicy,
-                    payloadQuietWindowSeconds(),
-                ),
+                exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy),
             )
             processBuilder.start()
         }
@@ -1717,12 +1706,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
-        exploitEnvironment(
-            requiresFreshP0Session,
-            cachedP0Offset,
-            routePolicy,
-            payloadQuietWindowSeconds(),
-        ).forEach { (name, value) ->
+        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
             append(name).append('=').append(shellQuote(value)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
@@ -1769,12 +1753,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
     ): Array<String> = buildList {
-        exploitEnvironment(
-            requiresFreshP0Session,
-            cachedP0Offset,
-            routePolicy,
-            payloadQuietWindowSeconds(),
-        ).forEach { (name, value) ->
+        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
             add("$name=$value")
         }
         add("CVE43499_ROOT_HELPER=$helperPath")
@@ -1919,16 +1898,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     )
 
     /**
-     * The payload's own post-boot window, from this run's settle decision.
-     *
-     * Read where the environment is built rather than where the run starts, so a mid-run override is
-     * part of the value: the user tapping "run anyway" while the countdown is on screen is exactly the
-     * case that used to skip this app's wait and then sit out the payload's.
-     */
-    private fun payloadQuietWindowSeconds(): Int =
-        BootSettle.payloadQuietWindowSeconds(bootSettleRequiredSeconds, bootSettleOverridden)
-
-    /**
      * Puts the payload's own manager on the phone when there is none, before the payload runs.
      *
      * The kernel does not need it - the manager is a plain app that talks to the loaded module over
@@ -2023,7 +1992,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      */
     private suspend fun awaitBootSettle(requiredSeconds: Int) {
         val required = BootSettle.normalize(requiredSeconds)
-        bootSettleRequiredSeconds = required
         if (required <= 0) return
         val remaining = BootSettle.remainingMillis(required, BootSettle.elapsedMillis())
         if (remaining <= 0L) {
@@ -2037,14 +2005,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             if (bootSettleOverridden) {
                 appendLog(app.getString(R.string.log_boot_settle_skipped))
                 AppLog.warn(RUN_LOG_TAG, "Boot settle skipped on the user's word")
-                // Says what the skip does not skip: the payload keeps a moment of its own over the same
-                // boot, and without this the pause that follows reads as a run that hung. Its own log
-                // line names the gate it used either way, so the two together account for the wait.
-                AppLog.info(
-                    RUN_LOG_TAG,
-                    "Payload still waits ${BootSettle.label(payloadQuietWindowSeconds())} " +
-                        "for the boot's allocator",
-                )
                 return
             }
             // Minutes of waiting, and the one other place a stop reaches: the settle is the longest part
@@ -2327,15 +2287,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // will not apply - and so a value chosen in the settings shows up in both.
             bootSettleSeconds = BootSettle.normalize(bootSettleSeconds),
             routePolicy = routePolicy,
-            // `overridden = false` because a plan is read before a run exists: the override is offered
-            // while the countdown is on screen, so the value here is the setting's own - and the run's
-            // log records what it actually handed over.
-            environment = exploitEnvironment(
-                requiresFreshP0Session,
-                cachedP0Offset,
-                routePolicy.policy,
-                BootSettle.payloadQuietWindowSeconds(bootSettleSeconds, overridden = false),
-            ),
+            environment = exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy.policy),
             shizukuArguments = if (shizuku) {
                 mapOf(
                     "CVE43499_ROOT_HELPER" to SHIZUKU_HELPER_PATH,
@@ -2353,13 +2305,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             requiresFreshP0Session: Boolean,
             cachedP0Offset: String?,
             routePolicy: ExploitRoutePolicy = ExploitRoutePolicy.LEGACY,
-            // Required, with no default: a default here would have to guess the run's settle decision,
-            // and guessing it is how the app's gate and the payload's came to disagree about one boot.
-            payloadQuietWindowSec: Int,
         ): Map<String, String> = buildMap {
-            // First, because it is the wait rather than a knob: by the time the payload reads this the
-            // app has finished its own settle, and this is what the payload waits on top of it.
-            put(BootSettle.PAYLOAD_QUIET_WINDOW_ENV, payloadQuietWindowSec.toString())
             // A fresh-session profile hands its pacing to the payload, so the policy's attempt and
             // timeout budget does not apply to it. The route still does: which way the payload finds
             // the slide is a different question from how many tries it gets.

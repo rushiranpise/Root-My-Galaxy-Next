@@ -18,10 +18,6 @@ import kotlinx.coroutines.delay
  * and the wait costs two minutes once per boot against a failed attempt that costs the whole run. It
  * is a floor rather than a hard block: [InstallViewModel.skipBootSettle] ends the wait on the user's
  * word, because someone who knows their device just booted cleanly is better informed than a constant.
- *
- * The payload keeps a window of its own over the same boot, and it is told this run's value rather
- * than a constant of its own: see [payloadQuietWindowSeconds]. Two gates are fine when one of them is
- * derived from the other, and were not fine while both were settings nobody had compared.
  */
 internal object BootSettle {
     /** What a manual run waits for unless it is told otherwise. */
@@ -43,44 +39,6 @@ internal object BootSettle {
      * automation would silently rewrite what a manual run does next time.
      */
     const val GATE_DEFAULT_SECONDS = 60
-
-    /** The name the payload reads the window below under. */
-    const val PAYLOAD_QUIET_WINDOW_ENV = "P0_MIN_BOOT_UPTIME_SEC"
-
-    /**
-     * The payload's own compiled window for this, and the most an environment may ask for.
-     *
-     * The payload waits this out before it touches the kernel, for the same reason the app waits: a
-     * cold device makes its racy stage worse. It is the ceiling rather than a setting because the
-     * only thing the app has to say about it is that this boot is further along than the payload
-     * assumes - and an override that could *raise* it would be a way to make a run hang for minutes
-     * on a device whose owner cannot see the number.
-     */
-    const val PAYLOAD_QUIET_WINDOW_MAX_SECONDS = 120
-
-    /**
-     * What the payload still waits when the settle gate was overridden.
-     *
-     * Not zero. The window protects the same racy stage whoever counts it, and someone overriding a
-     * two minute pause is asking for seconds rather than for none; thirty is short enough that
-     * nothing appears stuck and long enough that the allocator has stopped moving.
-     */
-    const val PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS = 30
-
-    /**
-     * The window to hand the payload, from this run's own settle decision.
-     *
-     * Derived rather than configured, because the app's gate and the payload's are one decision
-     * about one boot. A settle of `Off` means the payload does not wait either, and a settle longer
-     * than the ceiling is already satisfied by the app's own wait before the payload starts - which
-     * is what makes the two agree instead of stacking.
-     */
-    fun payloadQuietWindowSeconds(requiredSeconds: Int, overridden: Boolean): Int =
-        if (overridden) {
-            PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS
-        } else {
-            minOf(normalize(requiredSeconds), PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
-        }
 
     /**
      * What the setting offers. Rounded to these rather than free-form: a value nobody tested is not a
