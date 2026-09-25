@@ -1202,13 +1202,9 @@ private fun RootApp(
     }
 
     // The manager this app would install for the payload's flavour, and whether one is already there.
-    //
-    // [managerTick] is the other way this reading changes, and the other way is this app's own doing: an
-    // install it performed itself. A tick rather than a second read, so that the one place this question is
-    // asked stays one place.
-    var managerTick by remember { mutableStateOf(0) }
-    var managerInstalling by remember { mutableStateOf(false) }
-    val managerInstalled = remember(kernelsuFlavor, resumeTick, managerTick) {
+    // Nothing here installs it: a run does that itself when there is none, so this reading is only what
+    // the confirmation dialog says about the phone before the run is handed it.
+    val managerInstalled = remember(kernelsuFlavor, resumeTick) {
         KernelSuManager.installedFor(context, kernelsuFlavor)
     }
 
@@ -1225,9 +1221,9 @@ private fun RootApp(
                     Text(stringResource(R.string.install_confirm_body))
                     // What the run will do about the manager before it does anything else, said here rather
                     // than discovered mid-run: a run installs the flavour's manager when there is none, and
-                    // that can be a download plus a tap on the phone's installer. The offer under it is the
-                    // same install, asked for early - so a phone with no manager can have one before the run
-                    // is handed the phone, and a phone that gets one here is a run with nothing to do.
+                    // that can be a download plus a tap on the phone's installer. Nothing is offered for it
+                    // here: the run performs that install, so an offer beside this text would only be the
+                    // same install asked for a second time.
                     Text(
                         text = if (managerInstalled == null) {
                             stringResource(R.string.install_confirm_manager, kernelsuFlavor.label)
@@ -1237,46 +1233,6 @@ private fun RootApp(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (managerInstalled == null) {
-                        // The link shape, because this is not the dialog's answer: the answers are below, and
-                        // pressing this one leaves the question standing - the run is still the run, and it
-                        // will install the manager itself if this is skipped.
-                        AppTextAction(
-                            AppAction(
-                                label = R.string.action_install_manager,
-                                progress = managerInstalling,
-                            ) {
-                                clickHaptic(view)
-                                managerInstalling = true
-                                scope.launch {
-                                    val outcome = withContext(Dispatchers.IO) {
-                                        ManagerInstall.install(
-                                            context = context,
-                                            flavor = kernelsuFlavor,
-                                            // True here, unlike in a run: nothing delicate is in flight yet,
-                                            // and on a phone whose only shell is the pairing that pairing is
-                                            // the whole point of asking before the run.
-                                            allowWirelessAdb = true,
-                                            handToInstaller = true,
-                                            // Not waited for: the dialog reports what happened and stays open,
-                                            // and the person pressing through the installer comes back to it.
-                                            waitForInstall = false,
-                                            onLog = { line ->
-                                                AppLog.info(AppLogTags.KERNEL_SU, line)
-                                            },
-                                        )
-                                    }
-                                    managerInstalling = false
-                                    managerTick++
-                                    Toast.makeText(
-                                        context,
-                                        managerOutcomeMessage(context, outcome),
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                }
-                            },
-                        )
-                    }
                 }
             },
             confirmButton = {

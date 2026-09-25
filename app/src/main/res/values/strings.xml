@@ -504,7 +504,6 @@
     <string name="status_manager_check">Checking the %1$s manager</string>
     <string name="install_confirm_manager">The %1$s manager isn\'t installed. This run installs it first.</string>
     <string name="install_confirm_manager_ready">The %1$s manager is on the phone.</string>
-    <string name="action_install_manager">Install manager</string>
     <string name="status_stage_failed">Failed at: %1$s</string>
     <string name="failure_stage">Stage</string>
     <string name="failure_reason">Reason</string>
