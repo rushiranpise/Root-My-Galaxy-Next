@@ -399,13 +399,16 @@ object AppPreferences {
     /**
      * Whether a run that loaded KernelSU should hand the userspace over before it reports done.
      *
-     * Off by default, because what it does is close everything that is open, and a setting that did
-     * that unannounced would cost more than the tap it saves. What it buys when it is on: KernelSU's
-     * own soft reboot walks the module lifecycle in its normal order, so a run that started from a
-     * phone whose modules were inert ends with them loaded rather than with an instruction to restart.
+     * On by default, because the load is not the whole of the job: KernelSU mounts its modules, and
+     * nothing already running sees them until the userspace is built again, so a run that stops at the
+     * load leaves a phone that is rooted and behaving as if it were not. What that costs is the restart
+     * itself, which closes everything that is open - that is why it is a setting rather than something
+     * a run always does. What it buys: KernelSU's own soft reboot walks the module lifecycle in its
+     * normal order, so a run that started from a phone whose modules were inert ends with them loaded
+     * rather than with an instruction to restart.
      */
     fun restartAfterRoot(context: Context): Boolean =
-        prefs(context).getBoolean(RESTART_AFTER_ROOT, false)
+        prefs(context).getBoolean(RESTART_AFTER_ROOT, true)
 
     fun setRestartAfterRoot(context: Context, enabled: Boolean) {
         prefs(context).edit()

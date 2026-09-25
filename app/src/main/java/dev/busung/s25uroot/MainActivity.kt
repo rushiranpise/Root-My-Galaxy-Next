@@ -281,7 +281,7 @@ class MainActivity : ComponentActivity() {
      * recorded, which is a state worth naming too: the restart then falls back to the cached payload.
      */
     private var retryPayload by mutableStateOf<CachedPayload?>(null)
-    private var restartAfterRoot by mutableStateOf(false)
+    private var restartAfterRoot by mutableStateOf(true)
     private var shizukuBootMode by mutableStateOf(false)
     private var bootSettleSeconds by mutableStateOf(BootSettle.DEFAULT_SECONDS)
     private var bootGateSettleSeconds by mutableStateOf(BootSettle.GATE_DEFAULT_SECONDS)

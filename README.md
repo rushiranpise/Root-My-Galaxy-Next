@@ -618,7 +618,8 @@ reboot asked for from the screen that has just finished, at the moment that deci
 **Settings → Root Management → Auto Soft reboot** takes it for you: with it on, a run that loaded
 KernelSU asks for the soft reboot itself, after the result has been written, because the restart ends
 everything the process is in the middle of. A refusal there is a line in the log rather than a failure,
-since the run has already succeeded. It is off by default, as a userspace restart closes whatever is open.
+since the run has already succeeded. It is on by default, because a load whose modules nothing has picked
+up yet is not a finished job; the restart closes whatever is open, so it can be turned off.
 
 **A failed run offers a choice rather than one retry button**, because the boot's single attempt has just
 been spent and the three answers do not have the same odds:
