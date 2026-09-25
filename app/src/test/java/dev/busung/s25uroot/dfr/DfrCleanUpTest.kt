@@ -156,36 +156,93 @@ class DfrCleanUpTest {
     }
 
     /**
-     * The one thing about a clean-up that no reading can catch: the order its two writes happen in.
+     * The one thing about a clean-up that no reading can catch: what its two writes are ordered against.
      *
      * `pm uninstall` is a Package Manager write, and Package Manager writes `packages.xml` from its own
-     * memory - the copy it read at boot, which still holds our key while a clean-up is running. So a key
-     * removal performed *before* the helper's uninstall is undone by the app's own next call, in the same
-     * second, and the screen then reads the key as present and offers the reboot step again - a step that
-     * cannot help, because the file the phone boots from has the key in it. Both halves are correct on
-     * their own and the flow's reading of each is correct; only the sequence is wrong, which is why this
-     * assertion reads the source rather than any result.
+     * memory - the copy it read at boot, which still holds our key while a clean-up is running - on its own
+     * schedule, which is not this app's. So a press that takes the helper off *and* removes the key has the
+     * key put back into the file afterwards (measured on this device: 45 s later, with no restart between),
+     * and the phone boots the list the press was supposed to be done with - a clean-up that only works the
+     * second time, on a phone whose helper is already gone. Ordering the two commands cannot beat a write
+     * neither of them issued, which is why the helper is not in this press at all: the flow offers it as the
+     * step after the restart the removal owes. Both halves are correct on their own and the flow's reading of
+     * each is correct; only the sequence is wrong, which is why this assertion reads the source rather than
+     * any result.
      */
     @Test
-    fun `the helper is uninstalled before the key comes out of the file`() {
-        val source = uiSource()
-        val start = source.indexOf("fun cleanUp()")
-        assertTrue("no `fun cleanUp()` in the screen's source", start >= 0)
-        val body = source.substring(start)
-        val helper = body.indexOf("DfrInstall.uninstallStageTwo()")
+    fun `the clean-up removes the key and leaves the helper for the restart`() {
+        val body = cleanUpBody()
         val key = body.indexOf("DfrInstall.run(context, DfrMode.Uninstall)")
-        assertTrue("the clean-up does not uninstall the helper", helper >= 0)
+        val helper = body.indexOf("DfrInstall.uninstallStageTwo()")
         assertTrue("the clean-up does not remove the key", key >= 0)
+        assertTrue("the clean-up no longer uninstalls the helper at all", helper >= 0)
         assertTrue(
-            "the helper's uninstall runs after the key removal, so Package Manager rewrites the file " +
-                "from the memory that still holds the key and the removal never lands",
-            helper < key,
+            "the helper's uninstall runs before the key removal, so Package Manager rewrites the file from " +
+                "the memory that still holds the key and the removal never lands",
+            key < helper,
+        )
+        assertTrue(
+            "the helper is uninstalled whatever the key removal did, so a press that wrote the file also " +
+                "takes the helper off and the write that puts the key back is this app's own",
+            body.substring(key, helper).contains("keyTakenOut"),
         )
         assertTrue(
             "the removal is recorded before the last write to packages.xml, so the instant it stamps is " +
                 "not the one the phone has to restart past",
             key < body.indexOf("setDfrKeyRemovedAt"),
         )
+    }
+
+    /**
+     * The restart the removal owes is asked for in the same command as the removal - the same window, one
+     * layer down.
+     *
+     * A second command is issued when the first one's answer arrives, so everything between the two is time
+     * nothing is holding, and the writer that can put the key back is Package Manager's own, on its own
+     * schedule. One shell command has no room in it for anything else, which is the whole of the fix.
+     */
+    @Test
+    fun `the removal and the restart are one command, and a failed removal restarts nothing`() {
+        val command = DfrInstall.removalAndRestartCommand("/data/app/rmgnext/base.apk")
+        val removal = command.indexOf("--uninstall")
+        val restart = command.indexOf("soft-reboot")
+        assertTrue("the command does not remove the key", removal >= 0)
+        assertTrue("the command does not ask for the restart", restart >= 0)
+        assertTrue("the restart is not asked for after the removal", removal < restart)
+        assertTrue(
+            "the restart is asked for whatever the removal did: a restart with the key still in the file " +
+                "is every app on the phone closed to arrive back at the same step",
+            command.substring(removal, restart).contains("rc"),
+        )
+        assertTrue(
+            "the restart is not the installed daemon's, which is the only one that owns the userspace",
+            command.contains("/data/adb/ksud"),
+        )
+
+        // And the reading of it: the two halves are one command, so the injector's own verdicts say nothing
+        // about whether the daemon was ever reached.
+        val asked = DfrResult(Uninstall, ok = true, log = "x\n${DfrInstall.RESTART_REQUESTED}\ny")
+        assertTrue("the restart line is not read", asked.restartRequested)
+        assertFalse(
+            "an answer with no restart line reads as a restart that happened, where the phone is sitting on " +
+                "an unanswered removal and the step has to keep saying so",
+            DfrResult(Uninstall, ok = true, log = "x\n[+] DONE. our key removed; soft reboot to apply\ny")
+                .restartRequested,
+        )
+    }
+
+    /**
+     * The clean-up's own body, as the screen writes it.
+     *
+     * Read to the end of the file rather than to the method's closing brace, which is what the two tests
+     * above need: the removals and the branch between them are one slice of source, and a slice that stopped
+     * at the first `}` would be a different function's code by the time the second half is read.
+     */
+    private fun cleanUpBody(): String {
+        val source = uiSource()
+        val start = source.indexOf("fun cleanUp()")
+        assertTrue("no `fun cleanUp()` in the screen's source", start >= 0)
+        return source.substring(start)
     }
 
     /** The screen's own source, wherever the test JVM was started from. */

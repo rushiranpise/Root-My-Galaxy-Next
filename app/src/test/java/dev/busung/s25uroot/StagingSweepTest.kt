@@ -96,8 +96,15 @@ class StagingSweepTest {
         requireNotNull(source) { "RootRecovery.kt was not found; the scan is looking at the wrong directory" }
         val text = source.readText()
 
-        // Every action in that file reaches the daemon at its installed path...
-        assertTrue(text.contains("private const val KSUD_PATH = \"/data/adb/ksud\""))
+        // Every action in that file reaches the daemon at its installed path... The declaration is no
+        // longer `private`: the clean-up's removal runs the daemon itself, beside the command that takes
+        // the certificate out of packages.xml, and it asks this object for the path rather than keeping a
+        // second copy of it - which is the same rule this test is about, one layer up.
+        assertTrue(
+            "RootRecovery no longer names the installed daemon, so what the sweep may delete is no longer " +
+                "decided by a path the actions share",
+            text.contains("const val KSUD_PATH = \"/data/adb/ksud\""),
+        )
         // ...and the reload, the only action that wants a stage file, writes it from that copy itself,
         // which is what makes the staged daemon this sweep removes unread by anything.
         assertTrue(text.contains("KSUD=\$KSUD_PATH"))

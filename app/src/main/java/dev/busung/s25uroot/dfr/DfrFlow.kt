@@ -63,6 +63,10 @@ internal enum class DfrStep(
     ),
     ReadState(R.string.dfr_step_read, R.string.dfr_step_read_detail),
     ApplyRemoval(R.string.dfr_step_apply_removal, R.string.dfr_step_apply_removal_detail),
+    RemoveStageTwoAfterCleanUp(
+        R.string.dfr_step_remove_after_clean_up,
+        R.string.dfr_step_remove_after_clean_up_detail,
+    ),
     Inject(R.string.dfr_step_inject, R.string.dfr_step_inject_detail),
     Reboot(R.string.dfr_step_reboot, R.string.dfr_step_reboot_detail),
     RemoveStageTwo(R.string.dfr_step_remove, R.string.dfr_step_remove_detail),
@@ -269,6 +273,19 @@ internal object DfrFlow {
         if (state.keyRemovedAtMillis != null && !restartedSince(state.keyRemovedAtMillis, state)) {
             return DfrStep.ApplyRemoval
         }
+        // The clean-up's other half, and the reason it is not in the same press as the key: `pm uninstall`
+        // is a Package Manager write, and Package Manager rewrites `packages.xml` from the memory that still
+        // holds the key - so a helper taken off *before* the restart the key removal owes puts the key
+        // straight back into the file the phone is about to boot from, which is a clean-up that has to be
+        // run twice (measured: that is exactly what it did). The record above says this phone was cleaned
+        // up and the package says the helper is still installed, and both are needed: "the key is out of the
+        // file and a helper is installed" is also the state of a phone this app has never touched.
+        //
+        // It sits under the step above rather than beside it, because the two are one wait: reaching here
+        // means the restart that makes the removal true has already happened.
+        if (state.keyRemovedAtMillis != null && state.stageTwoInstalled) {
+            return DfrStep.RemoveStageTwoAfterCleanUp
+        }
         // The helper on the phone is not this build's, so the run it would start is another build's run -
         // and this comes before the armed check, which is the one ordering here worth arguing about.
         //
@@ -367,7 +384,21 @@ internal object DfrFlow {
             null -> add(R.string.dfr_clean_up_key_unread)
             false -> Unit
         }
-        if (helperInstalled) add(R.string.dfr_clean_up_helper)
+        if (helperInstalled) {
+            // Two lines for the one item, and the second is not a hedge: the helper comes off in this press
+            // only when the certificate is not in the file, because its own uninstall is a write to that
+            // file and Package Manager would put the certificate back from memory - so a press that removes
+            // the certificate is a press that leaves the helper for the step after the restart. Told before
+            // the press rather than after it, or a confirmation that named both would look half-done.
+            add(
+                // A reading that could not be taken gets the conditional wording: the file is the thing that
+                // decides this, and it is exactly the reading that is missing.
+                when (keyInjected) {
+                    false -> R.string.dfr_clean_up_helper
+                    else -> R.string.dfr_clean_up_helper_waiting
+                },
+            )
+        }
     }
 
     /** Every step in order, for the screen that shows how far along the flow is. */
@@ -385,7 +416,8 @@ internal object DfrFlow {
      *
      * [DfrStep.ReadState] is where the flow stops when nothing could be measured,
      * [DfrStep.RemoveStageTwo] undoes an install that landed under the wrong identity,
-     * [DfrStep.ApplyRemoval] is a clean-up waiting on the restart that makes it true, and
+     * [DfrStep.ApplyRemoval] is a clean-up waiting on the restart that makes it true,
+     * [DfrStep.RemoveStageTwoAfterCleanUp] is that clean-up's second half, and
      * [DfrStep.NoHelper] and [DfrStep.HelperUnwritable] stop it before it starts because this build
      * cannot produce the APK the whole flow exists to install - so none of them has a position, and a
      * screen that numbered them would be claiming progress that has not happened. They are named on their
@@ -396,6 +428,7 @@ internal object DfrFlow {
         DfrStep.HelperUnwritable,
         DfrStep.ReadState,
         DfrStep.RemoveStageTwo,
+        DfrStep.RemoveStageTwoAfterCleanUp,
         DfrStep.StaleStageTwo,
         DfrStep.ApplyRemoval,
     )

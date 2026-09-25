@@ -731,6 +731,7 @@
     <string name="dfr_yes">yes</string>
     <string name="dfr_no">no</string>
     <string name="dfr_no_root">No root shell answered.</string>
+    <string name="dfr_removal_no_answer">No answer came back from the root shell. That is what a restart in flight looks like, and it is also what a phone with no root looks like. Reopen this screen once the phone is back and the file will be read again.</string>
     <!-- One shell or the other, for the commands both of them can run: see DfrInstall.installStageTwo. -->
     <string name="dfr_no_shell">Neither a root shell nor Shizuku\'s answered.</string>
     <string name="dfr_stage_no_root">The service wasn\'t prepared because this step needs root. The install below doesn\'t need root.</string>
@@ -760,12 +761,16 @@
     <string name="dfr_clean_up_key">The certificate in android.uid.system\'s past signatures, in /data/system/packages.xml. Removing it takes effect when the phone starts again.</string>
     <string name="dfr_clean_up_key_unread">The certificate in android.uid.system will be removed if it is present.</string>
     <string name="dfr_clean_up_helper">The RMG-NEXT helper app, installed under that shared user.</string>
+    <string name="dfr_clean_up_helper_waiting">The RMG-NEXT helper app, installed under that shared user. If the certificate has to come out of the file, the helper comes off after the restart - its own uninstall is a write to that file, and Android would put the certificate back from memory.</string>
     <string name="dfr_clean_up_nothing">Neither the certificate nor the helper is on the phone, so there is nothing to remove.</string>
     <string name="dfr_clean_up_note">The two files left in /data/system aren\'t changed here. They are shown on the leftover files screen.</string>
+    <string name="dfr_clean_up_helper_waiting_run">The helper app is left in place for now: it comes off in the step after the restart, when Android has read the file without the certificate in it.</string>
     <string name="dfr_clean_up_confirm">Remove</string>
     <string name="dfr_clean_up_close">Close</string>
     <string name="dfr_step_apply_removal">Reboot to finish removing the key</string>
     <string name="dfr_step_apply_removal_detail">The certificate was removed from packages.xml, but Android is still using the old copy. Reboot the phone to make the change take effect.</string>
+    <string name="dfr_step_remove_after_clean_up">Remove Helper</string>
+    <string name="dfr_step_remove_after_clean_up_detail">The certificate is out of the list and the phone has restarted, but the helper is still installed - Android gives a package its system uid at install time and never revisits it, so it keeps running as the system user until it is uninstalled. Remove it to finish cleaning up. Getting the flow back means starting again from Install certificate.</string>
     <string name="dfr_step_inject">Install certificate</string>
     <string name="dfr_step_inject_detail">It goes into android.uid.system. Helper can only install as a system app if its key is in that list.</string>
     <string name="dfr_step_reboot">Soft Reboot</string>

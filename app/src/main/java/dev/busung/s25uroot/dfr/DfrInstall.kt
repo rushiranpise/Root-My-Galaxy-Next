@@ -11,6 +11,7 @@ import dev.busung.s25uroot.KernelSuFlavor
 import dev.busung.s25uroot.KernelSuRuntime
 import dev.busung.s25uroot.KernelSuVersionProbe
 import dev.busung.s25uroot.KnownGoodPayloadStore
+import dev.busung.s25uroot.RootRecovery
 import dev.busung.s25uroot.RootStatusProbe
 import dev.busung.s25uroot.SYSTEM_HELPER_DAEMON
 import dev.busung.s25uroot.SYSTEM_STAGED_DAEMON
@@ -100,6 +101,18 @@ internal data class DfrResult(
      */
     val keyTakenOut: Boolean
         get() = mode == DfrMode.Uninstall && ok && log.contains(PackagesXml.KEY_CHANGED)
+
+    /**
+     * Whether this run got as far as asking the daemon for the userspace restart - see
+     * [DfrInstall.removalAndRestartCommand].
+     *
+     * Read as its own line because the two halves of that command are one command: the injector's own
+     * verdicts say what happened to the file and nothing about whether the daemon was ever reached, so a
+     * caller that used [uninstalled] for both would report a restart that never happened on a phone whose
+     * `su` answered but whose daemon did not.
+     */
+    val restartRequested: Boolean
+        get() = mode == DfrMode.Uninstall && ok && log.contains(DfrInstall.RESTART_REQUESTED)
 
     /** One line for the app log. */
     fun summary(): String = "dfr ${mode.name.lowercase()}: ${if (ok) "ok" else "failed"}" +
@@ -405,6 +418,57 @@ internal object DfrInstall {
             TIMEOUT_SECONDS,
         ),
         mode,
+    )
+
+    /**
+     * Removes the key and then restarts the userspace, as **one** root command, because two commands are
+     * a window.
+     *
+     * `packages.xml` belongs to Package Manager, and Package Manager rewrites it from its own memory on its
+     * own schedule - so every moment between "the key is out of the file" and "the framework that read the
+     * old copy is gone" is a moment in which somebody else's write can put the key back, and the phone then
+     * boots the list this action exists to be done with. Measured on this device: a removal that had landed
+     * was back in the file 45 s later, with no restart in between.
+     *
+     * Asking for the restart afterwards cannot close that window however quickly it is asked, because the
+     * second command is issued when the first one's answer arrives and everything between the two is time
+     * nothing is holding. So the removal and the restart are one command, issued once, with the injector's
+     * own exit code as the only thing between them.
+     *
+     * Through the same root shell the removal uses on its own, and deliberately not [RootRecovery.softReboot]:
+     * that keeper exists for callers nobody is watching - it takes a one-owner lock, checks the kernel boot
+     * again and *waits* for `sys.boot_completed` - and every one of those checks is between the removal and
+     * the `stop` this action is racing. Here the person who pressed the button is the owner, the phone is
+     * booted by definition, and a refusal is read and reported.
+     */
+    internal fun removalAndRestartCommand(
+        classpath: String,
+        ksudPath: String = RootRecovery.KSUD_PATH,
+    ): String = buildString {
+        append(command(classpath, DfrMode.Uninstall)).append('\n')
+        append("rc=\$?\n")
+        // A removal that did not get through does not restart: a restart with the key still in the file is
+        // every app on the phone closed to arrive back at the same step, where the injector's own refusal is
+        // the thing worth reading.
+        append("if [ \"\$rc\" -ne 0 ]; then\n")
+        append("  echo \"[x] the certificate was not removed (rc=\$rc), so the userspace was not restarted\"\n")
+        append("  exit \"\$rc\"\n")
+        append("fi\n")
+        append("echo '").append(RESTART_REQUESTED).append("'\n")
+        append("'").append(ksudPath).append("' soft-reboot 2>&1\n")
+        append("echo \"[*] the daemon answered rc=\$?\"\n")
+    }
+
+    /**
+     * [removalAndRestartCommand] on this phone, as the step that applies a removal runs it.
+     *
+     * Null when no root shell answered - which on this action is also what a restart in flight looks like,
+     * because the command ends by taking down the framework this app is running in. The caller records that
+     * it asked before it asks, for exactly that reason.
+     */
+    fun removeAndRestart(context: Context): DfrResult? = resultOf(
+        KernelSuRuntime.rootShell(removalAndRestartCommand(context.packageCodePath), TIMEOUT_SECONDS),
+        DfrMode.Uninstall,
     )
 
     /**
@@ -1192,6 +1256,14 @@ internal object DfrInstall {
      * about.
      */
     private const val TIMEOUT_SECONDS = 120L
+
+    /**
+     * The line [removalAndRestartCommand] prints once the removal got through and the daemon is about to be
+     * asked for the restart. One constant rather than the sentence twice, so the command and the reading of
+     * it cannot drift apart.
+     */
+    internal const val RESTART_REQUESTED =
+        "[+] rmg: the certificate is out; asking the daemon to restart the userspace"
 
     /** Three reads of a package manager, which is quick but is still a package manager. */
     private const val PROBE_TIMEOUT_SECONDS = 30L

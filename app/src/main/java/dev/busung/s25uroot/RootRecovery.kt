@@ -120,8 +120,16 @@ internal fun kernelBootToken(): String? = runCatching {
  */
 internal object RootRecovery {
 
-    /** Where the verified late-load leaves the daemon. */
-    private const val KSUD_PATH = "/data/adb/ksud"
+    /**
+     * Where the verified late-load leaves the daemon.
+     *
+     * Read from outside this object by the one caller that has to run the daemon beside a command of its
+     * own rather than as a detached keeper: the clean-up's removal, which asks for the userspace restart
+     * in the same shell command it takes the certificate out in. See `DfrInstall.removalAndRestartCommand`
+     * - which is also why this is no longer private, the value being the point rather than the file it
+     * happens to be written in.
+     */
+    internal const val KSUD_PATH = "/data/adb/ksud"
 
     private const val ACCEPTED_MARKER = "RMG_RECOVERY_ACCEPTED"
     internal const val ACCEPT_POLL_ATTEMPTS = 100

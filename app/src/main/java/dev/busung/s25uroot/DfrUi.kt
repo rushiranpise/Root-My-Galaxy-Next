@@ -254,23 +254,32 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
      * see the report that made this action exist. A restart asked for after that boots the file *with* the
      * key in it, which is a restart that cannot help, and offering one is what the screen used to do.
      *
-     * So the uninstall runs again immediately before the restart, where nothing can get between them. On a
-     * file that is still clean it writes nothing and says so - which is the same answer, for free, and it
-     * is why this does not need to ask first whether the key came back.
+     * The two are **one root command** rather than two calls, and that is the correction this press
+     * needed: a re-made removal followed by a separately-issued restart leaves the very window it is
+     * closing, however fast the second call follows the first - and the window is not this app's to hold,
+     * because the writer that matters is Package Manager's own, on its own schedule. One command has no room
+     * in it for anything else. See [DfrInstall.removalAndRestartCommand] for the daemon being reached
+     * directly here rather than through the recovery keeper, and for why a removal that did not get through
+     * restarts nothing.
+     *
+     * The instant is stamped *before* the command runs, which is the one place in this screen where that is
+     * right: the command ends by taking down the framework this app is running in, so an instant written
+     * after the answer is an instant that is often never written - and a phone that restarts owes it whether
+     * or not the app survived to say so. The one answer that can arrive and be wrong is the one where the
+     * daemon was never reached, so that answer puts the previous value back.
      */
     fun applyRemoval() = act("apply removal") {
-        val again = DfrInstall.run(context, DfrMode.Uninstall)
-            ?: return@act context.getString(R.string.dfr_no_root)
-        // A removal that had to be written again is a new instant, for the same reason a clean-up stamps
-        // one: this phone owes a restart for a file that changed.
-        if (again.keyTakenOut) AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
-        val outcome = runRecoveryAction(context, RecoveryTool.SoftReboot)
-        val restart = if (outcome.accepted) {
-            context.getString(R.string.recovery_action_soft_reboot)
-        } else {
-            outcome.detail
+        val previous = AppPreferences.dfrKeyRemovedAt(context)
+        AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
+        // No answer at all, which on this action is what a restart in flight looks like as well as what a
+        // phone with no root shell looks like - so the line says both rather than picking one.
+        val result = DfrInstall.removeAndRestart(context)
+            ?: return@act context.getString(R.string.dfr_removal_no_answer)
+        if (!result.restartRequested) {
+            AppPreferences.setDfrKeyRemovedAt(context, previous)
+            return@act result.log
         }
-        listOf(again.log, restart).joinToString("\n")
+        result.log
     }
 
     fun cleanUp() = act("clean up") {
@@ -280,16 +289,20 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // here. Deleting them is what the residue screen is for, where they are listed with everything
         // else the app left behind and can be removed one at a time or together.
         //
-        // **The helper goes first and the key comes out last, and that order is the whole of this
-        // method.** `pm uninstall` is a Package Manager write, and Package Manager writes
-        // `packages.xml` from *its own memory* - the copy it read at boot, which still holds our key -
-        // so an uninstall running after the key removal puts the key straight back into the file. That
-        // is not a theory: measured on this device, a clean-up that removed the key first and then the
-        // helper left the key in the file within the same second, the screen read the key as present
-        // and asked for the reboot step again, and the reboot could not help - the file it booted from
-        // had the key in it. The next clean-up worked only because the helper was already gone, so
-        // nothing rewrote the file after the removal. Removing the helper first makes the key's write
-        // the last one, which is the only state a restart can make true.
+        // **The key comes out here and the helper does not, and that is the order the whole action is.**
+        // `pm uninstall` is a Package Manager write, and Package Manager writes `packages.xml` from *its own
+        // memory* - the copy it read at boot, which still holds our key - on its own schedule. Measured on
+        // this device: a removal that had landed was back in the file 45 s later. Ordering the two commands
+        // cannot beat a write neither of them issued and neither of them can wait for, so the helper waits
+        // for the restart the key removal owes and the flow offers it as the step after that one - see
+        // [DfrStep.RemoveStageTwoAfterCleanUp]. The earlier order did the opposite and produced a clean-up
+        // that had to be run twice: the first press left the key in the file the phone booted from, because
+        // the helper's own uninstall rewrote it after the removal, and only the second press - with nothing
+        // left to uninstall - stuck.
+        //
+        // A file that was already clean is the case where there is no such restart to wait for, so the
+        // helper comes off in this press after all: nothing was written to the file, so a Package Manager
+        // write cannot undo anything.
         //
         // Each record is cleared by its own half of the undo and by nothing else - see
         // [DfrCleanUpOutcome]. A half that did not land, including both halves on a phone with no root
@@ -299,18 +312,28 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // land on a phone that has none: a phone that has not been rerooted yet can still have this app's
         // helper taken off it. The key half below is the one that still refuses there, and its record is
         // kept until it lands - see [DfrCleanUpOutcome].
-        val helper = DfrInstall.uninstallStageTwo()
         val removed = DfrInstall.run(context, DfrMode.Uninstall)
+        // Read from the key's own verdict rather than from the helper half's result, because that result
+        // answers null for "no shell" as well: one of those two states leaves a helper installed on purpose
+        // and the other leaves one installed because nothing could take it off, and only the first is a
+        // clean-up that goes on after the restart.
+        val deferred = removed?.keyTakenOut == true
+        val helper = if (deferred) null else DfrInstall.uninstallStageTwo()
         val outcome = DfrCleanUpOutcome.of(removed, helper)
         if (outcome.keyGone) AppPreferences.setDfrInjectedAt(context, null)
         if (outcome.helperGone) AppPreferences.setDfrInstalledAt(context, null)
         // Recorded only when this run changed the file: an uninstall that found nothing to remove has
         // nothing waiting on a restart. What it earns is [DfrStep.ApplyRemoval] - the key is out of the
         // file and still live in the Package Manager that started before the change.
-        if (removed?.keyTakenOut == true) {
-            AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
+        if (deferred) AppPreferences.setDfrKeyRemovedAt(context, System.currentTimeMillis())
+        val log = removed?.log ?: context.getString(R.string.dfr_no_root)
+        // Said out loud rather than left to the step list: the confirmation promised the helper, and a press
+        // that does not touch it has to account for itself somewhere.
+        if (deferred) {
+            listOf(log, context.getString(R.string.dfr_clean_up_helper_waiting_run)).joinToString("\n")
+        } else {
+            log
         }
-        removed?.log ?: context.getString(R.string.dfr_no_root)
     }
 
     val step = reading?.step
@@ -544,6 +567,15 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                             roleFor(DfrAction.StageTwo),
                             enabled,
                         ) { removeStageTwo() }
+                        // The same press with the other reason under it: this helper is not an install that
+                        // landed wrong, it is the clean-up's own second half - the certificate is already out
+                        // of the file and the phone has restarted, so there is nothing to reinstall and its
+                        // own line says so rather than this list.
+                        DfrStep.RemoveStageTwoAfterCleanUp -> AppAction(
+                            R.string.dfr_action_remove_stage2,
+                            roleFor(DfrAction.StageTwo),
+                            enabled,
+                        ) { removeStageTwo() }
                         // No condition on the helper here: a build without one never reaches this step,
                         // because the flow refuses before it - see [DfrStep.NoHelper].
                         //
@@ -677,7 +709,8 @@ private fun askedAction(step: DfrStep?): DfrAction? = when (step) {
     DfrStep.ReadState, DfrStep.HelperUnwritable -> DfrAction.Read
     DfrStep.Inject -> DfrAction.Inject
     DfrStep.Reboot, DfrStep.RebootAgain, DfrStep.ApplyRemoval -> DfrAction.Reboot
-    DfrStep.RemoveStageTwo, DfrStep.InstallStageTwo, DfrStep.StaleStageTwo,
+    DfrStep.RemoveStageTwo, DfrStep.RemoveStageTwoAfterCleanUp, DfrStep.InstallStageTwo,
+    DfrStep.StaleStageTwo,
     DfrStep.OpenStageTwo,
     -> DfrAction.StageTwo
     else -> null

@@ -105,6 +105,16 @@ class DfrShellTransportTest {
         val inject = declaration(installSource(), "fun run(")
         assertTrue("the inject no longer runs as root", inject.contains("KernelSuRuntime.rootShell"))
         assertFalse("the inject tries the plain shell, which cannot write packages.xml", inject.contains("unprivilegedShell"))
+        val removal = declaration(installSource(), "fun removeAndRestart(")
+        assertTrue(
+            "the removal and the restart no longer run as root, so the write to packages.xml is attempted " +
+                "by a shell that cannot make it - and the phone restarts with the key still in the file",
+            removal.contains("KernelSuRuntime.rootShell"),
+        )
+        assertFalse(
+            "the combined command tries the plain shell, which cannot write packages.xml",
+            removal.contains("unprivilegedShell"),
+        )
         val action = declaration(installSource(), "fun runAction(")
         assertTrue("the daemon staging no longer runs as root", action.contains("KernelSuRuntime.rootShell"))
         assertFalse(

@@ -611,8 +611,13 @@ class DfrFlowTest {
     fun `the clean-up confirmation names both things it removes, not just one`() {
         // The button writes a file the phone boots from and does two unrelated things, so the question it
         // asks has to be about both. Key first, because that is the one with a restart behind it.
+        //
+        // With the certificate in the file, the helper's line is the one that says it comes off *after* the
+        // restart: the press leaves it, because its own `pm uninstall` is a write to the same file and
+        // Package Manager would put the certificate back from memory. A confirmation that promised both in
+        // this press would be promising a clean-up the app cannot do in this press.
         assertEquals(
-            listOf(R.string.dfr_clean_up_key, R.string.dfr_clean_up_helper),
+            listOf(R.string.dfr_clean_up_key, R.string.dfr_clean_up_helper_waiting),
             DfrFlow.cleanUpRemovals(keyInjected = true, helperInstalled = true),
         )
         assertEquals(
@@ -621,7 +626,8 @@ class DfrFlowTest {
             DfrFlow.cleanUpRemovals(keyInjected = true, helperInstalled = false),
         )
         assertEquals(
-            "and only the helper, on a phone whose key is out",
+            "and only the helper, on a phone whose key is out - and there it comes off in this press, " +
+                "because a file with no certificate in it cannot have one put back by the helper's write",
             listOf(R.string.dfr_clean_up_helper),
             DfrFlow.cleanUpRemovals(keyInjected = false, helperInstalled = true),
         )
@@ -645,6 +651,51 @@ class DfrFlowTest {
         assertFalse(
             "the unread case must not borrow the wording of a confirmed one",
             unread.contains(R.string.dfr_clean_up_key),
+        )
+        // And the helper's line is conditional for the same reason: the file is what decides whether the
+        // helper comes off in this press, and it is exactly the reading that is missing.
+        assertEquals(
+            listOf(R.string.dfr_clean_up_key_unread, R.string.dfr_clean_up_helper_waiting),
+            DfrFlow.cleanUpRemovals(keyInjected = null, helperInstalled = true),
+        )
+    }
+
+    @Test
+    fun `a cleaned-up phone with the helper still on it is asked to finish, not to inject`() {
+        // The clean-up's second half, and the reason the flow needs the removal's own record to find it:
+        // the helper keeps the system uid Package Manager gave it at install time, so a phone whose
+        // certificate has been taken out of the list is still a phone with a system app on it. Without the
+        // record the same reading is a phone to re-inject - the helper is looked at by the ladder, not by a
+        // clean-up that cannot be shown to have happened.
+        val cleanedUp = fresh(
+            keyInjected = false,
+            keyRemovedAtMillis = now - 30 * 60 * 1000L,
+            stageTwoInstalled = true,
+            stageTwoIsSystemUid = true,
+            installedAtMillis = now - 60 * 60 * 1000L,
+            uptimeMillis = 5 * 60 * 1000L,
+        )
+        assertEquals(DfrStep.RemoveStageTwoAfterCleanUp, DfrFlow.next(cleanedUp))
+        assertEquals(
+            "the helper is not taken off before the restart that makes the removal true",
+            DfrStep.ApplyRemoval,
+            DfrFlow.next(
+                cleanedUp.copy(
+                    keyRemovedAtMillis = now - 60_000L,
+                    frameworkUptimeMillis = 30 * 60 * 1000L,
+                ),
+            ),
+        )
+        assertEquals(
+            "without the record of a clean-up the same reading is a phone to re-inject",
+            DfrStep.Inject,
+            DfrFlow.next(cleanedUp.copy(keyRemovedAtMillis = null)),
+        )
+        assertEquals(
+            "armed hooks do not call a half-done clean-up finished: the hooks are the kernel's, and the " +
+                "helper is still installed",
+            DfrStep.RemoveStageTwoAfterCleanUp,
+            DfrFlow.next(cleanedUp.copy(stageTwoArmed = true)),
         )
     }
 
@@ -712,6 +763,14 @@ class DfrFlowTest {
             // A clean-up that changed the file on this boot: no key in packages.xml, a removal waiting on
             // the restart that makes it true.
             fresh(keyRemovedAtMillis = now - 60_000),
+            // The same clean-up after that restart, with the helper it did not touch still installed: the
+            // second half of the press, which is the step that has to be on the screen's list too.
+            fresh(
+                keyRemovedAtMillis = now - 30 * 60 * 1000L,
+                stageTwoInstalled = true,
+                stageTwoIsSystemUid = true,
+                uptimeMillis = 5 * 60 * 1000L,
+            ),
             // A build whose assets have no helper in them, which is the one state here that is not a
             // reading of the phone.
             fresh(helper = DfrHelperAvailability.NotInBuild),
