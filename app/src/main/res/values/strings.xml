@@ -43,7 +43,7 @@
     <string name="residue_clean">Clean</string>
     <string name="residue_blind">Error</string>
     <string name="residue_dialog_title">Files left on the device</string>
-    <string name="residue_dialog_help">The app doesn\'t remove these files automatically. Temporary files are stored in /data/local/tmp, some files may be left in /data/system, and /data/adb belongs to KernelSU.</string>
+    <string name="residue_dialog_help">The app doesn\'t remove these files automatically. Temporary files are stored in /data/local/tmp, some files may be left in /data/system, and /data/adb belongs to KernelSU. The last entry is the app\'s own cache, which isn\'t a file on the device.</string>
     <string name="residue_scope_temp">/data/local/tmp</string>
     <string name="residue_scope_temp_body">Temporary files are stored here. Other apps can see file names here even without root.</string>
     <string name="residue_scope_helper">/data/system</string>
@@ -51,6 +51,16 @@
     <string name="residue_scope_adb">/data/adb</string>
     <string name="residue_scope_adb_body">KernelSU\'s own directory: the installed daemon and the modules. Listed so you can see it, and never deleted from here - removing these breaks the root the app just obtained.</string>
     <string name="residue_scope_clean">Nothing there. The %1$d paths this app writes in this directory are all absent.</string>
+    <string name="residue_scope_p0">p0_cache</string>
+    <string name="residue_scope_p0_body">Not a file on the device: it is in the app\'s own storage, where nothing else can read it. It holds the p0 write window a run won, and the next run on this boot is handed it instead of searching for it again.</string>
+    <string name="residue_p0_summary_none">Nothing cached.</string>
+    <string name="residue_p0_summary_this_boot">%1$s \u00b7 won on this boot, %2$s</string>
+    <string name="residue_p0_summary_other_boot">%1$s \u00b7 from an earlier boot, so no run will use it, %2$s</string>
+    <string name="residue_p0_delete">Clear the cached p0 offset</string>
+    <string name="residue_p0_cleared">Cached p0 offset cleared. The next run on this boot searches for it again.</string>
+    <string name="residue_p0_clear_skipped">Nothing was cleared: a run is in flight in another process, and it writes the offset back when it ends.</string>
+    <string name="residue_log_p0_cleared">Preparing files: cleared the cached p0 offset, so the next run on this boot searches for it again</string>
+    <string name="residue_log_p0_clear_skipped">Preparing files: asked for the cached p0 offset to be cleared and stood down, a run is in flight in another process</string>
     <string name="residue_scope_clean_listed">The directory is empty.</string>
     <string name="residue_scope_unlisted">Couldn\'t list this directory, so only the paths the app writes could be checked.</string>
     <string name="residue_section_log">Files left behind: %1$s holds %2$d file(s), %3$s: %4$s</string>

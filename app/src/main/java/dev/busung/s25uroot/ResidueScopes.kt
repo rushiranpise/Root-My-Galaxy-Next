@@ -211,11 +211,13 @@ internal class ResidueSection(
 }
 
 /**
- * The second line of a folder's heading, as a string and its arguments.
+ * The second line of a heading, as a string and its arguments.
  *
  * A string resource rather than a string because this is decided where there is no `Context`: the choice
  * of sentence is the part that has to be right - "empty" and "could not be listed" are different claims
- * about the same directory - and assembling it here is what lets both be tested.
+ * about the same directory - and assembling it here is what lets both be tested. Used by the folders and
+ * by the p0 cache, which is a heading on the same screen for the same reason: what it holds has to be
+ * said before anybody opens it.
  */
 internal data class ResidueFolderSummary(@StringRes val res: Int, val args: List<Any> = emptyList())
 
@@ -276,6 +278,17 @@ internal class ResidueSurvey(
      * may be a file another app is about to execute rather than this app's leftovers.
      */
     val siblingPresent: Boolean = false,
+    /**
+     * The p0 offset cache, when it holds anything.
+     *
+     * The one entry on this screen that is not a file on the device. Everywhere else here the reading is
+     * of something another app could find; this is inside this app's own storage, where nothing outside
+     * can read it at all. It is listed with the rest anyway, and for the reason the screen exists: it is
+     * the one thing the app writes that changes what a later run does, and until it was read here there
+     * was no way to see it or to take it away - the number goes in and comes out of a run, and no screen
+     * in the app named it.
+     */
+    val p0Cache: P0CacheEntry? = null,
 ) {
 
     /** Whether anything at all was found, in any of the three. */
@@ -377,4 +390,8 @@ internal fun StagedResidue.survey(context: Context): ResidueSurvey = ResidueSurv
     temp = read(),
     sections = ResidueScopes.readAll(),
     siblingPresent = SiblingInstall.isPresent(context),
+    // Read here rather than by the dialog, so that the screen's refresh after a clear is one call that
+    // reads everything: the row's absence is the receipt, and it has to be the same kind of receipt the
+    // files in the three directories get.
+    p0Cache = P0Cache.entry(context),
 )

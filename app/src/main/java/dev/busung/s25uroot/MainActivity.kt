@@ -5284,6 +5284,10 @@ private fun StagedResidueDialog(
     var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
     var deleteOutcome by remember { mutableStateOf<Pair<PendingDelete, SweepOutcome>?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    // What came of clearing the p0 offset cache: true if it went, false if a run was in flight and it was
+    // left alone. Null before the button has been pressed, which is the difference between "nothing to
+    // report" and "nothing was done".
+    var cacheCleared by remember { mutableStateOf<Boolean?>(null) }
     // Which directories are open, by path, and empty to start with. Closed is the right default here
     // because each heading carries what its folder holds: the list that opens itself is the one where a
     // directory a detector found something in sits below two that are clean, and the reason somebody
@@ -5385,6 +5389,37 @@ private fun StagedResidueDialog(
             clearing = false
         }
     }
+    /**
+     * Clears the cached p0 offset, which is the one delete here that needs no shell.
+     *
+     * The file is the app's own, in its own storage, so this is a `deleteSharedPreferences` rather than
+     * a command - and it is also the only action on this screen that a device with no root and no
+     * Shizuku can complete. It still stands down while a run is in flight, for the reason [P0Cache.clear]
+     * gives: a run writes its own offset back when it ends, so a clear in the middle of one is a clear
+     * that would not have happened.
+     */
+    val clearP0Cache: () -> Unit = {
+        clearing = true
+        cacheCleared = null
+        scope.launch {
+            val cleared = withContext(Dispatchers.IO) { P0Cache.clear(context) }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(
+                AppLogTags.STAGING,
+                context.getString(
+                    if (cleared) {
+                        R.string.residue_log_p0_cleared
+                    } else {
+                        R.string.residue_log_p0_clear_skipped
+                    },
+                ),
+            )
+            cacheCleared = cleared
+            clearing = false
+        }
+    }
     val reading = report
     val present = reading?.temp?.present.orEmpty()
     // The half a catalog cannot produce: names the app does not write, listed through a shell. Shown
@@ -5421,8 +5456,11 @@ private fun StagedResidueDialog(
                     // Two clean sentences, because there are two clean readings of the temp directory:
                     // an empty one, and one that could not be listed and holds none of the known names.
                     // The second is only reached when the other two directories are empty as well, so a
-                    // clean claim here is about everything on the screen.
-                    present.isEmpty() && extras.isEmpty() && reading.sections.none { it.anything } -> Text(
+                    // clean claim here is about everything on the screen - which is why the cached offset
+                    // is part of the test: a device whose only entry is a cached p0 offset is not a device
+                    // with nothing to show, and the sentence here is the one that would hide it.
+                    present.isEmpty() && extras.isEmpty() && reading.p0Cache == null &&
+                        reading.sections.none { it.anything } -> Text(
                         stringResource(
                             if (reading.temp.directoryListed) {
                                 R.string.residue_clean_listed_body
@@ -5610,6 +5648,36 @@ private fun StagedResidueDialog(
                                         )
                                     },
                                 )
+                            }
+                        }
+                        // The fourth entry, and the odd one out: not a directory, not on the device, and
+                        // not deleted through a shell. It is last because it is the one nothing outside
+                        // this app can see, and it is in this list at all because what it holds changes
+                        // what the next run does - see [P0Cache].
+                        item(key = "p0cache") {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                P0CacheHeading(
+                                    entry = reading.p0Cache,
+                                    deleteEnabled = !clearing,
+                                    onDelete = clearP0Cache,
+                                )
+                                // Said where the button was, which for this row is the only place it can
+                                // be: the block at the bottom of the screen reports the deletes that went
+                                // through a shell, and a device with nothing but a cached offset has no
+                                // such delete to report.
+                                cacheCleared?.let { cleared ->
+                                    Text(
+                                        text = stringResource(
+                                            if (cleared) {
+                                                R.string.residue_p0_cleared
+                                            } else {
+                                                R.string.residue_p0_clear_skipped
+                                            },
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -6045,6 +6113,57 @@ private fun ResidueFolderHeading(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+/**
+ * The cached p0 offset, which is the one heading on this screen that is not a folder.
+ *
+ * Shaped like the folders around it and deliberately not one of them. There is no directory to open and
+ * nothing to list: one number, what it means, and the button that takes it away. What it keeps from the
+ * folders is the part that matters to a reader - the heading always renders, and it always says what it
+ * holds, so "nothing cached" is an answer somebody can find rather than a section that was not there.
+ *
+ * [entry] is the whole of the state, and the body is drawn open rather than behind an arrow: it is two
+ * sentences about the only entry in the list that a person cannot find on the device themselves, and an
+ * explanation of an invisible thing behind a tap is an explanation nobody reads.
+ */
+@Composable
+private fun P0CacheHeading(
+    entry: P0CacheEntry?,
+    deleteEnabled: Boolean,
+    onDelete: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.residue_scope_p0),
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f),
+            )
+            // Like a folder's heading, and unlike a row: the button is there only when there is
+            // something to take. A delete over an empty cache is a press that would do nothing and
+            // report that it had.
+            if (entry != null) {
+                ResidueDeleteButton(
+                    description = stringResource(R.string.residue_p0_delete),
+                    enabled = deleteEnabled,
+                    onDelete = onDelete,
+                )
+            }
+        }
+        val summary = entry?.summary() ?: ResidueFolderSummary(R.string.residue_p0_summary_none)
+        Text(
+            text = stringResource(summary.res, *summary.args.toTypedArray()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.residue_scope_p0_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

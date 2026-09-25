@@ -1664,16 +1664,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     /**
      * The offset this boot has already won, if any.
      *
-     * Keyed by the boot token, because a slide belongs to the boot that produced it: an offset carried
-     * across a reboot is not a hint, it is a wrong answer, and the payload treats a supplied offset as
-     * final.
+     * A delegate: where the number is kept, and what "this boot" is measured against, are [P0Cache]'s.
+     * All this side knows is the token, which is the same one the receipt above is written against.
      */
-    private fun cachedP0Offset(bootToken: String?): String? {
-        if (bootToken == null) return null
-        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
-        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) return null
-        return stored.getString(P0_CACHE_OFFSET, null)
-    }
+    private fun cachedP0Offset(bootToken: String?): String? = P0Cache.offsetFor(app, bootToken)
 
     /**
      * Records the offset a run's own output reported, for every later run in the same boot.
@@ -1682,21 +1676,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      * number a run can pass to the next one: the p0 stage is a lottery that can take many attempts, and
      * winning it once is enough for every later run on this boot. Reading the payload's own line back
      * is the only way the app can know the number - it cannot compute one and has nothing else to trust.
+     *
+     * The reading happens here and the storing happens in [P0Cache], which is the split worth keeping:
+     * what the payload's line looks like is this class's business, and what a cached number is belongs
+     * to the object that now also has to hand it to a settings screen.
      */
     private fun cacheP0Offset(bootToken: String?, log: String) {
         if (bootToken == null) return
         val match = P0_OFFSET_PATTERN.findAll(log).lastOrNull() ?: return
         val offset = match.groupValues[1].toLongOrNull(16) ?: return
         if (offset !in 0..P0_OFFSET_MAX || offset and P0_OFFSET_MASK != 0L) return
-        val value = "0x${offset.toString(16)}"
-        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
-        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) == bootToken &&
-            stored.getString(P0_CACHE_OFFSET, null) == value
-        ) return
-        stored.edit()
-            .putString(P0_CACHE_BOOT_TOKEN, bootToken)
-            .putString(P0_CACHE_OFFSET, value)
-            .apply()
+        P0Cache.store(app, bootToken, "0x${offset.toString(16)}")
     }
 
     private fun localAdbExploitCommand(
@@ -2236,9 +2226,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
         private const val RECEIPT_VERIFIED = "verified"
-        private const val P0_CACHE = "p0_cache"
-        private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
-        private const val P0_CACHE_OFFSET = "offset"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
