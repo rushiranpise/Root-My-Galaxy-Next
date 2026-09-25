@@ -6352,9 +6352,15 @@ private fun TargetSelectionSheet(
                     )
                 }
                 else -> LazyColumn(
+                    // The remaining height, not a fixed 480 dp: the controls above this list and the
+                    // actions below it can want more than the sheet has, and when they do it is the
+                    // list that has to give - it is the one part of the sheet that scrolls, and the
+                    // row that must stay reachable is the one at the bottom. `fill = false` keeps a
+                    // short list short, so a tab with two entries still opens to a sheet that ends
+                    // where its content does rather than to one full of empty space.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 480.dp)
+                        .weight(1f, fill = false)
                         .selectableGroup(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
