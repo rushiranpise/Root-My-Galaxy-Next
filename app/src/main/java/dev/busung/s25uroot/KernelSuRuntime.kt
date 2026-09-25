@@ -219,6 +219,17 @@ internal fun loadVerdict(payloadCode: Int, readings: ControlReadings): LoadVerdi
  * reason not to claim control, not a reason for a run to die with a stack trace.
  */
 internal object KernelSuRuntime {
+
+    /**
+     * The window a Shizuku probe gets, matching the `su` route's own probe window.
+     *
+     * A probe asks a question with a yes/no answer - is this shell root, is the module listed - so it
+     * gets a probe's patience rather than whatever a command behind it was given. The two routes use
+     * the same number for the same reason they answer the same way: a device that reads a route one way
+     * and not the other is the drift these two are kept in step to avoid.
+     */
+    private const val PROBE_TIMEOUT_MILLIS = 8_000L
+
     fun proofs(context: Context, helperOutput: String): Set<ControlProof> =
         readings(context, helperOutput).proofs
 
@@ -254,7 +265,7 @@ internal object KernelSuRuntime {
         directModuleList()?.let { return parseModuleList(it) }
         if (!ShizukuController.isRunning() || !ShizukuController.isGranted()) return null
         val result = runCatching {
-            ShizukuController.shell("/system/bin/grep -w kernelsu /proc/modules")
+            ShizukuController.shell("/system/bin/grep -w kernelsu /proc/modules", PROBE_TIMEOUT_MILLIS)
         }.getOrNull() ?: return null
         return when (result.exitCode) {
             0 -> true
@@ -287,7 +298,7 @@ internal object KernelSuRuntime {
         command: String,
         timeoutSeconds: Long = SuShell.COMMAND_TIMEOUT_SECONDS,
     ): ShizukuController.ShellResult? =
-        shizukuRootShell(command) ?: SuShell.run(command, timeoutSeconds)
+        shizukuRootShell(command, timeoutSeconds) ?: SuShell.run(command, timeoutSeconds)
 
     /**
      * Whether KernelSU is loaded in this boot, by any reading that needs no shell to make.
@@ -322,24 +333,47 @@ internal object KernelSuRuntime {
      * shell can do is done rather than refused, and so an action that needs root can be refused for the
      * right reason - the shell is there, root is not.
      */
-    fun unprivilegedShell(command: String): ShizukuController.ShellResult? {
+    /**
+     * The shell route with no elevation, and an optional bound on the command itself.
+     *
+     * [timeoutMillis] exists for callers whose command can hang on something outside the phone: an
+     * install that is waiting on a package manager, or on a server that has stopped answering. Null is
+     * what everything that has always been unbounded here keeps asking for, so nothing quietly gains a
+     * deadline it did not have.
+     */
+    fun unprivilegedShell(
+        command: String,
+        timeoutMillis: Long? = null,
+    ): ShizukuController.ShellResult? {
         if (!ShizukuController.isRunning() || !ShizukuController.isGranted()) return null
-        return runCatching { ShizukuController.shell(command) }.getOrNull()
+        return runCatching { ShizukuController.shell(command, timeoutMillis) }.getOrNull()
     }
 
-    private fun shizukuRootShell(command: String): ShizukuController.ShellResult? {
+    /**
+     * The root route through Shizuku, with [timeoutSeconds] applying to the command on this side too.
+     *
+     * It used to apply only to the `su` fallback, which made the pair read as one bound when it was
+     * one route bounded and one not: a command that never came back came back null through `su` and
+     * never through Shizuku. The probes keep [PROBE_TIMEOUT_MILLIS] rather than the caller's window,
+     * because a probe is a question with a yes/no answer and it should not be able to spend the whole
+     * budget a real command was given.
+     */
+    private fun shizukuRootShell(command: String, timeoutSeconds: Long): ShizukuController.ShellResult? {
         if (!ShizukuController.isRunning() || !ShizukuController.isGranted()) return null
+        val timeoutMillis = timeoutSeconds * 1_000L
         // Shizuku's own process is already the shell uid, so a device that granted the late-load's
         // shell allowance answers `id` as root without a second escalation hop.
-        val direct = runCatching { ShizukuController.shell("id") }.getOrNull()
+        val direct = runCatching { ShizukuController.shell("id", PROBE_TIMEOUT_MILLIS) }.getOrNull()
         if (direct != null && direct.isRoot()) {
-            return runCatching { ShizukuController.shell(command) }.getOrNull()
+            return runCatching { ShizukuController.shell(command, timeoutMillis) }.getOrNull()
         }
-        if (!(runCatching { ShizukuController.shell("su -c id") }.getOrNull()?.isRoot() == true)) {
+        val elevated =
+            runCatching { ShizukuController.shell("su -c id", PROBE_TIMEOUT_MILLIS) }.getOrNull()
+        if (!(elevated?.isRoot() == true)) {
             return null
         }
         return runCatching {
-            ShizukuController.shell("su -c ${shellQuote(command)}")
+            ShizukuController.shell("su -c ${shellQuote(command)}", timeoutMillis)
         }.getOrNull()
     }
 
