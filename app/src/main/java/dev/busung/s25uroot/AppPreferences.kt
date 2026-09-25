@@ -134,8 +134,11 @@ object AppPreferences {
 
     fun payloadSources(context: Context): List<PayloadSource> {
         val stored = prefs(context).getString(PAYLOAD_SOURCES, null)
-        if (stored == null) return listOf(legacyPayloadSource(context))
-        return decodePayloadSources(stored).ifEmpty { listOf(PayloadSource.DEFAULT) }
+        if (stored == null) return defaultPayloadSources(context)
+        // Saved and empty is the same answer as never saved: a list with nothing in it is one the app
+        // could not read a payload from, so the defaults are what it gets rather than a sheet it can only
+        // be rescued from by typing.
+        return decodePayloadSources(stored).ifEmpty { defaultPayloadSources(context) }
     }
 
     fun setPayloadSources(context: Context, sources: List<PayloadSource>) {
@@ -146,14 +149,23 @@ object AppPreferences {
             .apply()
     }
 
-    private fun legacyPayloadSource(context: Context): PayloadSource {
+    /**
+     * The list a device that has not saved one starts from.
+     *
+     * [PayloadSource.DEFAULTS] with the older single-repository preference folded in: a build before the
+     * list stored one repository and one branch, and a device that set them did so on purpose, so that
+     * source keeps its place at the front. The official catalog is added beside it rather than in place of
+     * it - the defaults are what a device starts from, not what it is forced back to.
+     */
+    private fun defaultPayloadSources(context: Context): List<PayloadSource> {
         val preferences = prefs(context)
-        val repository = preferences.getString(LEGACY_PAYLOAD_REPOSITORY, null)
-        val branch = preferences.getString(LEGACY_PAYLOAD_BRANCH, null)
-        return PayloadSource.create(
-            repository = repository ?: PayloadSource.DEFAULT_REPOSITORY,
-            branch = branch ?: PayloadSource.DEFAULT_BRANCH,
+        val chosen = PayloadSource.create(
+            repository = preferences.getString(LEGACY_PAYLOAD_REPOSITORY, null)
+                ?: PayloadSource.DEFAULT_REPOSITORY,
+            branch = preferences.getString(LEGACY_PAYLOAD_BRANCH, null)
+                ?: PayloadSource.DEFAULT_BRANCH,
         ) ?: PayloadSource.DEFAULT
+        return listOf(chosen).withSourcesAdded(PayloadSource.DEFAULTS)
     }
 
     private fun encodePayloadSources(sources: List<PayloadSource>): String {

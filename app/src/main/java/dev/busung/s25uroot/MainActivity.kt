@@ -7615,13 +7615,18 @@ private fun PayloadSourcesEditor(
                 )
             }
 
-            if (sources.none { it.id == PayloadSource.DEFAULT.id }) {
-                // A link, and a quiet one: it puts back the source every build ships with, which is a
-                // convenience inside this list rather than one of the screen's answers.
+            val missingDefaults = PayloadSource.DEFAULTS.filter { default ->
+                sources.none { it.id == default.id }
+            }
+            if (missingDefaults.isNotEmpty()) {
+                // A link, and a quiet one: it puts back the sources every build ships with, which is a
+                // convenience inside this list rather than one of the screen's answers. Offered while any
+                // of them is missing, and it adds the ones that are - a list that kept this fork's feed and
+                // dropped the official catalog is the state this is for as much as an emptied list is.
                 AppTextAction(
                     AppAction(R.string.payload_source_default) {
                         clickHaptic(view)
-                        sources = sources.withSourceAdded(PayloadSource.DEFAULT)
+                        sources = sources.withSourcesAdded(missingDefaults)
                     },
                 )
             }

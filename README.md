@@ -150,10 +150,15 @@ check are not here at all: they are on Home, beside the version they are about.
 lists the GitHub `owner/repository` and branch of every catalog the app may use, with a checkbox
 per entry to enable or disable it and a delete action to drop it. The sheet is the right shape
 for this form: it rises with the keyboard, so the repository and branch fields and their Add
-button stay visible on a short screen, where an alert dialog's buttons end up behind the IME. The built-in feed
-([Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads)) is the
-default entry and can be restored with one button, so pointing the list at a testing branch
-for payloads that are not in it yet does not cost you that catalog.
+button stay visible on a short screen, where an alert dialog's buttons end up behind the IME. Two feeds are configured by default: this fork's
+([Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads)) and the official
+one it was forked from
+([BuSung-dev/Root-My-Galaxy-Payloads](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads)). Both are
+read, and every target the picker lists carries the feed that served it — the official catalog is where
+this fork's artifacts come from, and it publishes builds of targets this fork has not rebuilt, so
+dropping it would leave that half of the list unreachable. Either can be disabled or removed, and
+whichever is missing can be restored with one button, so pointing the list at a testing branch for
+payloads that are not in it yet does not cost you those catalogs.
 
 Adding a source reads it before it is saved: the repository is resolved to a commit, its
 `support/targets-v3.json` is downloaded and parsed, and only then does it join the list, so a

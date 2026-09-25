@@ -69,6 +69,37 @@ data class PayloadSource(
             enabled = true,
         )
 
+        /**
+         * The official catalog, read as a source in its own right.
+         *
+         * The same repository [LEGACY_REPOSITORY] names, and the two are not the same thing: that one is
+         * a *reader's* constant, which exists so a manifest may keep naming the repository it was written
+         * in without being refused, and this one is a source a device can be told to read from. Nothing
+         * is fetched through the first.
+         *
+         * It is a default beside this fork's feed because the two catalogs are not copies of each other.
+         * Every artifact in this fork's catalog was copied out of this one, so the targets the fork has not
+         * rebuilt - and the builds it rebuilt differently - live only here, and a device whose list starts
+         * from one catalog cannot run what the other is the only publisher of. Which of the two a profile
+         * came from is carried on every entry the picker lists, so reading both costs a reader nothing but
+         * the choice.
+         */
+        val OFFICIAL = PayloadSource(
+            repository = LEGACY_REPOSITORY,
+            branch = LEGACY_BRANCH,
+            enabled = true,
+        )
+
+        /**
+         * What a device that has never saved a source list starts from.
+         *
+         * This fork's feed first, and the only thing the order decides is what a run uses when nobody has
+         * picked a target: [resolveFor] takes the first profile that fits the device, and every profile
+         * carries the source it came from, so the second catalog is one tap away in the picker rather
+         * than the payload a plain run would load.
+         */
+        val DEFAULTS: List<PayloadSource> = listOf(DEFAULT, OFFICIAL)
+
         fun isCommitValid(commit: String): Boolean = COMMIT_PATTERN.matches(commit.trim())
 
         /**
@@ -119,6 +150,15 @@ fun List<PayloadSource>.enabledSources(): List<PayloadSource> = filter { it.enab
 
 fun List<PayloadSource>.withSourceAdded(source: PayloadSource): List<PayloadSource> =
     if (any { it.id == source.id }) this else this + source
+
+/**
+ * Adds several sources, in order, skipping the ones already here.
+ *
+ * The plural of [withSourceAdded], for the one caller that puts a whole default list back: restoring the
+ * defaults on a list that already holds one of them has to add the other rather than refuse both.
+ */
+fun List<PayloadSource>.withSourcesAdded(sources: List<PayloadSource>): List<PayloadSource> =
+    sources.fold(this) { list, source -> list.withSourceAdded(source) }
 
 fun List<PayloadSource>.withSourceRemoved(sourceId: String): List<PayloadSource> =
     filterNot { it.id == sourceId }

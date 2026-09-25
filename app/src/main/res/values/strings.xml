@@ -595,7 +595,7 @@
     <string name="payload_sources_description">Manage payload repositories.</string>
     <string name="payload_sources_title">Payload sources</string>
     <string name="payload_sources_summary">%1$d of %2$d enabled</string>
-    <string name="payload_sources_empty">No sources yet. Add a repository or restore the default source.</string>
+    <string name="payload_sources_empty">No sources yet. Add a repository or restore the defaults.</string>
     <string name="payload_sources_failed">Some sources could not be loaded</string>
     <string name="payload_repository_label">Owner/Repository</string>
     <string name="payload_repository_hint">Used to fetch the support manifest and payload files.</string>
@@ -622,7 +622,7 @@
     <string name="payload_source_pin_failed">Couldn\'t resolve this reference: %1$s</string>
     <string name="payload_source_add">Add source</string>
     <string name="payload_source_add_action">Add</string>
-    <string name="payload_source_default">Restore default</string>
+    <string name="payload_source_default">Restore defaults</string>
     <string name="payload_source_duplicate">That source is already added</string>
     <string name="payload_source_remove">Remove source</string>
     <string name="payload_source_check">Check source support</string>

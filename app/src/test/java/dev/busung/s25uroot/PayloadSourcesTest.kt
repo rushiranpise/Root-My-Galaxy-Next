@@ -7,13 +7,44 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PayloadSourcesTest {
-    private val official = PayloadSource.DEFAULT
+    private val ours = PayloadSource.DEFAULT
+    private val official = PayloadSource.OFFICIAL
     private val community = PayloadSource("example-org/payloads", "testing", enabled = false)
 
     @Test
     fun defaultSourceIsUsable() {
+        assertTrue(ours.enabled)
+        assertEquals("rushiranpise/Root-My-Galaxy-Payloads@main", ours.id)
+    }
+
+    @Test
+    fun aDeviceStartsFromBothCatalogs() {
+        // The official catalog is a default rather than something to be typed in: every artifact in this
+        // fork's feed was copied out of it, and it still publishes the targets this fork has not rebuilt,
+        // so a list that started with one of the two would have no way to reach the other at all.
+        assertEquals(listOf(ours, official), PayloadSource.DEFAULTS)
         assertTrue(official.enabled)
-        assertEquals("rushiranpise/Root-My-Galaxy-Payloads@main", official.id)
+        assertEquals(PayloadSource.LEGACY_REPOSITORY, official.repository)
+        assertEquals(PayloadSource.LEGACY_BRANCH, official.branch)
+        // Two different catalogs, not one entry written twice: the ids are what a saved list, a pin and a
+        // selection are keyed by, so equal ids would mean the second source silently replacing the first.
+        assertEquals(2, PayloadSource.DEFAULTS.map { it.id }.distinct().size)
+    }
+
+    @Test
+    fun restoringTheDefaultsAddsWhatIsMissingAndNothingElse() {
+        // The link in the sheet offers whatever the list is missing, so it has to be additive: a list
+        // that kept this fork's feed and dropped the official one must not be handed a duplicate of the
+        // feed it still has.
+        assertEquals(
+            listOf(ours, community, official),
+            listOf(ours, community).withSourcesAdded(PayloadSource.DEFAULTS),
+        )
+        assertEquals(PayloadSource.DEFAULTS, emptyList<PayloadSource>().withSourcesAdded(PayloadSource.DEFAULTS))
+        assertEquals(
+            PayloadSource.DEFAULTS,
+            PayloadSource.DEFAULTS.withSourcesAdded(PayloadSource.DEFAULTS),
+        )
     }
 
     @Test
@@ -37,13 +68,13 @@ class PayloadSourcesTest {
     fun selectionIdKeepsSourcesApartWhenTheyOfferTheSamePayload() {
         val payload = "galaxy-s25-series-kernel-6.6.98"
 
-        val officialSelection = selectionIdFor(official.id, payload)
+        val oursSelection = selectionIdFor(ours.id, payload)
         val communitySelection = selectionIdFor(community.id, payload)
-        assertEquals(officialSelection, selectionIdFor(official.id, payload))
-        assertFalse(officialSelection == communitySelection)
-        assertEquals(official.id, sourceFromSelectionId(officialSelection))
+        assertEquals(oursSelection, selectionIdFor(ours.id, payload))
+        assertFalse(oursSelection == communitySelection)
+        assertEquals(ours.id, sourceFromSelectionId(oursSelection))
         assertEquals(community.id, sourceFromSelectionId(communitySelection))
-        assertEquals(payload, profileFromSelectionId(officialSelection))
+        assertEquals(payload, profileFromSelectionId(oursSelection))
         assertEquals(payload, profileFromSelectionId(communitySelection))
     }
 
