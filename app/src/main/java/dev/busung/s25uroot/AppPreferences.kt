@@ -367,29 +367,40 @@ object AppPreferences {
     fun bootRootMode(context: Context): Boolean =
         prefs(context).getBoolean(BOOT_ROOT_MODE, false)
 
+    /**
+     * Turns the payload's boot gate on or off, and the helper's gate off with it.
+     *
+     * The two are alternatives, not companions - see [rerootAtBoot] - so switching this one on switches
+     * the other one off. Only on the way on: turning this gate off says nothing about the other, and the
+     * recovery flow below relies on that when it puts this one back after a reboot it could not make.
+     */
     fun setBootRootMode(context: Context, enabled: Boolean) {
-        prefs(context).edit()
-            .putBoolean(BOOT_ROOT_MODE, enabled)
-            .apply()
+        val editor = prefs(context).edit().putBoolean(BOOT_ROOT_MODE, enabled)
+        if (enabled) editor.putBoolean(DFR_REROOT_AT_BOOT, false)
+        editor.apply()
     }
 
     /**
      * Whether a boot with no root should ask the stage-two helper to reroot.
      *
-     * Off by default, and separate from [bootRootMode] rather than folded into it, because the two are
-     * different ways to gain root and only one of them is an install: root on boot loads the payload this
-     * app would load from the payload sheet, while this one starts the helper - which is the phone this
-     * setting exists for, where the KernelSU in the kernel comes from the exploit the helper runs. A
-     * device that wants both is a device that has to say so twice, which is honest: each is unattended
-     * behaviour with its own failure to report.
+     * Off by default, and the other way a boot can be asked to gain root: root on boot loads the payload
+     * this app would load from the payload sheet, while this one starts the helper - which is the phone
+     * this setting exists for, where the KernelSU in the kernel comes from the exploit the helper runs.
+     * They are alternatives rather than companions even so, because both are unattended and both decide
+     * what a boot with no root does: with both on, one boot is two runs racing for the same kernel, and
+     * which of them wins is whichever reads the boot first. So each setter turns the other gate off, and a
+     * boot has exactly one answer to what it should do about root.
      */
     fun rerootAtBoot(context: Context): Boolean =
         prefs(context).getBoolean(DFR_REROOT_AT_BOOT, false)
 
+    /**
+     * Turns the helper's boot gate on or off, and the payload's gate off with it when this one comes on.
+     */
     fun setRerootAtBoot(context: Context, enabled: Boolean) {
-        prefs(context).edit()
-            .putBoolean(DFR_REROOT_AT_BOOT, enabled)
-            .apply()
+        val editor = prefs(context).edit().putBoolean(DFR_REROOT_AT_BOOT, enabled)
+        if (enabled) editor.putBoolean(BOOT_ROOT_MODE, false)
+        editor.apply()
     }
 
     /**

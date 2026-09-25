@@ -289,7 +289,34 @@ class DfrBootTest {
         )
         assertTrue(
             "turning the setting off no longer reaches a gate that is already waiting on a shell",
-            settings.contains("if (!enabled) DfrBootService.stop(this)"),
+            settings.contains("else DfrBootService.stop(this)"),
+        )
+    }
+
+    @Test
+    fun `the two boot gates cannot both be on`() {
+        // Root on boot and Reroot at boot are both unattended behaviour for the same boot, so a phone that
+        // asked for both is a phone that handed one boot to two runs: each reads the boot and each spends
+        // its own payload, and which of them roots the phone is whichever read it first - timing deciding
+        // something the person was asked about. Turning one on is therefore turning the other off, in the
+        // setters that every caller goes through rather than in the rows alone.
+        val preferences = source("src/main/java/dev/busung/s25uroot/AppPreferences.kt")
+        assertTrue(
+            "turning the payload gate on no longer turns the helper gate off, so one boot can be asked " +
+                "for both",
+            preferences.contains("if (enabled) editor.putBoolean(DFR_REROOT_AT_BOOT, false)"),
+        )
+        assertTrue(
+            "turning the helper gate on no longer turns the payload gate off",
+            preferences.contains("if (enabled) editor.putBoolean(BOOT_ROOT_MODE, false)"),
+        )
+        // And the rows, which hold their own copies of both readings: a preference write the screen does
+        // not move leaves the other switch drawn as on over a phone that has already turned it off.
+        val settings = source("src/main/java/dev/busung/s25uroot/MainActivity.kt")
+        assertTrue(
+            "the row for the gate that was just turned off keeps showing what the phone no longer holds",
+            settings.contains("if (enabled) rerootAtBoot = false") &&
+                settings.contains("if (enabled) bootRootMode = false"),
         )
     }
 

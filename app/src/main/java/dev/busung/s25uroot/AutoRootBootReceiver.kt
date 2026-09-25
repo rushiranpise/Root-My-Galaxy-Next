@@ -62,9 +62,12 @@ class AutoRootBootReceiver : BroadcastReceiver() {
         // root is exactly the boot that needs this. Started on the same quick reading as everything else
         // here, and the gate asks again - see [DfrBootService].
         //
-        // Not an `else` to the install below: the two are different ways to gain root and a device may have
-        // asked for both, which is why they have an attempt each. Whichever roots the phone first is the one
-        // the other then finds already done, and both read KernelSU before spending anything.
+        // Not an `else` to the install below: it is its own way to gain root, asked for by its own setting.
+        // The settings no longer let both gates be on at once - turning one on turns the other off - so the
+        // attempt each keeps is for the states the settings cannot reach: a phone that was already carrying
+        // both when they became exclusive, and one whose flags an older build wrote. Whichever roots the
+        // phone first is the one the other then finds already done, and both read KernelSU before spending
+        // anything.
         if (!rootActive && AppPreferences.rerootAtBoot(context)) {
             AppLog.info(AppLogTags.BOOT, "A reroot at boot was asked for")
             DfrBootService.start(context)

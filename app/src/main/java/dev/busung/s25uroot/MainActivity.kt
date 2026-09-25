@@ -472,9 +472,14 @@ class MainActivity : ComponentActivity() {
                     onBootRootModeChanged = { enabled ->
                         AppPreferences.setBootRootMode(this, enabled)
                         bootRootMode = enabled
-                        // Turning it off has to reach a gate that is already waiting, not just the
-                        // next boot: a foreground service left running would install anyway.
-                        if (!enabled) AutoRootService.stop(this)
+                        // The preference turns the helper's gate off with this one, so its row has to move
+                        // with this one rather than keep showing what the phone no longer holds.
+                        if (enabled) rerootAtBoot = false
+                        // Either way a gate that is already waiting has to be reached, not just the next
+                        // boot: a foreground service left running would install - or start the helper -
+                        // anyway. Turning this one on stops the helper's gate, which is the alternative it
+                        // just replaced; turning it off stops this gate.
+                        if (enabled) DfrBootService.stop(this) else AutoRootService.stop(this)
                     },
                     onRestartAfterRootChanged = { enabled ->
                         AppPreferences.setRestartAfterRoot(this, enabled)
@@ -483,10 +488,14 @@ class MainActivity : ComponentActivity() {
                     onRerootAtBootChanged = { enabled ->
                         AppPreferences.setRerootAtBoot(this, enabled)
                         rerootAtBoot = enabled
+                        // Same as the install gate's own toggle: the preference turns the other gate off,
+                        // so its row moves too.
+                        if (enabled) bootRootMode = false
                         // The same reach the install gate's own toggle has, for the same reason: a gate
                         // that is already waiting on a shell would otherwise start the helper minutes
-                        // after the user turned the setting that asked for it off.
-                        if (!enabled) DfrBootService.stop(this)
+                        // after the user turned the setting that asked for it off - and turning this one
+                        // on stops the install gate, which is the alternative it just replaced.
+                        if (enabled) AutoRootService.stop(this) else DfrBootService.stop(this)
                     },
                     onBootSettleChanged = { seconds ->
                         AppPreferences.setBootSettleSeconds(this, seconds)
