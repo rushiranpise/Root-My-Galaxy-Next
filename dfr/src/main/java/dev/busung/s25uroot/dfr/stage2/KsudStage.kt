@@ -133,8 +133,8 @@ internal object KsudStage {
             // the unverified keep it is, because nothing here compared the two files.
             if (existing.isFile && existing.length() > 0) {
                 log.appendLine(
-                    "[*] daemon already staged at $DEST (${existing.length()} bytes, left as it is): " +
-                        "the app's copy at $STAGED_BY_THE_APP was not readable to compare it against",
+                    "[*] The daemon is already staged at $DEST (${existing.length()}): " +
+                        "The existing file was left unchanged because the app's copy at $STAGED_BY_THE_APP could not be read for comparison.",
                 )
                 return log.toString()
             }
@@ -149,22 +149,22 @@ internal object KsudStage {
         // megabytes to write what is already in place. Anything else is replaced - see the KDoc above.
         if (sameBytes(existing, mine)) {
             log.appendLine(
-                "[*] daemon already staged and it is this device's own: $DEST " +
-                    "(${existing.length()} bytes, left as it is)",
+                "[*] The daemon is already staged at $DEST " +
+                    "(${existing.length()})",
             )
             return log.toString()
         }
 
-        log.appendLine("[*] daemon source: $STAGED_BY_THE_APP (${mine.size} bytes)")
+        log.appendLine("[*] The daemon is staged at $STAGED_BY_THE_APP (${mine.size})")
         return try {
             File(DEST).writeBytes(mine)
             android.system.Os.chmod(DEST, MODE)
-            log.appendLine("[+] staged $DEST")
+            log.appendLine("[+] daemon staged $DEST")
             log.toString()
         } catch (error: Throwable) {
             // Worth reporting plainly: this fails when the app was installed as an ordinary app, which
             // is exactly the state a stage two that was never re-keyed is in.
-            log.appendLine("[!] $DEST not writable: ${error.javaClass.simpleName}: ${error.message}")
+            log.appendLine("[!] $DEST is not writable: ${error.javaClass.simpleName}: ${error.message}")
             log.toString()
         }
     }
@@ -185,15 +185,15 @@ internal object KsudStage {
     private fun refusal(ours: File, context: Context): String = buildString {
         appendLine(
             if (ours.isFile) {
-                "[!] $STAGED_BY_THE_APP is present but unreadable, so nothing can be staged from it"
+                "[!]  The app's daemon at $STAGED_BY_THE_APP cannot be read, so it cannot be staged."
             } else {
-                "[x] nothing staged by the app to stage: no daemon at $STAGED_BY_THE_APP"
+                "[x] The app has not staged a daemon: no daemon was found at $STAGED_BY_THE_APP"
             },
         )
-        appendLine("    nothing at $DEST either, so there is no earlier staging to keep.")
+        appendLine("    Nothing was found at $DEST either, so there is no previous daemon to keep.")
         appendLine(
-            "    $LEFT_BY_THE_PAYLOAD is not taken: that path holds whichever KernelSU this phone " +
-                "has installed, and the daemon this run execs has to be this device's own payload's.",
+            "    $LEFT_BY_THE_PAYLOAD is not used: it contains the KernelSU installed on this device. " +
+        "This run must use the daemon from this device's own payload.",
         )
         val installed = installedFlavors(context).map { it.packageName }
         if (installed.isNotEmpty()) {
@@ -201,7 +201,7 @@ internal object KsudStage {
             // KernelSU, and which one is in the kernel cannot be known from this process.
             appendLine("    installed managers: ${installed.joinToString()}")
         }
-        append("    open the app and run the system uid flow again: it stages the daemon this device resolved.")
+        append("    Open the app and run the System UID process again. It will stage the daemon for this device.")
     }
 
     /** Whether a daemon is already at [DEST]. */

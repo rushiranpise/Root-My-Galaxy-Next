@@ -135,9 +135,9 @@ class Stage2Activity : Activity() {
             override fun onReceive(context: Context, intent: Intent) {
                 try {
                     controller = intent.extras?.getBinder(StageReceiver.CONTROLLER)
-                    append("[+] controller received from network_stack")
+                    append("[+] Got the controller from network_stack")
                 } catch (error: Throwable) {
-                    append("[x] reading the controller binder failed: $error")
+                    append("[x] Could not get the controller: $error")
                 } finally {
                     synchronized(controllerLock) { controllerLock.notifyAll() }
                 }
@@ -163,7 +163,7 @@ class Stage2Activity : Activity() {
     /** Reads the phone again and stages again, which is the one action here that changes nothing. */
     private fun reread() {
         if (running.get()) {
-            append("[!] a run is in progress, so the readings are left as they are")
+            append("[!] A run is already in progress, so the current readings were left unchanged.")
             return
         }
         runInBackground {
@@ -182,20 +182,20 @@ class Stage2Activity : Activity() {
     private fun startRun() {
         if (armed()) {
             append(
-                "[x] the exploit is already armed ($ARMED_MARKER exists), so a second run is refused.\n" +
-                    "    Only a hard reboot clears it - a soft reboot does not.",
+                "[x] The exploit is already active ($ARMED_MARKER exists), so it cannot be run again.\n" +
+                    "    Only a full device reboot will clear it. A soft reboot will not.",
             )
             refreshReadouts()
             return
         }
         if (!running.compareAndSet(false, true)) {
-            append("[!] a run is already in progress")
+            append("[!] A run is already in progress")
             return
         }
         runButton.isEnabled = false
         rereadButton.isEnabled = false
         progress.visibility = View.VISIBLE
-        outcomeView.text = "running the exploit - the log below is the trace"
+        outcomeView.text = "Running the exploit. The log below shows what is happening."
         outcomeView.setTextColor(palette.onSurfaceVariant)
         refreshReadouts()
         runInBackground {
@@ -210,14 +210,14 @@ class Stage2Activity : Activity() {
                     rereadButton.isEnabled = true
                     progress.visibility = View.GONE
                     outcomeView.text = if (success) {
-                        "root obtained - check the KernelSU manager"
+                        "Root access obtained. Check the KernelSU Manager."
                     } else {
-                        "the run stopped at $result; the log above says which step"
+                        "The process stopped at $result. Check the log above for details."
                     }
                     outcomeView.setTextColor(if (success) palette.success else palette.error)
                     refreshReadouts()
                 }
-                Log.i(TAG, "run finished with $result")
+                Log.i(TAG, "Run finished with $result")
                 // A run a person asked for, whose last step is the one the phone cannot finish by itself:
                 // what was just loaded is inert until the Android userspace is built again, and the restart
                 // that does it is KernelSU's own soft reboot. This process cannot ask for it - that needs a
@@ -235,8 +235,9 @@ class Stage2Activity : Activity() {
         val binder = awaitController(CONTROLLER_TIMEOUT_MS)
         if (binder == null) {
             append(
-                "[x] no controller within ${CONTROLLER_TIMEOUT_MS / 1000}s: the hop did not land, " +
-                    "or network_stack was too slow. The log above says which step refused.",
+                "[x] No controller was found within ${CONTROLLER_TIMEOUT_MS / 1000}s. " +
+    "The exploit may not have worked, or network_stack took too long. " +
+    "Check the log above for details.",
             )
             return result
         }
@@ -248,7 +249,7 @@ class Stage2Activity : Activity() {
         val reporter = object : Binder() {
             override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
                 runCatching { append(data.readString().orEmpty()) }
-                    .onFailure { Log.e(TAG, "reporter failed", it) }
+                    .onFailure { Log.e(TAG, "Reporter failed", it) }
                 return true
             }
         }
@@ -256,12 +257,12 @@ class Stage2Activity : Activity() {
         try {
             if (binder.transact(CODE_RUN_ALL, request, reply, 0)) {
                 result = reply.readInt()
-                append("\nrun all -> $result")
+                append("\nRun all -> $result")
             } else {
-                append("[x] the controller refused the call")
+                append("[x] The controller refused the call")
             }
         } catch (error: Throwable) {
-            append("[x] controller call failed: ${error.message}")
+            append("[x] Controller call failed: ${error.message}")
         } finally {
             request.recycle()
             reply.recycle()
@@ -286,8 +287,8 @@ class Stage2Activity : Activity() {
         val launch = packageManager.getLaunchIntentForPackage(MAIN_PACKAGE)
         if (launch == null) {
             append(
-                "[*] root is loaded, and this is the state a restart applies: $MAIN_PACKAGE is not " +
-                    "installed, so the reboot is yours to do",
+                "[*] Root is loaded. A restart is required to apply this state. " +
+    "$MAIN_PACKAGE is not installed, so you need to restart the device yourself.",
             )
             return
         }
@@ -296,9 +297,11 @@ class Stage2Activity : Activity() {
         val started = runCatching { startActivity(launch) }.isSuccess
         append(
             if (started) {
-                "[*] root is loaded, and this is the state a restart applies: asked $MAIN_PACKAGE to do it"
+                "[*] Root is loaded. A restart is required to apply this state. " +
+    "$MAIN_PACKAGE was asked to restart the device."
             } else {
-                "[!] root is loaded, but $MAIN_PACKAGE could not be opened, so the reboot is yours to do"
+                "[!] Root is loaded, but $MAIN_PACKAGE could not be opened. " +
+        "You need to restart the device yourself."
             },
         )
     }
@@ -311,7 +314,7 @@ class Stage2Activity : Activity() {
             while (current == null) {
                 val left = deadline - SystemClock.uptimeMillis()
                 if (left <= 0) break
-                append("[*] waiting for the controller (${left / 1000}s left)")
+                append("[*] Waiting for the controller (${left / 1000}s left)")
                 runCatching { controllerLock.wait(minOf(left, 5_000)) }
                     .onFailure { Thread.currentThread().interrupt() }
                 current = controller
@@ -349,8 +352,8 @@ class Stage2Activity : Activity() {
     private fun daemon(): String {
         val staged = File(KsudStage.DEST)
         if (!staged.isFile) {
-            return "nothing at ${KsudStage.DEST}\n" +
-                "the app stages it while it has root, so a boot with no root reaches a run from here"
+            return "Nothing at ${KsudStage.DEST}\n" +
+                "The app stages it while it has root, so a boot with no root reaches a run from here"
         }
         val size = "%,d bytes".format(staged.length())
         // Running it is the only way to know which build it is, and this process may be refused that -
@@ -365,7 +368,7 @@ class Stage2Activity : Activity() {
             if (version.isNotEmpty()) {
                 version
             } else {
-                "the version is not readable from this process (the daemon is executed by the exploit's root)"
+                "Could not read the version from this process. The daemon is running with root access from the exploit."
             }
     }
 
@@ -387,7 +390,7 @@ class Stage2Activity : Activity() {
             } else {
                 installed.joinToString("\n") { "${it.label}  ${it.packageName}" }
             }
-            return "the app did not say which flavour this run loads\n$others"
+            return "The app did not report which version this run uses.\n$others"
         }
         val here = KsudStage.isInstalled(this, told)
         return buildString {
@@ -396,10 +399,10 @@ class Stage2Activity : Activity() {
             val others = installed.filter { it.id != told.id }
             if (others.isNotEmpty()) {
                 append("\n")
-                append(others.joinToString("\n") { "${it.label}  ${it.packageName} is also here" })
+                append(others.joinToString("\n") { "${it.label}  ${it.packageName} is also installed" })
             }
             if (!here) {
-                append("\nthe kernel this run loads would have nothing to drive it")
+                append("\nThe KernelSU version used by this run has no manager to control it")
             }
         }
     }
@@ -413,34 +416,34 @@ class Stage2Activity : Activity() {
             else -> palette.success
         }
         stateView.text = when {
-            busy -> "running"
-            isArmed -> "hook armed"
-            else -> "ready"
+            busy -> "Running"
+            isArmed -> "Active"
+            else -> "Ready"
         }
         stateView.setTextColor(palette.onAccent(tint))
         stateView.background = palette.pillBackground(tint)
         identityView.text = identity()
         hookView.text = if (isArmed) {
-            "$ARMED_MARKER exists - the hooks are in this boot's kernel\n" +
-                "a second run is refused; only a hard reboot clears it"
+            "$ARMED_MARKER exists - the hooks are active in this boot's kernel.\n" +
+        "A second run is not allowed. Only a full device reboot will clear them."
         } else {
-            "$ARMED_MARKER absent - no run has armed this boot"
+            "$ARMED_MARKER is not present - the hooks have not been enabled for this boot."
         }
         hookView.setTextColor(if (isArmed) palette.warning else palette.onSurface)
         daemonView.text = daemon()
         managerView.text = managers()
         refreshManagerAction()
         startedView.text = if (autorun) {
-            "the app, with the boot: this run started by itself"
+            "Started automatically when the device booted"
         } else {
-            "you, from the launcher or the app"
+            "Started by you from the launcher or app"
         }
+
         bootView.text = when (rerootAtBoot) {
-            true -> "on - the app reroots after a boot with no root"
-            false -> "off - a boot with no root is left to you"
-            // The app decides this and this screen only shows it, so a value nobody sent is said as one
-            // rather than guessed: this screen has no setting of its own to read instead.
-            null -> "not read here: the app holds this setting"
+            true -> "On - the app will get root again after a boot without root"
+            false -> "Off - if the device boots without root, you must start it yourself"
+            // The app decides this setting. This screen only displays it.
+            null -> "Not available here - the app controls this setting"
         }
     }
 
@@ -471,27 +474,27 @@ class Stage2Activity : Activity() {
             setPadding(dip(20), dip(20), dip(20), dip(28))
             setBackgroundColor(palette.surface)
         }
-        column.addView(text("RMG-NEXT helper", 32f, palette.onSurface, Typeface.DEFAULT))
+        column.addView(text("RMG-NEXT Helper", 32f, palette.onSurface, Typeface.DEFAULT))
         column.addView(
-            text("stage two  ·  uid 1000  ·  system", 12f, palette.onSurfaceVariant, Typeface.DEFAULT, 4),
+            text("uid 1000  ·  system", 12f, palette.onSurfaceVariant, Typeface.DEFAULT, 4),
         )
 
-        stateView = pill("ready")
+        stateView = pill("Ready")
         identityView = value()
         hookView = value()
         daemonView = value()
         managerView = value()
-        openManagerButton = answer("Open manager", loud = false).apply {
+        openManagerButton = answer("Open Manager", loud = false).apply {
             setOnClickListener { openManager() }
         }
         column.addView(
             card(
                 sectionLabel("Status"),
                 stateView,
-                field("Who this process is", identityView),
-                field("Hooks in this kernel", hookView),
-                field("Daemon for this boot", daemonView),
-                field("KernelSU installed", managerView),
+                field("Process", identityView),
+                field("Hooked", hookView),
+                field("Daemon", daemonView),
+                field("KernelSU Manager", managerView),
                 // The action for that reading, under it, which is the shape the app's own readings cards
                 // use for the same reason: this is the one thing on this screen that another app owns, and
                 // being told which manager this run loads is only half of what to do with it.
@@ -500,15 +503,14 @@ class Stage2Activity : Activity() {
         )
 
         outcomeView = text(
-            "one press: the exploit patches the vendor file, makes modprobe usable, has init run it " +
-                "and loads the module",
+            "Ready to Root?",
             12f,
             palette.onSurfaceVariant,
             Typeface.DEFAULT,
             8,
         )
-        runButton = answer("Obtain root", loud = true)
-        rereadButton = answer("Read again", loud = false)
+        runButton = answer("Run", loud = true)
+        rereadButton = answer("Refresh", loud = false)
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             visibility = View.GONE
             isIndeterminate = true
@@ -523,9 +525,9 @@ class Stage2Activity : Activity() {
         bootView = value()
         column.addView(
             card(
-                sectionLabel("Boot"),
-                field("Started by", startedView),
-                field("Reroot at boot", bootView),
+                sectionLabel("Reason"),
+                field("Started", startedView),
+                field("Auto Root", bootView),
                 openAppButton(),
             ),
         )
@@ -617,8 +619,8 @@ class Stage2Activity : Activity() {
     private fun openManager() {
         val target = managerTarget()
         if (target == null) {
-            outcomeView.text = "no manager to open: the app did not say which flavour this run loads, " +
-                "and no single manager is installed"
+            outcomeView.text = "No manager to open: the app did not say which version this run uses, " +
+    "and no single manager is installed."
             outcomeView.setTextColor(palette.onSurfaceVariant)
             return
         }
@@ -626,7 +628,7 @@ class Stage2Activity : Activity() {
         if (launch == null) {
             outcomeView.text = "no ${target.label} manager at ${target.packageName}"
             outcomeView.setTextColor(palette.error)
-            append("[!] ${target.packageName} is not installed, so there is nothing to open")
+            append("[!] ${target.packageName} is not installed")
             return
         }
         append("[*] opening the ${target.label} manager (${target.packageName})")
@@ -642,7 +644,7 @@ class Stage2Activity : Activity() {
                 outcomeView.setTextColor(palette.error)
                 return@setOnClickListener
             }
-            append("[*] opening $MAIN_PACKAGE, where the boot behaviour is set")
+            append("[*] Opening $MAIN_PACKAGE to change the boot settings")
             startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         return view
