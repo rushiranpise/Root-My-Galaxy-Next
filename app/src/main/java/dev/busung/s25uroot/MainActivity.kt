@@ -990,6 +990,7 @@ private fun RootApp(
             targetCatalog.profiles.resolveFor(device)
         }
         val freshSession = resolved?.requiresFreshP0Session == true
+        val cachedOffset = installViewModel.cachedOffsetForThisBoot()
         RunPlanDisplay(
             deviceLabel = "${device.model} \u00b7 ${device.kernelRelease}",
             targetLabel = resolved?.let { "${it.displayName} (${it.profileId})" },
@@ -1014,11 +1015,13 @@ private fun RootApp(
             shizuku = shizukuMode,
             payloadMode = payloadMode,
             partitionReadOnly = partitionReadOnly,
+            cachedOffset = cachedOffset,
             // The policy a run would actually use, resolved here from the same stored override a run
             // reads - so the preview shows the environment the run will get and names the side that
             // chose each of the three numbers a user can move.
             plan = InstallViewModel.exploitPlan(
                 freshSession,
+                cachedOffset,
                 shizukuMode,
                 ExploitOverride.resolve(
                     policy = resolved?.routePolicy ?: ExploitRoutePolicy.LEGACY,
@@ -6489,6 +6492,7 @@ private data class RunPlanDisplay(
     val shizuku: Boolean,
     val payloadMode: PayloadMode,
     val partitionReadOnly: Boolean,
+    val cachedOffset: String?,
     val plan: ExploitPlan,
 )
 
@@ -6710,6 +6714,11 @@ private fun RunPlanDialog(
                         RunPlanMonospace("$name=$value")
                     }
                 }
+                RunPlanRow(
+                    stringResource(R.string.run_plan_cached_offset),
+                    display.cachedOffset
+                        ?: stringResource(R.string.run_plan_cached_offset_none),
+                )
                 RunPlanSection(stringResource(R.string.run_plan_limits))
                 Text(
                     stringResource(R.string.run_plan_limits_note),

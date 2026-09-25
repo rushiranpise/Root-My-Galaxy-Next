@@ -643,6 +643,8 @@
     <string name="run_plan_variables">Payload variables</string>
     <string name="run_plan_variables_none">No other settings are set for this run</string>
     <string name="run_plan_shizuku_arguments">Added by Shizuku</string>
+    <string name="run_plan_cached_offset">Cached P0 offset for this boot</string>
+    <string name="run_plan_cached_offset_none">None; the leak has not been won on this boot</string>
     <string name="run_plan_limits">App time limits</string>
     <string name="run_plan_stall">No output before the run is treated as stalled</string>
     <string name="run_plan_stall_none">Not applied to a fresh session</string>

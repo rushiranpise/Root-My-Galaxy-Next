@@ -1311,6 +1311,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
         }
         val logPrefix = mutableState.value.log
+        val bootToken = currentBootToken()
+        val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
             ShizukuController.exec(
@@ -1319,6 +1321,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     stagedPayload.absolutePath,
                     helper.absolutePath,
                     requiresFreshP0Session,
+                    cachedP0Offset,
                     routePolicy,
                 ),
             )
@@ -1333,6 +1336,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             processBuilder.environment().putAll(
                 exploitEnvironment(
                     requiresFreshP0Session,
+                    cachedP0Offset,
                     routePolicy,
                     payloadQuietWindowSeconds(),
                 ),
@@ -1356,6 +1360,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             while (process.isAlive) {
                 val rawLog = readLog()
                 if (rawLog != lastRawLog) {
+                    if (!requiresFreshP0Session) cacheP0Offset(bootToken, rawLog)
                     publishExploitLog(logPrefix, rawLog)
                     lastRawLog = rawLog
                     lastProgressAt = SystemClock.elapsedRealtime()
@@ -1385,6 +1390,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
             val exitCode = process.waitFor()
             val rawLog = readLog()
+            if (!requiresFreshP0Session) cacheP0Offset(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog)
             // Both transports drain into `captured` during the poll loop, so a child that still
             // holds the pipe open cannot block the loop; nothing here reads it, because what the
@@ -1436,6 +1442,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val logPrefix = mutableState.value.log
         val helper = nativeHelperFile()
         require(helper.isFile) { app.getString(R.string.error_helper_unavailable) }
+        val bootToken = currentBootToken()
+        val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
 
         val totalMillis = activeCeilings.totalMillis
         // A socket handshake and a pushed upload are blocking work, and the run itself is driven from
@@ -1459,6 +1467,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 session.runStreaming(
                     command = localAdbExploitCommand(
                         requiresFreshP0Session,
+                        cachedP0Offset,
                         routePolicy,
                     ),
                     overallTimeoutMs = totalMillis,
@@ -1468,6 +1477,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     stallTimeoutMs = if (requiresFreshP0Session) totalMillis else activeCeilings.stallMillis,
                     shouldStop = { !mutableState.value.busy },
                 ) { raw ->
+                    if (!requiresFreshP0Session) cacheP0Offset(bootToken, raw)
                     publishExploitLog(logPrefix, raw)
                 }
             }
@@ -1659,14 +1669,57 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
     private fun currentBootToken(): String? = kernelBootToken()
 
+    /** The slide offset cached for this boot, if an earlier run found one. */
+    internal fun cachedOffsetForThisBoot(): String? = cachedP0Offset(currentBootToken())
+
+    /**
+     * The offset this boot has already won, if any.
+     *
+     * Keyed by the boot token, because a slide belongs to the boot that produced it: an offset carried
+     * across a reboot is not a hint, it is a wrong answer, and the payload treats a supplied offset as
+     * final.
+     */
+    private fun cachedP0Offset(bootToken: String?): String? {
+        if (bootToken == null) return null
+        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
+        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) return null
+        return stored.getString(P0_CACHE_OFFSET, null)
+    }
+
+    /**
+     * Records the offset a run's own output reported, for every later run in the same boot.
+     *
+     * The payload prints it on the `slide-kaslr-ok` line once it has won the leak, and it is the one
+     * number a run can pass to the next one: the p0 stage is a lottery that can take many attempts, and
+     * winning it once is enough for every later run on this boot. Reading the payload's own line back
+     * is the only way the app can know the number - it cannot compute one and has nothing else to trust.
+     */
+    private fun cacheP0Offset(bootToken: String?, log: String) {
+        if (bootToken == null) return
+        val match = P0_OFFSET_PATTERN.findAll(log).lastOrNull() ?: return
+        val offset = match.groupValues[1].toLongOrNull(16) ?: return
+        if (offset !in 0..P0_OFFSET_MAX || offset and P0_OFFSET_MASK != 0L) return
+        val value = "0x${offset.toString(16)}"
+        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
+        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) == bootToken &&
+            stored.getString(P0_CACHE_OFFSET, null) == value
+        ) return
+        stored.edit()
+            .putString(P0_CACHE_BOOT_TOKEN, bootToken)
+            .putString(P0_CACHE_OFFSET, value)
+            .apply()
+    }
+
     private fun localAdbExploitCommand(
         requiresFreshP0Session: Boolean,
+        cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
         exploitEnvironment(
             requiresFreshP0Session,
+            cachedP0Offset,
             routePolicy,
             payloadQuietWindowSeconds(),
         ).forEach { (name, value) ->
@@ -1713,10 +1766,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         payloadPath: String,
         helperPath: String,
         requiresFreshP0Session: Boolean,
+        cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
     ): Array<String> = buildList {
         exploitEnvironment(
             requiresFreshP0Session,
+            cachedP0Offset,
             routePolicy,
             payloadQuietWindowSeconds(),
         ).forEach { (name, value) ->
@@ -2221,6 +2276,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
         private const val RECEIPT_VERIFIED = "verified"
+        private const val P0_CACHE = "p0_cache"
+        private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
+        private const val P0_CACHE_OFFSET = "offset"
+        private const val P0_OFFSET_MAX = 0x1f0000L
+        private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
@@ -2233,6 +2293,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private val HELPER_POLL_INTERVAL = 250.milliseconds
         private val SHIZUKU_LOG_POLL_INTERVAL = 1.seconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
+        private val P0_OFFSET_PATTERN = Regex(
+            "slide-kaslr-ok[^\\n]*slide=([0-9a-fA-F]{16})",
+        )
 
         /** The ceilings a run would get right now, from the settings. */
         internal fun runCeilings(context: Context, freshSession: Boolean): RunCeilings = RunLimits.resolve(
@@ -2251,6 +2314,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
          */
         internal fun exploitPlan(
             requiresFreshP0Session: Boolean,
+            cachedP0Offset: String?,
             shizuku: Boolean,
             // Required, with no default: a default here would have to guess whether the run is a fresh
             // session, and guessing wrong is exactly the drift - origins that describe a policy other
@@ -2268,6 +2332,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // log records what it actually handed over.
             environment = exploitEnvironment(
                 requiresFreshP0Session,
+                cachedP0Offset,
                 routePolicy.policy,
                 BootSettle.payloadQuietWindowSeconds(bootSettleSeconds, overridden = false),
             ),
@@ -2286,6 +2351,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
         internal fun exploitEnvironment(
             requiresFreshP0Session: Boolean,
+            cachedP0Offset: String?,
             routePolicy: ExploitRoutePolicy = ExploitRoutePolicy.LEGACY,
             // Required, with no default: a default here would have to guess the run's settle decision,
             // and guessing it is how the app's gate and the payload's came to disagree about one boot.
@@ -2304,6 +2370,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             if (!requiresFreshP0Session) {
                 put("P0_ATTEMPT_TIMEOUT_SEC", routePolicy.p0AttemptTimeoutSec.toString())
                 put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", routePolicy.attemptTimeoutSec.toString())
+                if (routePolicy.p0OffsetCache) {
+                    cachedP0Offset?.let { put(ExploitRoutePolicy.P0_OFFSET_ENV, it) }
+                }
             }
             routePolicy.slideRoute.env?.let { put(ExploitRoutePolicy.SLIDE_SOURCE_ENV, it) }
             // The p0 window's base, when the policy names one - which today means a user moved it in Run
@@ -2314,21 +2383,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             routePolicy.p0WindowDelayUsec?.let {
                 put(ExploitRoutePolicy.P0_WINDOW_DELAY_ENV, it.toString())
             }
-            // SLIDE_P0_OFFSET is deliberately never set, whatever the profile's `p0OffsetCache` says.
+            // The offset this boot already won, when the feed's policy allows the hand-over. The
+            // payload treats a supplied offset as final and returns before it prepares the p0 pipe
+            // oracle, which is the entire p0 lottery skipped - the stage that has to be won attempt
+            // after attempt otherwise, and the reason the original app roots in minutes on a device
+            // this app cannot get past that stage on. It is bounded to this boot twice over: the cache
+            // is keyed by the boot token, and a fresh-session profile never reaches this line.
             //
-            // The payload can learn the slide two ways: it can find it, or it can be told it. Being
-            // told short-circuits `slide_leak_kernel_base` before any of the work that path does -
-            // preparing the p0 pipe oracle, holding and then restoring its gate and probe slot pages -
-            // and that work is what leaves the slab in the state the next stage needs. The payload's
-            // forced branch is only sound for a caller that can also pass P0_GATE_PAGE_STRUCT and
-            // P0_PROBE_PAGE_STRUCT, which is its own supervisor retrying inside one process; an app
-            // that carried an offset over from an earlier run can pass neither.
-            //
-            // Measured on this device (SM-S938U1, one boot, 2026-09-23): nine runs handed 0x0f0000 or
-            // 0x180000 all died at `phys step cache gate failed` followed by "stack writer ran;
-            // refusing retry on this boot", and after the app's stored offset was cleared the next run
-            // discovered 0x0f0000 for itself and reached root. Same build, same exploit, same boot,
-            // same number - so what broke those runs was being handed it.
+            // The hand-over was removed on 2026-09-23 after nine runs handed 0x0f0000/0x180000 died at
+            // `phys step cache gate failed`, which was read as the supplied offset breaking the stage
+            // after it. That was a payload bug, not this one: the artifact's target left
+            // `KMALLOC_CGROUP_TYPE` at the shared default of 2, so the pipe-buffer cache gate compared
+            // every page against the reclaim row (which the kernel aliases to the normal row) and never
+            // against the `kmalloc-cg-*` cache the pipe pages are charged to. A run that discovered the
+            // slide for itself died at the same gate on 2026-09-25 with no offset involved at all. With
+            // the target fixed, skipping the lottery is what this app wants.
         }
 
         private fun stripAnsi(value: String): String = ANSI_ESCAPE.replace(value, "").replace("\r", "")
