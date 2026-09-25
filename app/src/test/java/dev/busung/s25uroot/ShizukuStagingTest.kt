@@ -134,6 +134,29 @@ class ShizukuStagingTest {
     }
 
     @Test
+    fun theWindowIsAskedOfTheRemoteRatherThanInheritedFromProcess() {
+        // The trap this exists for: `Process.waitFor(long, TimeUnit)` is a loop around `exitValue()`, and it
+        // catches only `IllegalThreadStateException` - what a *local* process throws while its child is still
+        // running. A live process on the far side of the binder answers `IllegalStateException` with the same
+        // "process hasn't exited" message instead, which that loop does not catch, so the window fails on its
+        // very first probe - before any waiting has happened - and the caller reads the probe's refusal as
+        // the staging's own failure. Measured on the device: the payload daemon's staging failed 1.7 s in
+        // with "Couldn't stage /data/local/tmp/ksud-s25u-kdp through Shizuku: process hasn't exited". The
+        // call sites were pinned below; this contract was not, and every window in the file rests on it.
+        val body = declaration(transportSource(), "override fun waitFor(timeout: Long, unit: TimeUnit)")
+
+        assertTrue(
+            "the bounded wait is inherited from Process again, so every window in this file fails on its " +
+                "first probe against a process that is merely still alive: $body",
+            body.contains("waitForTimeout("),
+        )
+        assertTrue(
+            "the unit is not sent in the form the remote parses, so the window never becomes one",
+            body.contains("unit.toString()") || body.contains("unit.name()"),
+        )
+    }
+
+    @Test
     fun onlyOctalPermissionsAreAcceptedAsAMode() {
         assertTrue(isFileMode("755"))
         assertTrue(isFileMode("644"))

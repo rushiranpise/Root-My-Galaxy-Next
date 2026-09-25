@@ -351,6 +351,28 @@ object ShizukuController {
         override fun getOutputStream(): OutputStream = output
         override fun getErrorStream(): InputStream = error
         override fun waitFor(): Int = remote.waitFor()
+
+        /**
+         * The bounded wait is asked of the remote, and is not inherited from [Process].
+         *
+         * [Process]'s own implementation is a loop around [exitValue], and it catches one exception and one
+         * only: `IllegalThreadStateException`, which is what a *local* process throws while its child is
+         * still running. A live process on the far side of the binder answers differently - `IllegalStateException`
+         * with the same "process hasn't exited" message - so the loop does not catch it, and cannot have
+         * meant to: it arrives on the very first probe, before any waiting has happened, and escapes as the
+         * caller's own failure. Measured on the device: staging the payload's daemon failed 1.7 s in with
+         * "Couldn't stage /data/local/tmp/ksud-s25u-kdp through Shizuku: process hasn't exited" - the copy
+         * done, the `cat` still alive, and a window that had asked the one question a live process cannot
+         * answer. Every bounded wait in this file goes through here, so that one probe was every window in
+         * the transport.
+         *
+         * Shizuku's own AIDL carries the call this needs: `waitForTimeout(long, String)`, with the unit
+         * spelled as its own name - which is what the reference client
+         * (`rikka.shizuku.ShizukuRemoteProcess`) does with it as well.
+         */
+        override fun waitFor(timeout: Long, unit: TimeUnit): Boolean =
+            remote.waitForTimeout(timeout, unit.toString())
+
         override fun exitValue(): Int = remote.exitValue()
 
         override fun destroy() {
