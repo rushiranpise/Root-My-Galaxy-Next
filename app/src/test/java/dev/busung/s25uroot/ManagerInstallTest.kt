@@ -140,6 +140,45 @@ class ManagerInstallTest {
     }
 
     @Test
+    fun `an install that hangs is abandoned rather than waited on`() {
+        // The manager is something a run goes on without, never something it waits for indefinitely. Both
+        // shell routes are the same command on two transports, so both take a window - and the one that had
+        // none was Shizuku's, where a `pm install` waiting on a package manager that will not answer held
+        // the run for as long as the phone was up, with nothing in the log to say so.
+        val body = objectBody()
+        assertTrue(
+            "the manager install over Shizuku is unbounded again, so a `pm install` that never answers is a " +
+                "run that never starts: $body",
+            body.contains("unprivilegedShell(installCommand(staged), INSTALL_TIMEOUT_MILLIS)"),
+        )
+        assertTrue(
+            "the install over root lost its window",
+            body.contains("rootShell(installCommand(apk.absolutePath), INSTALL_TIMEOUT_SECONDS)"),
+        )
+        // The copy has to share that window: a transfer with no bound in front of a bounded command is a
+        // bounded command nothing ever reaches.
+        assertTrue(
+            "the copy the shell route installs from is staged with no window of its own, so the bounded " +
+                "command behind it can still be held by the transfer in front of it",
+            declaration(engineSource(), "private fun stageForShell(").contains("INSTALL_TIMEOUT_MILLIS"),
+        )
+        // And the timeout is asked about before it is believed: a command that ran out of its window may
+        // still have installed the package, and reporting a manager the phone now has as missing is the one
+        // mistake here that costs the user a second install.
+        val timeoutArm = body.substringAfter("null -> AppLog.warn").substringBefore("else ->")
+        assertTrue(
+            "a timed-out install is reported without saying what it timed out on",
+            timeoutArm.contains("did not answer within"),
+        )
+        assertTrue(
+            "a timed-out install is reported before the phone is asked whether it actually landed, so a " +
+                "manager that installed itself on the way out is reported as missing",
+            body.indexOf("installedAfter(context, flavor)?.let { return installed(flavor, release, ManagerInstallRoute.Shell, it) }") >
+                body.indexOf("null -> AppLog.warn"),
+        )
+    }
+
+    @Test
     fun `a manager that cannot be installed does not fail the run`() {
         // The kernel does not need the manager - the manager is how the root is *used* afterwards - so
         // turning this into a failed run would refuse the thing the user asked for over an app that can be

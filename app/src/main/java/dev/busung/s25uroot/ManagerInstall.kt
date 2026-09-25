@@ -250,14 +250,27 @@ internal object ManagerInstall {
         if (ShizukuController.isRunning() && ShizukuController.isGranted()) {
             val staged = stageForShell(apk)
             if (staged != null) {
-                KernelSuRuntime.unprivilegedShell(installCommand(staged))?.let { result ->
-                    if (!result.ok()) {
+                // Bounded, like the root route above: this step sits in front of a payload whose timing
+                // is delicate, and a `pm install` waiting on something that is not there must not be
+                // able to hold the run - the manager is something the run goes on without, never
+                // something it waits for indefinitely. Null is that timeout, and null is also what an
+                // absent server answers, so the two are said apart rather than logged as one.
+                when (val result = KernelSuRuntime.unprivilegedShell(installCommand(staged), INSTALL_TIMEOUT_MILLIS)) {
+                    null -> AppLog.warn(
+                        AppLogTags.KERNEL_SU,
+                        "pm install of the ${flavor.label} manager over Shizuku did not answer within " +
+                            "${INSTALL_TIMEOUT_SECONDS}s",
+                    )
+                    else -> if (!result.ok()) {
                         AppLog.warn(
                             AppLogTags.KERNEL_SU,
                             "pm install of the ${flavor.label} manager over Shizuku refused: ${tail(result.output)}",
                         )
                     }
                 }
+                // Asked whether it landed either way: a command that ran out of its window may still have
+                // installed the package, and reporting a manager the phone now has as missing is the one
+                // mistake this step must not make - the run would install it a second time.
                 installedAfter(context, flavor)?.let { return installed(flavor, release, ManagerInstallRoute.Shell, it) }
             }
         }
@@ -446,7 +459,9 @@ internal object ManagerInstall {
      * was no manager; what it buys is that the file installed is always the one in this app's cache.
      */
     private fun stageForShell(apk: File): String? = runCatching {
-        ShizukuController.writeFile(SHELL_APK_PATH, "644", apk.inputStream())
+        // The install's own window, so the copy and the `pm install` that reads it are one budget rather
+        // than a bounded command behind an unbounded transfer.
+        ShizukuController.writeFile(SHELL_APK_PATH, "644", apk.inputStream(), INSTALL_TIMEOUT_MILLIS)
         SHELL_APK_PATH
     }.onFailure { error ->
         AppLog.warn(
@@ -484,6 +499,9 @@ internal object ManagerInstall {
 
     /** Longer than a usual shell window: `pm install` of a 20 MB APK is not instant on a phone. */
     private const val INSTALL_TIMEOUT_SECONDS = 180L
+
+    /** The same window in the units the Shizuku route takes, so the two routes share one budget. */
+    private const val INSTALL_TIMEOUT_MILLIS = INSTALL_TIMEOUT_SECONDS * 1_000L
 
     /** How long a run waits for a manager the user has to install by hand. */
     private const val USER_INSTALL_WAIT_MILLIS = 180_000L
