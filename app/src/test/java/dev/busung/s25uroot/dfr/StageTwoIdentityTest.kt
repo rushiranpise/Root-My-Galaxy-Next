@@ -172,6 +172,31 @@ class StageTwoIdentityTest {
     }
 
     @Test
+    fun `the restart the helper offers is the one the app already takes`() {
+        // The helper cannot restart anything itself: a soft reboot is the installed daemon run as root, and
+        // this APK is the system uid inside system_server, which the daemon hands no shell to. So the button
+        // asks the app - and it asks with the app's *own* direct soft-restart action, the one its launcher
+        // shortcut sends, rather than a name of the helper's own. What answers it is then the path that
+        // already probes for a shell and holds the per-boot lock, and there is no second implementation of a
+        // reboot to keep in step.
+        assertEquals(
+            "the helper asks for a restart under an action the app does not answer, so the button would " +
+                "open the app and nothing would happen",
+            actionSoftRestartInApp(),
+            constantIn(stageTwoActivity(), "SOFT_RESTART_ACTION"),
+        )
+        assertTrue(
+            "the helper declares the action but never sets it on the launch, so the request never leaves " +
+                "this screen",
+            stageTwoActivity().contains("launch.action = SOFT_RESTART_ACTION"),
+        )
+        assertTrue(
+            "the app no longer answers the shortcut's soft-restart action, so nothing would take the request",
+            mainActivity().contains("restartShortcutOf"),
+        )
+    }
+
+    @Test
     fun `the app and the helper agree about the extras that start a run`() {
         assertEquals(
             "the app sets an extra the helper does not read, so a boot-time reroot would open the " +
@@ -413,6 +438,16 @@ class StageTwoIdentityTest {
     private fun source(relative: String): String =
         candidates(relative).firstOrNull { it.isFile }?.readText()
             ?: error("none of ${candidates(relative)} exists, so this test read nothing")
+
+    /**
+     * The app's own soft-restart action, out of the file that defines it.
+     *
+     * Read rather than restated, because the literal is already written twice inside the app - once in this
+     * file and once in the launcher's `shortcuts.xml` - and a third copy here would be a third thing to keep
+     * in step with two APKs that share no code.
+     */
+    private fun actionSoftRestartInApp(): String =
+        constantIn(source("app/src/main/java/dev/busung/s25uroot/RebootTargets.kt"), "ACTION_SOFT_RESTART")
 
     /** The module directory and the repository root: the test JVM's working directory is one of them. */
     private fun candidates(relative: String): List<File> = listOf(File(relative), File("../$relative"))

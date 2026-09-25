@@ -21,6 +21,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -33,61 +34,60 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Stage two's screen: what this process is, what the phone looks like from here, one action, and the log.
+ * Stage two's screen: one word for this boot, one line about what is missing, four actions, and the log.
  *
- * The sequence is the one it always was - the run is one press because the exploit is one sequence, and
- * every step after the first is only reachable from the one before - and what changed is how much of the
- * phone the screen answers for. Everything the app knows about this flow it reads through a root shell,
- * and there is no root shell in the state this screen exists for: a phone that has rebooted with the
- * exploit's hooks gone. From inside system, with no shell at all, these are the facts worth having, so
- * these are the ones on the screen:
+ * ## The run is gated, because the run is what cannot be taken back
  *
- * - **Who this process is**, because a stage two that installed without being system-uid looks exactly
- *   like a working one from every other process on the device.
- * - **Whether the hooks are already in the kernel**, because that is the state a second run cannot fix
- *   and a reboot can: a run started anyway is a run that collides with a half-armed kernel.
- * - **Which daemon this boot will exec**, and whether it is there at all - the app stages it while it has
- *   root, and a boot with no root is exactly the boot whose staging may be missing.
- * - **Which manager is installed**, which is what tells a wrong-flavour daemon from a right one when the
- *   run's own last step is the one that fails.
+ * The exploit spends the boot it runs in: it arms a marker in the kernel that only a reboot clears, and a
+ * second attempt is a second late-load into a kernel that already has the module. So nothing on this screen
+ * starts one until the two states that make it pointless are read and answered - and answered by a greyed
+ * button rather than by a log line for a press that could never have worked, which is what it used to be.
+ * See [BootState] and [blockReason].
  *
- * ## Started by the app rather than by a person
+ * The same goes for the files: a run the helper cannot hand over is a run that cannot succeed, and it would
+ * still spend the boot finding that out. [StageNeeds] lists them, the screen refuses without the ones that
+ * are the run's own hand-off, and the phone's own files are shown as readings rather than gates - a phone
+ * whose exploit is fine must not be refused a run over a file this process happens not to be able to see.
  *
- * [EXTRA_AUTORUN] makes the run start by itself once the daemon is staged, which is what lets the app
- * bring this screen up from a boot with no root. It is an *extra* rather than this screen's own
- * behaviour because the decision belongs to the app: that is the half holding the setting, the boot
- * receipt and the one-attempt-per-boot rule, and the half allowed to act on them. Opened by hand, this
- * screen still waits for the press.
+ * ## What is on the screen, and what is in the log
+ *
+ * Four actions, and they are the four things that are worth doing from here: **Run**, which is the one that
+ * costs the boot; **Open Manager**, which is the app that can act on the root this loaded; **Open RMG-NEXT**,
+ * which owns the boot settings; and **Soft reboot**, which is the userspace restart a loaded KernelSU needs
+ * before it does anything. Everything else this screen used to say - the process identity, the hook and
+ * daemon readings, the manager table, the setting behind the launch - is read into the log instead and stays
+ * there: it is diagnosis, nobody needs it before pressing, and the readings that decide a press are the two
+ * this screen answers with one word.
+ *
+ * **Run is refused, or the screen says so before it is pressed.** [startRun] holds the same gate as the
+ * button, so the auto-run the app asks for on a boot without root is answered the same way as a press.
  *
  * ## The log is the diagnosis
  *
- * A run that stops says which step refused, in the lines above it - and those lines are produced for
- * minutes before there is a verdict. So the log is a panel with a scroll of its own rather than the tail
- * of the page: a page that scrolled as the exploit talked would move the action out from under the thumb
- * that pressed it.
+ * A run that stops says which step refused, in the lines above it - and those lines are produced for minutes
+ * before there is a verdict. So the log is a panel with a scroll of its own rather than the tail of the page:
+ * a page that scrolled as the exploit talked would move the action out from under the thumb that pressed it.
  *
  * ## Written in code, not in resources
  *
- * This APK has one screen, and a layout resource for it would be a second place for the same view
- * hierarchy to be wrong - one that the compiler cannot check against the fields it fills. The strings
- * are here for the same reason: this module shares no code with the app, so its resources are its own,
- * and a strings file with twelve entries in it would be a second file to keep in step for no reader.
+ * This APK has one screen, and a layout resource for it would be a second place for the same view hierarchy
+ * to be wrong - one that the compiler cannot check against the fields it fills. The strings are here for the
+ * same reason: this module shares no code with the app, so its resources are its own, and a strings file
+ * with a dozen entries in it would be a second file to keep in step for no reader.
  */
 class Stage2Activity : Activity() {
 
     private lateinit var palette: Palette
 
     private lateinit var stateView: TextView
-    private lateinit var identityView: TextView
-    private lateinit var hookView: TextView
-    private lateinit var daemonView: TextView
-    private lateinit var managerView: TextView
-    private lateinit var openManagerButton: Button
-    private lateinit var startedView: TextView
-    private lateinit var bootView: TextView
-    private lateinit var outcomeView: TextView
+    private lateinit var summaryView: TextView
+    private lateinit var needsHeaderView: TextView
+    private lateinit var needsRows: LinearLayout
     private lateinit var runButton: Button
-    private lateinit var rereadButton: Button
+    private lateinit var recheckButton: Button
+    private lateinit var openManagerButton: Button
+    private lateinit var openAppButton: Button
+    private lateinit var softRebootButton: Button
     private lateinit var progress: ProgressBar
     private lateinit var logView: TextView
     private lateinit var logScroll: ScrollView
@@ -98,24 +98,37 @@ class Stage2Activity : Activity() {
     private val running = AtomicBoolean(false)
     private var controllerReceiver: BroadcastReceiver? = null
 
-    /** Whether the app asked for the run on its way in, so the boot section can say who started this. */
+    /** The last reading of the files a run needs, so a press decides on it rather than re-reading the phone. */
+    @Volatile
+    private var needs: StageNeeds.Reading? = null
+
+    /** Whether the app asked for the run on its way in, which is a reading the log still carries. */
     private var autorun = false
 
-    /** What the app's own reroot-at-boot setting was, or null when the app did not say. */
+    /** What the app's own reroot-at-boot setting was, or null when the app did not say. Reported in the log. */
     private var rerootAtBoot: Boolean? = null
 
     /**
      * Which flavour this run loads, as the app named it, or null when the app did not say.
      *
-     * The one fact about the payload this process cannot work out for itself: three managers can be
-     * installed at once, they belong to three different projects, and which of them drives the daemon this
-     * boot will exec is a fact about the payload the app resolved. So it is told - see
-     * `DfrInstall.STAGE_TWO_FLAVOR_EXTRA` - and an id this APK does not know reads the same as no id at all.
+     * The one fact about the payload this process cannot work out for itself: three managers can be installed
+     * at once, they belong to three different projects, and which of them drives the daemon this boot will
+     * exec is a fact about the payload the app resolved. So it is told - see `DfrInstall.STAGE_TWO_FLAVOR_EXTRA`
+     * - and an id this APK does not know reads the same as no id at all.
      */
     private var payloadFlavor: ManagerFlavor? = null
 
     /** The window the app was drawing with, as `role=hex` pairs, or null when it did not say. */
     private var tint: Map<String, Int> = emptyMap()
+
+    /**
+     * Whether the file list is open.
+     *
+     * Closed is the default on a phone whose list is complete, because nine rows that all say `ok` are nine
+     * rows of nothing to do - and open is forced whenever one of them is missing, because that is the row
+     * somebody has to fix.
+     */
+    private var needsExpanded = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,7 +143,7 @@ class Stage2Activity : Activity() {
         refreshReadouts()
 
         runButton.setOnClickListener { startRun() }
-        rereadButton.setOnClickListener { reread() }
+        recheckButton.setOnClickListener { recheck() }
 
         // The controller arrives as a binder on a broadcast, so the receiver has to be live before the
         // hop is asked for - and it is registered exported because the sender is network_stack, a
@@ -154,7 +167,7 @@ class Stage2Activity : Activity() {
         // because a run nobody asked for spends this boot's only attempt.
         runInBackground {
             append(KsudStage.stage(this))
-            runOnUiThread { refreshReadouts() }
+            readThePhone(announce = true)
             if (autorun) runOnUiThread { startRun() }
         }
     }
@@ -165,15 +178,57 @@ class Stage2Activity : Activity() {
     }
 
     /** Reads the phone again and stages again, which is the one action here that changes nothing. */
-    private fun reread() {
+    private fun recheck() {
         if (running.get()) {
             append("[!] A run is already in progress, so the current readings were left unchanged.")
             return
         }
         runInBackground {
             append(KsudStage.stage(this))
-            runOnUiThread { refreshReadouts() }
+            readThePhone(announce = true)
         }
+    }
+
+    /**
+     * The files this boot's run stands on and the two states it cannot be run from, read once.
+     *
+     * The list itself is the card's, not the log's: which files are there and which are not is the one thing
+     * a person is looking at before a press, and nine lines of it interleaved with the exploit's own output is
+     * a screen where neither can be read. It reaches the log only when a run is *refused* for it - see
+     * [startRun] - which is the one case where the list has to outlive the screen.
+     */
+    private fun readThePhone(announce: Boolean) {
+        val reading = StageNeeds.check(this)
+        needs = reading
+        runOnUiThread { refreshReadouts() }
+        if (announce) append(openingLine())
+    }
+
+    /**
+     * One line saying what this process is, which is the one reading the card cannot carry.
+     *
+     * A stage two that installed without being system-uid looks exactly like a working one from every other
+     * process on the device, and that is a fact about the log rather than about the phone's state: nothing on
+     * the card changes when it is wrong. So it is one line, on the first read only, with the manager and who
+     * started this run on the same line - the card names the manager in its action, and this is the record.
+     */
+    private fun openingLine(): String {
+        val uid = Process.myUid()
+        val installed = KsudStage.installedFlavors(this)
+        val manager = payloadFlavor?.label
+            ?: installed.firstOrNull()?.label
+            ?: "no manager"
+        val started = if (autorun) {
+            "started by the app" + when (rerootAtBoot) {
+                true -> " (reroot at boot on)"
+                false -> " (reroot at boot off)"
+                null -> ""
+            }
+        } else {
+            "started by hand"
+        }
+        return "[*] pid=${Process.myPid()} uid=$uid${if (uid == Process.SYSTEM_UID) " (system)" else ""} " +
+            "${selinuxContext()} · manager $manager · $started"
     }
 
     /**
@@ -184,11 +239,12 @@ class Stage2Activity : Activity() {
      * words.
      */
     private fun startRun() {
-        if (armed()) {
-            append(
-                "[x] The exploit is already active ($ARMED_MARKER exists), so it cannot be run again.\n" +
-                    "    Only a full device reboot will clear it. A soft reboot will not.",
-            )
+        val refusal = blockReason()
+        if (refusal.isNotEmpty()) {
+            append("[x] $refusal")
+            // The list behind that sentence, in the log as well as on the card: a refusal that names the count
+            // of what is missing and nothing else is a phone nobody can fix from the log they were handed.
+            needs?.takeIf { !it.ready }?.let { append(it.report()) }
             refreshReadouts()
             return
         }
@@ -197,11 +253,10 @@ class Stage2Activity : Activity() {
             return
         }
         runButton.isEnabled = false
-        rereadButton.isEnabled = false
+        recheckButton.isEnabled = false
         progress.visibility = View.VISIBLE
-        outcomeView.text = "Running the exploit. The log below shows what is happening."
-        outcomeView.setTextColor(palette.onSurfaceVariant)
-        refreshReadouts()
+        summaryView.text = "Running the exploit. The log below shows what is happening."
+        summaryView.setTextColor(palette.onSurfaceVariant)
         runInBackground {
             var result = -1
             try {
@@ -209,19 +264,21 @@ class Stage2Activity : Activity() {
             } finally {
                 running.set(false)
                 val success = result == 0
-                runOnUiThread {
-                    runButton.isEnabled = true
-                    rereadButton.isEnabled = true
-                    progress.visibility = View.GONE
-                    outcomeView.text = if (success) {
-                        "Root access obtained. Check the KernelSU Manager."
+                runOnUiThread { progress.visibility = View.GONE }
+                // The verdict goes to the log and the screen goes back to being a reading of the phone: what
+                // the state word says after a run is the fact that decides the next press - rooted, or spent -
+                // and a line about the run itself would overwrite that with news that is already in the log.
+                append(
+                    if (success) {
+                        "\n[+] Root access obtained. The manager can act on it now."
                     } else {
-                        "The process stopped at $result. Check the log above for details."
-                    }
-                    outcomeView.setTextColor(if (success) palette.success else palette.error)
-                    refreshReadouts()
-                }
+                        "\n[x] The process stopped at $result. The lines above say where."
+                    },
+                )
                 Log.i(TAG, "Run finished with $result")
+                // Read again rather than only redrawn: a run consumes the file the daemon's own late-load
+                // renames, so the list this screen printed on the way in is no longer what is on the phone.
+                readThePhone(announce = false)
                 // A run a person asked for, whose last step is the one the phone cannot finish by itself:
                 // what was just loaded is inert until the Android userspace is built again, and the restart
                 // that does it is KernelSU's own soft reboot. This process cannot ask for it - that needs a
@@ -230,6 +287,33 @@ class Stage2Activity : Activity() {
                 if (success && !autorun) runOnUiThread { askTheAppToRestart() }
             }
         }
+    }
+
+    /**
+     * Why a run must not start here, or an empty string when one may.
+     *
+     * One function for the button's own state and for the refusal, so a greyed button and a refused press
+     * cannot be two different rules. The order is the order of what a person does about it: a rooted or
+     * spent boot is a reboot, and a missing file is the app's staging.
+     */
+    private fun blockReason(): String {
+        if (BootState.armed()) {
+            return "The exploit is already active (${BootState.ARMED_MARKER} exists), so it cannot be run " +
+                "again. Only a full device reboot will clear it. A soft reboot will not."
+        }
+        if (BootState.rootLive()) {
+            return "KernelSU is already loaded in this boot's kernel, and a second late-load is not run into " +
+                "a kernel that already has the module. Reboot, or soft reboot, and root again from there."
+        }
+        val reading = needs
+            ?: return "The files this boot's run needs have not been read yet, so a run was not started."
+        if (!reading.ready) {
+            val blocking = reading.blocking
+            return "The run is refused: ${blocking.size} of the ${reading.items.count { it.need.required }} " +
+                "files it hands over are not there - " + blocking.joinToString(", ") { it.need.path } +
+                ". The list is on the card."
+        }
+        return ""
     }
 
     /** The whole exploit, and its result: the code the controller answered with. */
@@ -310,6 +394,35 @@ class Stage2Activity : Activity() {
         )
     }
 
+    /**
+     * Asks the app for the userspace restart, which is the only way this screen can ask for one.
+     *
+     * The request is the app's own direct soft-restart action - the one its launcher shortcut sends - so what
+     * answers it is the app's existing path: the same probe for a root shell, the same per-boot lock, and the
+     * same daemon command. Nothing here is a second implementation of a reboot, and a phone the app cannot
+     * restart (no root, no Shizuku) is told to the person by the app's own screen rather than by this one.
+     *
+     * It is offered whether or not a run has happened, because that is the state it is for on this device: a
+     * load is inert until the userspace is built again, and after one it is the only thing left to do.
+     */
+    private fun softReboot() {
+        val launch = packageManager.getLaunchIntentForPackage(MAIN_PACKAGE)
+        if (launch == null) {
+            append("[!] $MAIN_PACKAGE is not installed, so the restart cannot be asked for. Restart the device yourself.")
+            return
+        }
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        launch.action = SOFT_RESTART_ACTION
+        val started = runCatching { startActivity(launch) }.isSuccess
+        append(
+            if (started) {
+                "[*] asked $MAIN_PACKAGE for the userspace restart; it needs root to take it"
+            } else {
+                "[!] $MAIN_PACKAGE could not be opened, so you need to restart the device yourself"
+            },
+        )
+    }
+
     /** Waits for the controller binder, reporting how long is left rather than going quiet. */
     private fun awaitController(timeoutMs: Long): IBinder? {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
@@ -327,127 +440,118 @@ class Stage2Activity : Activity() {
         }
     }
 
-    /**
-     * Whether the hooks are in this boot's kernel, as far as this process can tell.
-     *
-     * A failed reading answers no, which is the direction that costs a run rather than a collision: the
-     * exploit's own mutex is the thing that actually decides, and this only exists to say so before a
-     * press instead of after it.
-     */
-    private fun armed(): Boolean = runCatching { File(ARMED_MARKER).exists() }.getOrDefault(false)
+    /** This process's SELinux context, for the log's identity line. */
+    private fun selinuxContext(): String = runCatching {
+        "context=" + File("/proc/self/attr/current").readText().trim().trim('\u0000')
+    }.getOrElse { "context=unreadable" }
 
-    /**
-     * Who this process is: the pid, the uid, and the SELinux context.
-     *
-     * Three facts and not one, because the failure this screen has to make obvious is a stage two that
-     * *installed* but is not system-uid - which is what a certificate that went into the wrong shared
-     * user looks like, and which no single field shows.
-     */
-    private fun identity(): String {
-        val uid = Process.myUid()
-        val context = runCatching {
-            File("/proc/self/attr/current").readText().trim().trim('\u0000')
-        }.getOrElse { "unreadable" }
-        return "pid=${Process.myPid()}  uid=$uid (system uid: ${uid == Process.SYSTEM_UID})\n" +
-            "process=${applicationInfo.processName}\ncontext=$context"
-    }
-
-    /** The daemon the exploit will exec, as it looks from here. */
-    private fun daemon(): String {
-        val staged = File(KsudStage.DEST)
-        if (!staged.isFile) {
-            return "Nothing at ${KsudStage.DEST}\n" +
-                "The app stages it while it has root, so a boot with no root reaches a run from here"
-        }
-        val size = "%,d bytes".format(staged.length())
-        // Running it is the only way to know which build it is, and this process may be refused that -
-        // a refused exec is a fact about this reading and not about the daemon, so it is said as one.
-        val version = runCatching {
-            val process = ProcessBuilder(KsudStage.DEST, "-V").redirectErrorStream(true).start()
-            val line = process.inputStream.bufferedReader().readLine().orEmpty()
-            process.waitFor()
-            line.trim()
-        }.getOrNull().orEmpty()
-        return "${KsudStage.DEST}  $size\n" +
-            if (version.isNotEmpty()) {
-                version
-            } else {
-                "Could not read the version from this process. The daemon is running with root access from the exploit."
-            }
-    }
-
-    /**
-     * Which manager this run's kernel will be driven by, and what else is on the phone.
-     *
-     * Two readings in one field, because the second is what makes the first diagnosable. The flavour the
-     * app named is the answer - it comes from the payload this run loads, which is the only side that knows
-     * - and whether its manager is installed is the thing a person needs before they start: a run that
-     * succeeds with no manager leaves root nothing on the phone can use. The list under it is what a
-     * wrong-daemon failure is measured against, and it is also the fallback when the app did not say.
-     */
-    private fun managers(): String {
-        val installed = KsudStage.installedFlavors(this)
-        val told = payloadFlavor
-        if (told == null) {
-            val others = if (installed.isEmpty()) {
-                "none of the three flavours is installed"
-            } else {
-                installed.joinToString("\n") { "${it.label}  ${it.packageName}" }
-            }
-            return "The app did not report which version this run uses.\n$others"
-        }
-        val here = KsudStage.isInstalled(this, told)
-        return buildString {
-            append(told.label).append("  ").append(told.packageName).append('\n')
-            append(if (here) "installed - this is the manager for the daemon above" else "not installed")
-            val others = installed.filter { it.id != told.id }
-            if (others.isNotEmpty()) {
-                append("\n")
-                append(others.joinToString("\n") { "${it.label}  ${it.packageName} is also installed" })
-            }
-            if (!here) {
-                append("\nThe KernelSU version used by this run has no manager to control it")
-            }
-        }
-    }
-
+    /** Everything the state word cannot carry: the pill, the one line under it, and what a press may do. */
     private fun refreshReadouts() {
-        val isArmed = armed()
+        val reading = needs
         val busy = running.get()
-        val tint = when {
-            isArmed -> palette.warning
-            busy -> palette.onSurfaceVariant
-            else -> palette.success
+        val armed = BootState.armed()
+        val rootLive = BootState.rootLive()
+        val blocking = reading?.blocking.orEmpty()
+        val ready = reading?.ready == true
+
+        val (word, tint) = when {
+            busy -> "Running" to palette.onSurfaceVariant
+            rootLive -> "Rooted" to palette.success
+            armed -> "Already run" to palette.warning
+            !ready -> "Not ready" to palette.warning
+            else -> "Ready" to palette.success
         }
-        stateView.text = when {
-            busy -> "Running"
-            isArmed -> "Active"
-            else -> "Ready"
-        }
+        stateView.text = word
         stateView.setTextColor(palette.onAccent(tint))
         stateView.background = palette.pillBackground(tint)
-        identityView.text = identity()
-        hookView.text = if (isArmed) {
-            "$ARMED_MARKER exists - the hooks are active in this boot's kernel.\n" +
-        "A second run is not allowed. Only a full device reboot will clear them."
-        } else {
-            "$ARMED_MARKER is not present - the hooks have not been enabled for this boot."
-        }
-        hookView.setTextColor(if (isArmed) palette.warning else palette.onSurface)
-        daemonView.text = daemon()
-        managerView.text = managers()
-        refreshManagerAction()
-        startedView.text = if (autorun) {
-            "Started automatically when the device booted"
-        } else {
-            "Started by you from the launcher or app"
-        }
 
-        bootView.text = when (rerootAtBoot) {
-            true -> "On - the app will get root again after a boot without root"
-            false -> "Off - if the device boots without root, you must start it yourself"
-            // The app decides this setting. This screen only displays it.
-            null -> "Not available here - the app controls this setting"
+        summaryView.text = when {
+            busy -> "Running the exploit. The log below shows what is happening."
+            rootLive -> "KernelSU is loaded in this boot's kernel. Reboot, or soft reboot, before rooting again."
+            armed -> "The exploit has already run this boot. Reboot to root this boot again."
+            !ready -> if (reading == null) {
+                "Reading the files this boot's run needs…"
+            } else {
+                "${blocking.size} of ${reading.items.count { it.need.required }} files missing: " +
+                    blocking.joinToString(", ") { it.need.path }
+            }
+            else -> "All ${reading.items.count { it.need.required }} files this boot's run needs are present."
+        }
+        summaryView.setTextColor(if (busy || rootLive || armed || !ready) palette.onSurfaceVariant else palette.success)
+
+        renderNeeds()
+        refreshManagerAction()
+        // The whole point: a run that cannot work is not offered. [startRun] refuses the same three states,
+        // so this is the button's half of one rule rather than a second one.
+        runButton.isEnabled = !busy && !armed && !rootLive && ready
+        recheckButton.isEnabled = !busy
+    }
+
+    /**
+     * The file list, as rows under its own header: a tick or a cross, the path, and for a missing one the
+     * sentence that says what stops working without it.
+     *
+     * Rebuilt rather than patched, because the rows and the header have to agree about what is wrong and the
+     * reading is what both come from. The reasons are only on the rows that are not `ok`: a list of nine
+     * explanations is a wall, and most of them describe something that is not wrong.
+     *
+     * Three markers, because there are three states and two of them are not the same problem: a tick for a
+     * path that is there, a cross for one the kernel says is not - which is the only one a run is refused
+     * over - and a question mark for one this process is not allowed to look at, which the exploit uses from
+     * its own context and a run does not depend on.
+     */
+    private fun renderNeeds() {
+        val reading = needs
+        needsRows.removeAllViews()
+        if (reading == null) {
+            needsHeaderView.text = "Files  ·  reading…"
+            needsRows.visibility = View.GONE
+            return
+        }
+        val blocking = reading.blocking.size
+        val needed = reading.items.count { it.need.required }
+        val notSeen = reading.notSeenReadings().size
+        val tail = if (notSeen == 0) "" else "  ·  $notSeen of the phone's not visible here"
+        needsHeaderView.text = when {
+            needsExpanded -> "Files  ·  ${needed - blocking} of $needed needed present$tail"
+            blocking > 0 -> "Files  ·  $blocking needed missing$tail"
+            notSeen > 0 -> "Files  ·  all $needed needed present$tail"
+            else -> "Files  ·  all $needed needed present"
+        }
+        needsRows.visibility = if (needsExpanded || blocking > 0) View.VISIBLE else View.GONE
+        reading.items.forEach { checked ->
+            val (mark, colour) = when (checked.presence) {
+                StageNeeds.Presence.Present -> "\u2713  " to palette.onSurfaceVariant
+                StageNeeds.Presence.Absent -> "\u2717  " to palette.error
+                StageNeeds.Presence.Unreadable -> "?  " to palette.warning
+            }
+            needsRows.addView(
+                text(mark + checked.need.path, 11f, colour, Typeface.MONOSPACE, 6),
+            )
+            if (checked.presence == StageNeeds.Presence.Absent) {
+                needsRows.addView(
+                    text(
+                        "      ${checked.need.why}  (${checked.need.group.label})",
+                        11f,
+                        palette.onSurfaceVariant,
+                        Typeface.DEFAULT,
+                        2,
+                    ),
+                )
+            }
+            if (!checked.need.required && checked.presence != StageNeeds.Presence.Present) {
+                needsRows.addView(
+                    text(
+                        "      not visible from this process${checked.because?.let { " ($it)" }.orEmpty()}: " +
+                            "the exploit reads, patches or execs it from its own context, so this reading " +
+                            "cannot stop a run",
+                        11f,
+                        palette.onSurfaceVariant,
+                        Typeface.DEFAULT,
+                        2,
+                    ),
+                )
+            }
         }
     }
 
@@ -457,11 +561,19 @@ class Stage2Activity : Activity() {
         }.start()
     }
 
+    /**
+     * Adds a line, and follows the run only when the log was already at its end.
+     *
+     * Following unconditionally is the other half of what made this pane look broken: the exploit prints for
+     * minutes, and a person who scrolled back to read an earlier line was dragged to the bottom by the next
+     * one. At the end, follow; anywhere else, leave the reading where it was put.
+     */
     private fun append(text: String) {
         val line = if (text.endsWith("\n")) text else "$text\n"
         runOnUiThread {
+            val follow = !logScroll.canScrollVertically(1)
             logView.append(line)
-            logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
+            if (follow) logScroll.post { logScroll.fullScroll(View.FOCUS_DOWN) }
         }
     }
 
@@ -479,62 +591,52 @@ class Stage2Activity : Activity() {
             setBackgroundColor(palette.surface)
         }
         column.addView(text("RMG-NEXT Helper", 32f, palette.onSurface, Typeface.DEFAULT))
-        column.addView(
-            text("uid 1000  ·  system", 12f, palette.onSurfaceVariant, Typeface.DEFAULT, 4),
-        )
 
         stateView = pill("Ready")
-        identityView = value()
-        hookView = value()
-        daemonView = value()
-        managerView = value()
-        openManagerButton = answer("Open Manager", loud = false).apply {
-            setOnClickListener { openManager() }
+        summaryView = text("", 13f, palette.onSurfaceVariant, Typeface.DEFAULT, 10)
+        needsHeaderView = text("", 12f, palette.accent, Typeface.DEFAULT_BOLD, 16).apply {
+            setPadding(dip(2), dip(6), dip(2), dip(6))
+            isClickable = true
+            setOnClickListener {
+                needsExpanded = !needsExpanded
+                renderNeeds()
+            }
         }
-        column.addView(
-            card(
-                sectionLabel("Status"),
-                stateView,
-                field("Process", identityView),
-                field("Hooked", hookView),
-                field("Daemon", daemonView),
-                field("KernelSU Manager", managerView),
-                // The action for that reading, under it, which is the shape the app's own readings cards
-                // use for the same reason: this is the one thing on this screen that another app owns, and
-                // being told which manager this run loads is only half of what to do with it.
-                openManagerButton,
-            ),
-        )
-
-        outcomeView = text(
-            "Ready to Root?",
-            12f,
-            palette.onSurfaceVariant,
-            Typeface.DEFAULT,
-            8,
-        )
+        needsRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         runButton = answer("Run", loud = true)
-        rereadButton = answer("Refresh", loud = false)
+        recheckButton = answer("Recheck", loud = false)
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             visibility = View.GONE
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(palette.accent)
             layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dip(10) }
         }
-        column.addView(card(sectionLabel("Run"), outcomeView, runButton, progress, rereadButton))
+        column.addView(
+            card(
+                sectionLabel("This boot"),
+                stateView,
+                summaryView,
+                needsHeaderView,
+                needsRows,
+                runButton,
+                progress,
+                recheckButton,
+            ),
+        )
+
+        openManagerButton = answer("Open Manager", loud = false).apply {
+            setOnClickListener { openManager() }
+        }
+        openAppButton = answer("Open RMG-NEXT", loud = false).apply {
+            setOnClickListener { openTheApp() }
+        }
+        softRebootButton = answer("Soft reboot", loud = false).apply {
+            setOnClickListener { softReboot() }
+        }
+        column.addView(card(sectionLabel("Next"), openManagerButton, openAppButton, softRebootButton))
 
         column.addView(logCard())
 
-        startedView = value()
-        bootView = value()
-        column.addView(
-            card(
-                sectionLabel("Reason"),
-                field("Started", startedView),
-                field("Auto Root", bootView),
-                openAppButton(),
-            ),
-        )
         // Padded by the bars' own height rather than laid out under them, and asked for on the root so
         // that one listener answers for the whole screen. The system applies this without being asked on
         // the versions this APK targets, where a screen that ignored it would put its title under the
@@ -570,11 +672,13 @@ class Stage2Activity : Activity() {
             },
             LinearLayout.LayoutParams(WRAP, WRAP),
         )
+        // Not selectable, deliberately: a selectable `TextView` takes the drag for a text selection, so the
+        // pane it sits in cannot be scrolled with a finger on it - which is exactly what this screen looked
+        // like. The text is still recoverable whole, from the Copy action above it.
         logView = text("", 11f, palette.onSurfaceVariant, Typeface.MONOSPACE).apply {
-            setTextIsSelectable(true)
             setLineSpacing(dip(3).toFloat(), 1f)
         }
-        logScroll = ScrollView(this).apply {
+        logScroll = LogScrollView(this).apply {
             addView(logView)
             background = cardBackground(palette.panel)
             setPadding(dip(12), dip(10), dip(12), dip(10))
@@ -586,7 +690,7 @@ class Stage2Activity : Activity() {
     }
 
     /**
-     * The manager this screen's one action opens, or null when there is nothing it could open.
+     * The manager this screen's action opens, or null when there is nothing it could open.
      *
      * The flavour the app named wins, and it wins **even when it is not installed**: the reading under it
      * already says so, and a button that quietly opened somebody else's manager because the right one was
@@ -623,15 +727,15 @@ class Stage2Activity : Activity() {
     private fun openManager() {
         val target = managerTarget()
         if (target == null) {
-            outcomeView.text = "No manager to open: the app did not say which version this run uses, " +
+            summaryView.text = "No manager to open: the app did not say which version this run uses, " +
     "and no single manager is installed."
-            outcomeView.setTextColor(palette.onSurfaceVariant)
+            summaryView.setTextColor(palette.onSurfaceVariant)
             return
         }
         val launch = packageManager.getLaunchIntentForPackage(target.packageName)
         if (launch == null) {
-            outcomeView.text = "no ${target.label} manager at ${target.packageName}"
-            outcomeView.setTextColor(palette.error)
+            summaryView.text = "no ${target.label} manager at ${target.packageName}"
+            summaryView.setTextColor(palette.error)
             append("[!] ${target.packageName} is not installed")
             return
         }
@@ -639,19 +743,16 @@ class Stage2Activity : Activity() {
         startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    private fun openAppButton(): Button {
-        val view = answer("Open RMG-NEXT", loud = false)
-        view.setOnClickListener {
-            val launch = packageManager.getLaunchIntentForPackage(MAIN_PACKAGE)
-            if (launch == null) {
-                outcomeView.text = "RMG-NEXT is not installed under $MAIN_PACKAGE"
-                outcomeView.setTextColor(palette.error)
-                return@setOnClickListener
-            }
-            append("[*] Opening $MAIN_PACKAGE to change the boot settings")
-            startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    /** The app that owns the boot settings, under the name the two APKs share. */
+    private fun openTheApp() {
+        val launch = packageManager.getLaunchIntentForPackage(MAIN_PACKAGE)
+        if (launch == null) {
+            summaryView.text = "RMG-NEXT is not installed under $MAIN_PACKAGE"
+            summaryView.setTextColor(palette.error)
+            return
         }
-        return view
+        append("[*] opening $MAIN_PACKAGE")
+        startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     /** A card: the platform's lifted panel, rounded, with the screen's own inset inside it. */
@@ -665,16 +766,6 @@ class Stage2Activity : Activity() {
 
     private fun sectionLabel(body: String): TextView =
         text(body, 14f, palette.onSurface, Typeface.DEFAULT_BOLD)
-
-    /** One label above one value, which is the shape this app's own readings cards use. */
-    private fun field(label: String, value: TextView): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dip(12) }
-        addView(text(label, 12f, palette.onSurfaceVariant, Typeface.DEFAULT_BOLD))
-        addView(value, LinearLayout.LayoutParams(MATCH, WRAP).apply { topMargin = dip(2) })
-    }
-
-    private fun value(): TextView = text("", 14f, palette.onSurface, Typeface.DEFAULT)
 
     /** The state, as one word on a tinted pill rather than as a line of prose. */
     private fun pill(initial: String): TextView =
@@ -756,7 +847,7 @@ class Stage2Activity : Activity() {
         const val EXTRA_AUTORUN = "rmg.autorun"
 
         /**
-         * What the app's reroot-at-boot setting is, so the boot row can show it.
+         * What the app's reroot-at-boot setting is, so the log can say who started this and on what terms.
          *
          * Optional, and absent means absent: this screen has no copy of that setting, and a missing extra
          * is the honest answer for a helper the app did not start.
@@ -768,8 +859,8 @@ class Stage2Activity : Activity() {
          * `DfrInstall.STAGE_TWO_FLAVOR_EXTRA` by the test that owns every shared name.
          *
          * Optional like the one above, and absent means absent: this screen has no way to work out which
-         * flavour the payload loads, so without it the manager row says so and the action falls back to a
-         * manager that is installed and unambiguous.
+         * flavour the payload loads, so without it the manager action falls back to a manager that is
+         * installed and unambiguous.
          */
         const val EXTRA_FLAVOR = "rmg.flavor"
 
@@ -798,16 +889,26 @@ class Stage2Activity : Activity() {
         const val EXTRA_AFTER_ROOT = "rmg.afterRoot"
 
         /**
+         * The app's own direct soft-restart request, which is the action its launcher shortcut sends.
+         *
+         * The other direction from the extra above: that one tells the app a load has just happened, this
+         * one asks for the restart at a time of the person's choosing - after a run, or after a boot this
+         * screen was opened on with KernelSU already loaded. It is the shortcut's action rather than a new
+         * one so that what answers it is the app's existing path, with its probe, its per-boot lock and its
+         * own screen when the phone cannot take a restart. Held to `ACTION_SOFT_RESTART` in the app's
+         * `RebootTargets.kt` by `StageTwoIdentityTest`, since two APKs with no shared code cannot share a
+         * literal any other way.
+         */
+        const val SOFT_RESTART_ACTION = "dev.busung.s25uroot.action.SOFT_RESTART"
+
+        /**
          * The app, by its application id.
          *
-         * A constant here because these two APKs share no code, and the boot row's action has to name the
-         * app that owns the setting - so the name is held to the app's own build file by
+         * A constant here because these two APKs share no code, and the actions above have to name the
+         * app that answers them - so the name is held to the app's own build file by
          * `StageTwoIdentityTest`, which reads both.
          */
         const val MAIN_PACKAGE = "dev.rushiranpise.rmgnext"
-
-        /** The hooks the module installs; present means a run has already been armed this boot. */
-        const val ARMED_MARKER = "/dev/df"
 
         /** Enough for the hop and the first report; the run itself is not time-limited after that. */
         const val CONTROLLER_TIMEOUT_MS = 30_000L
@@ -968,6 +1069,27 @@ private class Palette(private val activity: Activity, private val tint: Map<Stri
 
         const val PILL_RADIUS_DP = 999f
         const val ANSWER_RADIUS_DP = 14f
+    }
+}
+
+/**
+ * The log's own pane, which keeps the page around it from taking the drag it was given.
+ *
+ * This screen scrolls and so does the log inside it, and a plain `ScrollView` in that position loses every
+ * gesture to the page: a parent intercepts a drag once it passes its own slop, whatever the child was about
+ * to do with it, and the pane that came out of that drew a scrollbar and could not be moved. Disallowing the
+ * parent for the length of the gesture is the whole of the fix; the framework resets the flag on the next
+ * `ACTION_DOWN`, so nothing has to be handed back.
+ *
+ * A nested-scrolling `NestedScrollView` would settle the same argument by protocol, and the page here is a
+ * plain `ScrollView` - so the protocol is not what is answering on the versions this APK targets.
+ */
+private class LogScrollView(context: Context) : ScrollView(context) {
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
+        return super.onTouchEvent(event)
     }
 }
 
