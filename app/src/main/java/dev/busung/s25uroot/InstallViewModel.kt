@@ -2045,6 +2045,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             RunNotification.post(
                 context = app,
                 message = message,
+                phase = phase,
                 progress = installProgress(phase, failureStage = null),
                 runId = activeRunId,
             )

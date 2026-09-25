@@ -75,6 +75,77 @@ class RunNotificationTest {
     }
 
     @Test
+    fun `the running notification is the shape Android 16 promotes`() {
+        val notification = source("RunNotification.kt")
+
+        // Promotion is a request the platform answers, and these are what it is answered from: the style it
+        // draws a bar into, the chip's word, the request itself, and the permission the manifest has to ask
+        // for. Any one of them missing is a run that is never promoted, which looks exactly like a phone that
+        // does not promote - the failure this test exists for.
+        assertTrue(notification.contains("NotificationCompat.ProgressStyle()"))
+        assertTrue(notification.contains("setShortCriticalText("))
+        assertTrue(notification.contains("setRequestPromotedOngoing(true)"))
+        assertTrue(
+            "the manifest does not ask for the permission a promoted notification needs",
+            source("AndroidManifest.xml").contains("android.permission.POST_PROMOTED_NOTIFICATIONS"),
+        )
+        // All three are Android 16 calls, so a build that made them unconditionally would crash the first
+        // time a phone below it posted a run notification.
+        assertTrue(
+            "the live update's own calls are not behind the API that has them",
+            notification.contains("Build.VERSION.SDK_INT >= LIVE_UPDATE_API"),
+        )
+    }
+
+    @Test
+    fun `the boot gate's notification is the same live update`() {
+        val gate = source("AutoRootService.kt")
+
+        // The gate's notification is the one a phone in a pocket actually shows after a reboot, and it is
+        // built by another object entirely - so this is what says the two are one shape rather than two live
+        // updates for the same run disagreeing about it.
+        assertTrue(
+            "the boot gate posts a notification that nothing promotes",
+            gate.contains("RunNotification.live("),
+        )
+        assertTrue(
+            "an unattended run's notification does not name its stage the way the run's own does",
+            gate.contains("chip = RunNotification.chipLabel(state.phase)"),
+        )
+        assertTrue(
+            "the gate's bar is not the bar the run screen draws",
+            gate.contains("fraction = installProgress(state.phase, state.failure?.stage)"),
+        )
+        // The two waits before there is a run to name are the gate's own words, and both are declared: a chip
+        // whose string is missing posts a live update with an empty chip rather than failing where anyone
+        // would see it.
+        val strings = baseStrings()
+        assertTrue(gate.contains("R.string.autoroot_chip_booting"))
+        assertTrue(gate.contains("R.string.autoroot_chip_shizuku"))
+        assertTrue(strings.contains("name=\"autoroot_chip_booting\""))
+        assertTrue(strings.contains("name=\"autoroot_chip_shizuku\""))
+    }
+
+    @Test
+    fun `every phase has the word its chip gets`() {
+        val notification = source("RunNotification.kt")
+
+        val missing = InstallPhase.entries.filterNot { notification.contains("InstallPhase.${it.name}") }
+        assertTrue("a phase has no chip word, so its live update has an empty chip: $missing", missing.isEmpty())
+
+        // Both directions. A word referenced and not declared is an empty chip; one declared and never
+        // referenced is a phase's word nobody ever sees. On the phone the two look the same.
+        val referenced = Regex("R\\.string\\.(run_chip_[a-z_]+)")
+            .findAll(notification).map { it.groupValues[1] }.toSet()
+        val declared = Regex("<string name=\"(run_chip_[a-z_]+)\"")
+            .findAll(baseStrings()).map { it.groupValues[1] }.toSet()
+        // Without this the comparison below holds between two empty sets, which is how a renamed string
+        // would leave the chip empty and this test still green.
+        assertTrue("no chip words were found in the notification at all", referenced.isNotEmpty())
+        assertEquals("the chip words are not the ones the default locale declares", declared, referenced)
+    }
+
+    @Test
     fun `a notification with no run behind it is swept at launch`() {
         // A run killed with its process cannot take its own down, and one left behind would keep someone
         // waiting on an install that is not happening.
@@ -95,6 +166,24 @@ class RunNotificationTest {
             .flatMap { root -> root.walkTopDown().filter { it.isFile && it.name == name }.toList() }
             .firstOrNull()
         requireNotNull(file) { "$name was not found; the scan is looking at the wrong directory" }
+        return file.readText()
+    }
+
+    /**
+     * The default locale's strings rather than whichever `strings.xml` the walk meets first.
+     *
+     * There are twelve of them, and the translated ones carry a fraction of the keys - so a test that read
+     * the first file it found would pass or fail on the order of a directory listing.
+     */
+    private fun baseStrings(): String {
+        val file = candidateRoots()
+            .flatMap { root ->
+                root.walkTopDown()
+                    .filter { it.isFile && it.name == "strings.xml" && it.parentFile?.name == "values" }
+                    .toList()
+            }
+            .firstOrNull()
+        requireNotNull(file) { "the default locale's strings were not found" }
         return file.readText()
     }
 

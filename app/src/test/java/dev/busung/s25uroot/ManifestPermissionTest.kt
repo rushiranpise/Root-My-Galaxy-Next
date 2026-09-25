@@ -91,6 +91,10 @@ class ManifestPermissionTest {
             "createMulticastLock" to "android.permission.CHANGE_WIFI_MULTICAST_STATE",
             "getActiveNetwork" to "android.permission.ACCESS_NETWORK_STATE",
             "openConnection" to "android.permission.INTERNET",
+            // A promoted notification - the run's live update on Android 16 - is only promoted for an app
+            // whose manifest asks for this one. Nothing throws without it; the run simply stays an ordinary
+            // notification, which is the failure that would never be noticed as one.
+            "setRequestPromotedOngoing" to "android.permission.POST_PROMOTED_NOTIFICATIONS",
         )
     }
 }

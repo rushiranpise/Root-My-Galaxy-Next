@@ -11,6 +11,14 @@
     -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      Asked for so a run can be promoted to what Android 16 calls a live update: the system puts it in the
+      status bar as a chip and at the top of the shade and the lock screen, which is where the two things
+      worth seeing during a run - how far along it is and the Stop button - are readable without opening
+      the app. It is not a runtime permission, and a phone that does not promote still posts the same
+      notification as an ordinary ongoing one.
+    -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Needed to reach the device's own adbd on loopback and to discover its port.-->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

@@ -197,6 +197,12 @@
     <string name="offline_cache_empty">Not available.</string>
     <string name="offline_cached_artifact_invalid">The cached %1$s doesn\'t match</string>
     <string name="autoroot_stabilizing">Waiting for the phone to finish starting</string>
+    <!--
+      The boot gate's chip words, for the two waits before a run exists to name. The run's own phases are
+      named by RunNotification's words, so a boot and a manual run say the same thing about the same stage.
+    -->
+    <string name="autoroot_chip_booting">Booting</string>
+    <string name="autoroot_chip_shizuku">Shizuku</string>
     <string name="autoroot_run_in_flight">Skipped: another run was already in progress.</string>
     <string name="autoroot_starting">Starting install</string>
     <string name="autoroot_prior_install_required">Root on boot needs a saved payload.</string>
@@ -1000,6 +1006,20 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="run_notification_channel_description">Shows what the running install is doing. You can stop it or copy the log.</string>
     <string name="run_notification_stopping">Stopping…</string>
     <string name="run_notification_log_copied">Log copied to the clipboard</string>
+    <!--
+      The status chip's own words. The chip is 96dp wide and the system draws text in it only when it
+      fits, so a phase is a word here and a sentence everywhere else. One per phase, because a phase with
+      no word would post a live update with an empty chip.
+    -->
+    <string name="run_chip_starting">Starting</string>
+    <string name="run_chip_checking">Checking</string>
+    <string name="run_chip_waiting">Waiting</string>
+    <string name="run_chip_download">Download</string>
+    <string name="run_chip_exploit">Exploit</string>
+    <string name="run_chip_loading">KernelSU</string>
+    <string name="run_chip_rooted">Rooted</string>
+    <string name="run_chip_failed">Failed</string>
+    <string name="run_chip_stopped">Stopped</string>
     <string name="target_search">Search device, model, or kernel</string>
     <string name="no_matching_devices_query">Nothing matches "%1$s"</string>
     <string name="target_show_everything">Search all devices</string>
