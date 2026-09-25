@@ -2392,12 +2392,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             //
             // The hand-over was removed on 2026-09-23 after nine runs handed 0x0f0000/0x180000 died at
             // `phys step cache gate failed`, which was read as the supplied offset breaking the stage
-            // after it. That was a payload bug, not this one: the artifact's target left
-            // `KMALLOC_CGROUP_TYPE` at the shared default of 2, so the pipe-buffer cache gate compared
-            // every page against the reclaim row (which the kernel aliases to the normal row) and never
-            // against the `kmalloc-cg-*` cache the pipe pages are charged to. A run that discovered the
-            // slide for itself died at the same gate on 2026-09-25 with no offset involved at all. With
-            // the target fixed, skipping the lottery is what this app wants.
+            // after it. The offset is not what that gate turns on. On 2026-09-25 the artifact the
+            // original app runs died there on its own scan attempt, with no offset handed to it, and
+            // then rooted on the attempt after that - handed the offset its own scan had just won,
+            // which is this hand-over. What the gate reads is a page, and a missed write window leaves
+            // that read coming back as `dead000000000100`; no cache choice fixes it, since this device
+            // has no `kmalloc-cg-*` cache at all and the artifact that reads the shared row matches the
+            // pipe page's own cache. Winning one lottery per boot is what this app does not want.
         }
 
         private fun stripAnsi(value: String): String = ANSI_ESCAPE.replace(value, "").replace("\r", "")
