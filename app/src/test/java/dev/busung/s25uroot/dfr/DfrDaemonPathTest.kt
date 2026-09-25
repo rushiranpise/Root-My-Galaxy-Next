@@ -249,18 +249,18 @@ class DfrDaemonPathTest {
         )
         assertTrue(
             "the refusal no longer says which copy it will not take",
-            source.contains("is not taken"),
+            source.contains("is not used"),
         )
         // The keep is conditional on the app's copy being unreadable, and says so: trusting a daemon at the
         // path the exploit execs is only safe because nothing but the app writes it, and a keep that claimed
         // a comparison it did not make is the failure this whole change is about.
         assertTrue(
             "a daemon at the exec path is still taken without a word about why it could not be compared",
-            source.contains("was not readable to compare it against"),
+            source.contains("could not be read for comparison"),
         )
         assertTrue(
             "the keep happens before the app's copy is even looked at, so a mismatch would never be noticed",
-            source.indexOf("mine == null") < source.indexOf("was not readable to compare it against"),
+            source.indexOf("mine == null") < source.indexOf("could not be read for comparison"),
         )
     }
 

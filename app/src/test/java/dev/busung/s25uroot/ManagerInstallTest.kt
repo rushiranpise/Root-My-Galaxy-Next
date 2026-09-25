@@ -168,17 +168,20 @@ class ManagerInstallTest {
     }
 
     @Test
-    fun `the sheet that starts a run offers the manager before it starts anything`() {
+    fun `the sheet that starts a run says what the run will do about the manager, and installs nothing`() {
+        // The sheet used to carry its own offer to install the manager. A run installs that manager itself
+        // before it does anything else, so the offer was the same install asked for a second time - and it
+        // was asked for before the run had said what it was going to do, which is the one place this is
+        // decided. The sheet states the state; the run acts on it.
         val activity = appSource()
         assertTrue(
-            "the run-plan sheet no longer offers to install the manager, so a phone with none has to find " +
-                "that out from the run itself",
-            activity.contains("R.string.action_install_manager"),
+            "the sheet offers to install the manager again, so a phone with none is asked the same question " +
+                "twice, by two things that can disagree about the answer",
+            !activity.contains("R.string.action_install_manager"),
         )
         assertTrue(
-            "the sheet's offer does not go through the same install the run uses, so the two could come to " +
-                "different managers",
-            activity.contains("ManagerInstall.install("),
+            "the sheet installs a manager itself again, which is the run's step and not the sheet's",
+            !activity.contains("ManagerInstall.install("),
         )
         assertTrue(
             "the sheet no longer says which of the two states the phone is in, so a run that will stop to " +
