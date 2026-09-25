@@ -198,9 +198,13 @@ class DfrShellTransportTest {
         // The screen's three actions and the shells they use, which is where a second, root-only call would
         // silently put the flow back to refusing on a boot with no root.
         val open = declaration(uiSource(), "fun open() =")
+        // The call and the flavour it carries, rather than one line of it: the extras it hands over are
+        // named one per line, and a check on the first line alone would break every time another one is
+        // added - which is a test of formatting wearing the clothes of a test of behaviour.
         assertTrue(
-            "opening the helper no longer goes through DfrInstall.launch",
-            open.contains("DfrInstall.launch(flavor = "),
+            "opening the helper no longer goes through DfrInstall.launch with the flavour the run loads",
+            open.contains("DfrInstall.launch(") &&
+                open.contains("flavor = AppPreferences.kernelsuFlavor(context)"),
         )
         val remove = declaration(uiSource(), "fun removeStageTwo() =")
         assertTrue(

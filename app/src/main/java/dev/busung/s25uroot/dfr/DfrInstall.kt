@@ -330,6 +330,21 @@ internal object DfrInstall {
     const val STAGE_TWO_FLAVOR_EXTRA = "rmg.flavor"
 
     /**
+     * The colours this app's window is drawn with, so the helper's screen can be drawn with them too.
+     *
+     * The helper resolves its palette from the theme it is drawn in, which is the platform's
+     * `DeviceDefault` - the OEM's palette, and not the Material one the app uses. Its accent in particular
+     * is a different colour outright, which is what "the helper does not match the app" meant. So the app
+     * sends the values it is drawing with and the helper paints those, and neither side keeps a second
+     * copy of the other's colours.
+     *
+     * Absent is a real state and not an error: a launch with no screen behind it - the boot, or the helper
+     * opened from the launcher - has no window to copy, and the helper then falls back to its own theme as
+     * it always did.
+     */
+    const val STAGE_TWO_TINT_EXTRA = "rmg.tint"
+
+    /**
      * What the helper sets on this app once its run has loaded KernelSU, so the app does the restart.
      *
      * The restart the helper's success needs is KernelSU's own soft reboot, and the helper cannot ask for
@@ -951,6 +966,7 @@ internal object DfrInstall {
         autorun: Boolean = false,
         rerootAtBoot: Boolean? = null,
         flavor: KernelSuFlavor? = null,
+        tint: String? = null,
     ): String = buildString {
         append("/system/bin/am start -n '").append(packageName).append("/").append(activity).append('\'')
         if (autorun) append(" --ez ").append(STAGE_TWO_AUTORUN_EXTRA).append(" true")
@@ -961,6 +977,12 @@ internal object DfrInstall {
         // which is why the helper treats "absent" and "blank" as the same answer and says so.
         if (flavor != null) {
             append(" --es ").append(STAGE_TWO_FLAVOR_EXTRA).append(' ').append(flavor.id)
+        }
+        // Quoted, because the value is a list of `role=hex` pairs and the shell is the thing that parses
+        // this line: unquoted, a comma would be nothing to a shell and a hex run that began with a digit
+        // would still be a word - but the quoting is what keeps that true of the next value added here.
+        if (tint != null) {
+            append(" --es ").append(STAGE_TWO_TINT_EXTRA).append(" '").append(tint).append('\'')
         }
     }
 
@@ -1060,9 +1082,10 @@ internal object DfrInstall {
         autorun: Boolean,
         rerootAtBoot: Boolean?,
         flavor: KernelSuFlavor? = null,
+        tint: String? = null,
     ): DfrAction? = verdictFor(
         KernelSuRuntime.unprivilegedShell(
-            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor),
+            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor, tint = tint),
         ),
         LAUNCH_FAILURE,
     )
@@ -1081,9 +1104,10 @@ internal object DfrInstall {
         autorun: Boolean = false,
         rerootAtBoot: Boolean? = null,
         flavor: KernelSuFlavor? = null,
+        tint: String? = null,
     ): DfrAction? = verdictFor(
         runOnEitherShell(
-            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor),
+            launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor, tint = tint),
             TIMEOUT_SECONDS,
         ),
         LAUNCH_FAILURE,

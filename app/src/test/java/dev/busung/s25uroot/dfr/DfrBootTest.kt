@@ -172,7 +172,9 @@ class DfrBootTest {
         val body = declaration(dfrInstallSource(), "internal fun launchWithoutRoot(")
         assertTrue(
             "the boot rerun no longer sends the command the screen sends, so the two can drift apart",
-            body.contains("launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor)"),
+            body.contains(
+                "launchCommand(autorun = autorun, rerootAtBoot = rerootAtBoot, flavor = flavor, tint = tint)",
+            ),
         )
         assertTrue("the launch is no longer through Shizuku's plain shell", body.contains("unprivilegedShell"))
         assertFalse("the launch escalates when a boot has no root to escalate with", body.contains("rootShell"))

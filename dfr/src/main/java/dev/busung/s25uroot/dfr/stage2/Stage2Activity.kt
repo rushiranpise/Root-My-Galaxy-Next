@@ -114,13 +114,17 @@ class Stage2Activity : Activity() {
      */
     private var payloadFlavor: ManagerFlavor? = null
 
+    /** The window the app was drawing with, as `role=hex` pairs, or null when it did not say. */
+    private var tint: Map<String, Int> = emptyMap()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         autorun = intent?.getBooleanExtra(EXTRA_AUTORUN, false) == true
         rerootAtBoot = intent?.takeIf { it.hasExtra(EXTRA_REROOT_AT_BOOT) }
             ?.getBooleanExtra(EXTRA_REROOT_AT_BOOT, false)
         payloadFlavor = KsudStage.flavorOf(intent?.getStringExtra(EXTRA_FLAVOR))
-        palette = Palette(this)
+        tint = parseTint(intent?.getStringExtra(EXTRA_TINT))
+        palette = Palette(this, tint)
         setContentView(buildScreen())
         dressWindow()
         refreshReadouts()
@@ -770,6 +774,21 @@ class Stage2Activity : Activity() {
         const val EXTRA_FLAVOR = "rmg.flavor"
 
         /**
+         * The colours the app's window is drawn with, as it draws them - held to `DfrInstall.STAGE_TWO_TINT_EXTRA`
+         * by the test that owns every shared name.
+         *
+         * This screen used to resolve its whole palette from its own theme, which is the platform's
+         * `DeviceDefault`: the OEM's colours, not the Material ones the app draws with, and an accent that
+         * is a different colour outright. So the app sends the values it is drawing with and the screen is
+         * painted in those, which is the only way two APKs that share no code can be one product's look.
+         *
+         * Optional, and absent means absent: a launch with no app behind it - the boot, or this screen
+         * opened from the launcher - has no window to copy, and the palette falls back to the theme it is
+         * drawn in, exactly as it did before.
+         */
+        const val EXTRA_TINT = "rmg.tint"
+
+        /**
          * What this screen sets on the app when a run it started has loaded KernelSU.
          *
          * The app's half is `DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA`, and the two are held together by
@@ -799,22 +818,49 @@ class Stage2Activity : Activity() {
 }
 
 /**
- * The screen's colours, answered by the running theme.
+ * The screen's colours: the window the app is drawing with, and the running theme behind it.
  *
- * Read from the theme rather than written down here, so this screen follows the phone's light/dark
- * setting and - on a device with Material You - the same accent the app is tinted with: the platform's
- * `colorAccent` and Compose's `primary` are one wallpaper-derived palette, so the two screens agreeing
- * is not a coincidence to maintain but the same source read twice.
+ * The app's values win where it sent any, because the two are not the same palette and were never going
+ * to be: the theme here is the platform's `DeviceDefault`, whose colours are the OEM's, while the app
+ * draws a Material scheme built either from Material You's tonal palette or from a seed it chose. Those
+ * include `colorAccent`, which is *not* the app's `primary` - an earlier version of this comment claimed
+ * the two were one wallpaper-derived palette read twice, and the screens disagreeing is what that
+ * assumption cost.
  *
- * What it deliberately does not read is the app's own scheme. This APK cannot see the app's resources,
- * and a copy of those values would be a second palette to keep in step with the first - which is the one
- * thing a helper that must look like the app cannot afford.
+ * So what is read from the theme is the fallback, and it is a real one rather than a formality: a launch
+ * with no app behind it - the boot, or this screen opened from the launcher - has no window to copy, and
+ * the theme is then the only honest answer. Both routes are then one expression per colour, which is
+ * what keeps them from drifting apart.
+ *
+ * The values themselves are still not written down here: [tint] is what the app sent, so there is no
+ * second palette in this file to keep in step with the app's - which is the one thing a helper that must
+ * look like the app cannot afford.
  */
-private class Palette(private val activity: Activity) {
+private fun parseTint(raw: String?): Map<String, Int> = raw.orEmpty()
+    .split(',')
+    .mapNotNull { pair ->
+        val at = pair.indexOf('=')
+        val value = if (at <= 0) null else pair.substring(at + 1).trim().toLongOrNull(16)
+        // A pair that is not `role=hex` is dropped rather than defaulted: a role this screen does not know
+        // is one the app added and this build never grew, and a value it cannot read is not a colour.
+        if (value == null) null else pair.substring(0, at).trim() to value.toInt()
+    }
+    .toMap()
+private class Palette(private val activity: Activity, private val tint: Map<String, Int>) {
 
-    private val dark: Boolean =
-        (activity.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
+    /**
+     * Whether this window is a dark one.
+     *
+     * The app's answer when it sent one, because the app's light/dark choice is its own setting rather
+     * than the phone's: a screen painted in a dark scheme on a phone set to light is the mismatch this
+     * whole arrangement exists to remove.
+     */
+    private val dark: Boolean = tint["dark"]?.let { it != 0 }
+        ?: ((activity.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES)
+
+    /** One of the app's own colours, or null when it did not send this one. */
+    private fun fromTheApp(role: String): Int? = tint[role]
 
     private fun color(attribute: Int, fallback: Long): Int {
         val value = TypedValue()
@@ -835,23 +881,40 @@ private class Palette(private val activity: Activity) {
             .getOrElse { ColorStateList.valueOf(fallback.toInt()) }
     }
 
-    /** The window behind everything. */
-    val surface: Int = color(android.R.attr.colorBackground, if (dark) 0xFF101014 else 0xFFF7F7FA)
+    /**
+     * The window behind everything.
+     *
+     * The app's own surface when it sent one, and otherwise the platform's - which is the case for a
+     * launch with no screen behind it. Preferring the app's is the whole point: the two are different
+     * palettes, not two spellings of one.
+     */
+    val surface: Int = fromTheApp("surface")
+        ?: color(android.R.attr.colorBackground, if (dark) 0xFF101014 else 0xFFF7F7FA)
 
-    /** A card on that window, which is the platform's own lifted-panel colour. */
-    val card: Int = color(android.R.attr.colorBackgroundFloating, if (dark) 0xFF1C1C22 else 0xFFFFFFFF)
+    /** A card on that window: the app's own card fill, or the platform's lifted panel. */
+    val card: Int = fromTheApp("card")
+        ?: color(android.R.attr.colorBackgroundFloating, if (dark) 0xFF1C1C22 else 0xFFFFFFFF)
 
     /** The log's pane: one step off the card it sits on, so the monospace block reads as a well. */
-    val panel: Int = if (dark) 0xFF26262E.toInt() else 0xFFEDEDF2.toInt()
+    val panel: Int = fromTheApp("panel") ?: if (dark) 0xFF26262E.toInt() else 0xFFEDEDF2.toInt()
 
-    /** The theme's own text colours, which already answer for the window they are drawn on. */
-    val onSurface: Int =
-        stateList(android.R.attr.textColorPrimary, if (dark) 0xFFE6E1E5 else 0xFF1B1B1F).defaultColor
+    /** The text colours, which have to answer for the window they are drawn on - so the app's, when sent. */
+    val onSurface: Int = fromTheApp("onSurface")
+        ?: stateList(android.R.attr.textColorPrimary, if (dark) 0xFFE6E1E5 else 0xFF1B1B1F).defaultColor
 
-    val onSurfaceVariant: Int =
-        stateList(android.R.attr.textColorSecondary, if (dark) 0xFFC4C7C5 else 0xFF44474A).defaultColor
+    val onSurfaceVariant: Int = fromTheApp("onSurfaceVariant")
+        ?: stateList(android.R.attr.textColorSecondary, if (dark) 0xFFC4C7C5 else 0xFF44474A).defaultColor
 
-    val accent: Int = color(android.R.attr.colorAccent, if (dark) 0xFFA8C7FA else 0xFF415F91)
+    /**
+     * The accent, which the platform's `colorAccent` is not.
+     *
+     * The app's accent is either Material You's tonal palette or a scheme generated from a chosen seed;
+     * the platform attribute is the OEM's accent, which is neither. So this is the colour that disagreed
+     * most visibly, and the one whose fallback matters least: with the app behind the launch, it is always
+     * the app's.
+     */
+    val accent: Int = fromTheApp("accent")
+        ?: color(android.R.attr.colorAccent, if (dark) 0xFFA8C7FA else 0xFF415F91)
 
     /** Whether this window is a light one, which decides the bars' icons and the pills' strength. */
     val isLight: Boolean

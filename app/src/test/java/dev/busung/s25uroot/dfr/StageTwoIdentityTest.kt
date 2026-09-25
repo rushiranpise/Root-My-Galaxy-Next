@@ -1,5 +1,6 @@
 package dev.busung.s25uroot.dfr
 
+import dev.busung.s25uroot.HelperTint
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -218,6 +219,37 @@ class StageTwoIdentityTest {
             "the helper's theme no longer switches with the phone's light/dark setting, so its whole " +
                 "palette is resolved against the wrong window",
             helperTheme().contains("@android:style/Theme.DeviceDefault.DayNight"),
+        )
+    }
+
+    @Test
+    fun `the window the app sends is the window the helper paints`() {
+        // The helper's own theme is the platform's DeviceDefault - the OEM's palette, and `colorAccent` is
+        // not this app's `primary` - so a helper that resolved everything from its theme was a different
+        // app's screen next to this one. What fixes that is the app handing over the values it is drawing
+        // with, which makes an extra spelled differently on the two sides silent: the helper would fall
+        // back to its theme and simply look wrong again, with nothing failing.
+        assertEquals(
+            "the app sends the window's colours under an extra the helper does not read, so its screen " +
+                "would go back to the OEM's palette without anything else noticing",
+            HelperTint.EXTRA,
+            constantIn(stageTwoActivity(), "EXTRA_TINT"),
+        )
+        assertEquals(
+            "the launch and the theme disagree about the name, so the colours the theme computed never " +
+                "reach a launch",
+            DfrInstall.STAGE_TWO_TINT_EXTRA,
+            HelperTint.EXTRA,
+        )
+        assertTrue(
+            "the screen that opens the helper no longer hands over the colours it is drawn in, so the " +
+                "helper opens in its own theme",
+            source("app/src/main/java/dev/busung/s25uroot/DfrUi.kt").contains("tint = HelperTint.value"),
+        )
+        assertTrue(
+            "the helper no longer prefers what it was handed, so a launch that did send the window would " +
+                "be painted from the theme anyway",
+            stageTwoActivity().contains("fromTheApp(\"accent\")"),
         )
     }
 

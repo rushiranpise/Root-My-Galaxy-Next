@@ -224,7 +224,14 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
         // The flavour goes with it, because the helper's manager row and its one action are about the
         // KernelSU this phone is set to run - which is this side's fact. Opening the helper by hand and
         // getting a manager row about a flavour the next run would not load would be worse than no row.
-        val action = DfrInstall.launch(flavor = AppPreferences.kernelsuFlavor(context))
+        // And the window's colours go with it, so the screen that opens is drawn in the one the person
+        // was already looking at: the helper cannot see this app's scheme, and its own theme is the
+        // platform's. [HelperTint.value] is null if no screen has drawn yet, which is not a case this
+        // press can get to - it is a button on one.
+        val action = DfrInstall.launch(
+            flavor = AppPreferences.kernelsuFlavor(context),
+            tint = HelperTint.value,
+        )
             ?: return@act listOf(staged, context.getString(R.string.dfr_no_shell)).joinToString("\n")
         listOf(staged, action.log).joinToString("\n")
     }
