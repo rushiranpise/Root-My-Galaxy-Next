@@ -1,5 +1,6 @@
 package dev.busung.s25uroot
 
+import dev.busung.s25uroot.dfr.DfrInstall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -278,11 +279,16 @@ class StagingSweepTest {
         // The difference from a sweep is the whole point of this command: a sweep names this app's own
         // paths, and a clear takes whatever is in the directory, so what it deletes cannot be written as
         // a list. Checked as the exact text, because the order is the report and only the text is true.
+        //
+        // One entry at a time rather than one `rm -rf` over the globs, and that is what the run's own two
+        // files force: both are inside that expansion and neither may go, and `rm` has no way to be told
+        // to skip a name - so the loop, the guard and the entry-per-delete are one decision.
+        val held = StagedResidue.heldForTheRun.joinToString("|")
         val expected = """
-            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; printf 'had %s\n' "${'$'}e"; done
-            rm_out=${'$'}(rm -rf -- /data/local/tmp/* /data/local/tmp/.[!.]* 2>&1)
+            rm_out=''
+            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; case "${'$'}{e##*/}" in $held) printf 'kept %s\n' "${'$'}e"; continue;; esac; printf 'had %s\n' "${'$'}e"; out=${'$'}(rm -rf -- "${'$'}e" 2>&1); [ -n "${'$'}out" ] && rm_out="${'$'}rm_out${'$'}{rm_out:+, }${'$'}out"; done
             [ -n "${'$'}rm_out" ] && printf 'said %s\n' "${'$'}rm_out"
-            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; printf 'left %s\n' "${'$'}e"; done
+            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; case "${'$'}{e##*/}" in $held) continue;; esac; printf 'left %s\n' "${'$'}e"; done
             exit 0
         """.trimIndent()
         assertEquals(expected, StagingSweep.clearCommand())
@@ -293,14 +299,127 @@ class StagingSweepTest {
         val command = StagingSweep.clearCommand()
         val delete = command.lineSequence().first { it.contains("rm -rf") }
 
-        // Every target is a glob inside the directory...
-        assertTrue(delete.contains("/data/local/tmp/*"))
-        assertTrue(delete.contains("/data/local/tmp/.[!.]*"))
-        // ...and the directory itself is not one of them: it belongs to the shell uid, with a mode an
-        // app has no business rewriting, and a run stages into it again afterwards.
-        assertFalse("the directory itself is a delete target", delete.contains("/data/local/tmp "))
+        // Every target is an entry the globs inside the directory produced...
+        assertTrue(command.contains("for e in /data/local/tmp/* /data/local/tmp/.[!.]*;"))
+        // ...and it is the loop's own entry that is handed to `rm`, never the directory: the directory
+        // belongs to the shell uid, with a mode an app has no business rewriting, and a run stages into it
+        // again afterwards.
+        assertEquals("\"${'$'}e\"", delete.substringAfter("rm -rf -- ").substringBefore(" 2>&1"))
         // Dot-names are staging markers here, so a clear that skipped them would leave the markers.
         assertTrue(command.trimEnd().endsWith("exit 0"))
+    }
+
+    @Test
+    fun `the files a run reads are the two this app never deletes`() {
+        // Both are read out of /data/local/tmp by code that is not this app's: the daemon's own
+        // `late-load` renames the stage copy onto /data/adb/ksud as its first act, and the staging copies
+        // the daemon from the payload's own staged copy - so a clear that took either one would cost the
+        // boot that the run it was staged for cannot be started again in. Named from `DfrInstall`'s own
+        // constants, which is the code that writes them, so a rename moves both.
+        assertEquals(
+            setOf(
+                DfrInstall.PAYLOAD_STAGED_DAEMON.substringAfterLast('/'),
+                DfrInstall.DAEMON_STAGE_PATH.substringAfterLast('/'),
+            ),
+            StagedResidue.heldForTheRun,
+        )
+        // Held and still listed: a detector's favourite names have to be reported, and both are in the
+        // directory on every device that has staged a run. Being in the catalogue is a reading, and this
+        // is the difference between it and a permission to delete.
+        val catalogued = StagedResidue.catalog.mapTo(HashSet()) { it.name }
+        StagedResidue.heldForTheRun.forEach { name ->
+            assertTrue("$name is held but not in the catalogue, so nothing reports it", name in catalogued)
+        }
+        assertEquals(
+            StagedResidue.heldForTheRun,
+            StagedResidue.catalog.filter { it.heldForTheRun }.mapTo(HashSet()) { it.name },
+        )
+    }
+
+    @Test
+    fun `a delete of a run's own file deletes nothing and says what it kept`() {
+        // The guard is inside `remove` rather than at the two screens that call it, because every delete
+        // this app performs goes through this one function - and the answer has to be a delete that did
+        // nothing rather than a refusal, since there is no state of the device on which these would go.
+        val held = listOf(DfrInstall.PAYLOAD_STAGED_DAEMON, DfrInstall.DAEMON_STAGE_PATH)
+        val outcome = StagingSweep.remove(held) as SweepOutcome.Done
+
+        assertEquals(emptyList<String>(), outcome.found)
+        assertEquals(emptyList<String>(), outcome.left)
+        assertEquals(held, outcome.kept)
+        assertEquals(0, outcome.removed)
+        // And nothing about it reads as a failure: `rm` never ran, so there is no complaint to carry.
+        assertEquals("", outcome.complaint)
+    }
+
+    @Test
+    fun `a clear leaves the files a run reads, and names them among what it left`() {
+        val command = StagingSweep.clearCommand()
+
+        // The guard is a `case` on the entry's base name, and every held name is in it...
+        assertTrue(command.contains("case \"${'$'}{e##*/}\" in"))
+        StagedResidue.heldForTheRun.forEach { name ->
+            assertTrue("$name is not in the clear's guard, so a clear would take it", command.contains(name))
+        }
+        // ...while `rm` is never handed one, which is the property the guard exists for: what it is handed
+        // is the loop's entry, and a command that named a held path on a delete line is one edit away from
+        // taking it.
+        assertEquals(
+            listOf("\"${'$'}e\""),
+            command.lineSequence()
+                .filter { it.contains("rm -rf") }
+                .map { line -> line.substringAfter("rm -rf -- ").substringBefore(" 2>&1") }
+                .toList(),
+        )
+        assertFalse(
+            "a clear went back to one `rm -rf` over the whole directory, which cannot skip a name",
+            command.contains("rm -rf -- /data/local/tmp"),
+        )
+        // What it kept is reported rather than passed over: the outcome the screen reads is built from
+        // these lines, and a directory somebody emptied that is still not empty has to say why.
+        assertEquals(
+            listOf(DfrInstall.DAEMON_STAGE_PATH),
+            StagingSweep.pathsIn(
+                "kept ${DfrInstall.DAEMON_STAGE_PATH}\nhad /data/local/tmp/rmgnext-payload\n",
+                StagingSweep.KEPT_PREFIX,
+            ),
+        )
+    }
+
+    @Test
+    fun `the kept files are not called leftovers, because one of those is a fact about the device`() {
+        // A clear that kept both files and could not remove nothing is the ordinary state of a device
+        // that has staged a run, so it has to read as the clear working - a "2 could not be deleted" line
+        // on every cleanup would teach a person to ignore the line that means it.
+        val outcome = SweepOutcome.Done(
+            found = listOf("/data/local/tmp/rmgnext-payload"),
+            left = emptyList(),
+            complaint = "",
+            kept = listOf(DfrInstall.DAEMON_STAGE_PATH, DfrInstall.PAYLOAD_STAGED_DAEMON),
+        )
+        assertEquals(SweepVerdict.Removed, outcome.verdict)
+        assertEquals(1, outcome.removed)
+    }
+
+    @Test
+    fun `the row in the temp directory offers no delete for a file a run reads`() {
+        // The screen is the other half of the guard in `remove`: a row whose button works would still be
+        // refused, and a person pressing it would be told their cleanup did nothing for no stated reason.
+        // So the button is absent and the row carries the sentence that says why.
+        val source = sourceFiles().first { it.name == "MainActivity.kt" }.readText()
+
+        assertTrue(
+            "a held file is offered for deletion again",
+            source.contains("val keptForTheRun = finding.staged.heldForTheRun"),
+        )
+        assertTrue(
+            "the row draws its delete button for a held file",
+            source.contains("if (deletable && !keptForTheRun)"),
+        )
+        assertTrue(
+            "the row no longer says why it has no button",
+            source.contains("R.string.residue_row_kept"),
+        )
     }
 
     @Test

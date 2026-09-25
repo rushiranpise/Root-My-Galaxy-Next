@@ -5525,6 +5525,10 @@ private fun StagedResidueDialog(
                                 )
                                 val ambiguous = reading.siblingPresent &&
                                     finding.staged.name in StagedResidue.sharedWithTheOtherInstall
+                                // A file a run reads is not offered for deletion at all - not even confirmed
+                                // first: the answer to "may I remove this" is no, and a confirmation would
+                                // make it a question about this device's state. [ResidueRow] draws no button
+                                // for one, and says why in the row instead.
                                 ResidueRow(
                                     finding = finding,
                                     deleteEnabled = !clearing,
@@ -5938,8 +5942,12 @@ private fun clearOutcomeLine(context: Context, outcome: SweepOutcome): String = 
     is SweepOutcome.Done -> when {
         outcome.complaint.isNotEmpty() ->
             context.getString(R.string.residue_clear_refused, outcome.complaint)
+        // A refusal and a leftover come before the kept files, because both are news about the device and
+        // the kept files are not: keeping them is the answer this app chose, on every clear.
         outcome.left.isNotEmpty() ->
             context.getString(R.string.residue_clear_left, outcome.left.size)
+        outcome.kept.isNotEmpty() ->
+            context.getString(R.string.residue_clear_done_kept, outcome.removed, outcome.kept.size)
         else -> context.getString(R.string.residue_clear_done, outcome.removed)
     }
 }
@@ -5949,7 +5957,10 @@ private fun clearOutcomeLine(context: Context, outcome: SweepOutcome): String = 
  *
  * [deletable] is the scope's answer, not the row's: `/data/adb` is listed and never deleted from - the
  * daemon and the modules in it are the root this app just obtained - so those rows carry no button at all
- * rather than a disabled one, which would read as "not right now".
+ * rather than a disabled one, which would read as "not right now". The run's own two files are hidden the
+ * same way and for the same reason, and they are the one case where the absence of a button needs a
+ * sentence: a person who has just been told their phone has a detector's favourite names in it will look
+ * for the delete, and what they need to know is that this app will not remove these at all.
  */
 @Composable
 private fun ResidueRow(
@@ -5959,6 +5970,7 @@ private fun ResidueRow(
     onDelete: () -> Unit,
 ) {
     val reading = finding.reading as? ResidueReading.Present ?: return
+    val keptForTheRun = finding.staged.heldForTheRun
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(
             modifier = Modifier.weight(1f),
@@ -5979,8 +5991,22 @@ private fun ResidueRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (keptForTheRun) {
+                Text(
+                    text = stringResource(R.string.residue_row_kept),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.residue_row_kept_detail),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        if (deletable) {
+        // The run's files are not given a button whatever the caller passed: the guard is in the sweep as
+        // well, and this is the same rule said where the row is drawn.
+        if (deletable && !keptForTheRun) {
             ResidueDeleteButton(
                 description = stringResource(R.string.residue_delete_row, finding.staged.name),
                 enabled = deleteEnabled,

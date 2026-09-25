@@ -76,6 +76,16 @@ internal sealed interface SweepOutcome {
         val left: List<String>,
         /** What `rm` said about the paths it would not remove, empty when it said nothing. */
         val complaint: String,
+        /**
+         * The paths the delete was asked for and refused to name, which are a run's own files.
+         *
+         * Carried apart from [left] rather than folded into it, because the two are opposite answers to
+         * the same question: a leftover is a path `rm` could not take - a fact about the device, and one
+         * worth a line in the log - while these were never taken on purpose. Counting them as leftovers
+         * would report a cleanup that worked as a cleanup that partially failed, on every device that has
+         * ever staged a run. See [StagedResidue.heldForTheRun] for which files these are.
+         */
+        val kept: List<String> = emptyList(),
     ) : SweepOutcome {
 
         /**
@@ -110,7 +120,21 @@ internal sealed interface SweepOutcome {
     fun clearLogLine(context: Context): String = when (this) {
         NoShell -> context.getString(R.string.residue_log_clear_none)
         SkippedRun -> context.getString(R.string.residue_log_clear_skipped)
-        is Done -> context.getString(R.string.residue_log_clear, removed, left.size)
+        // Its own sentence only when there is something to say, so a clear of a clean directory does not
+        // grow an "and 0 were kept" on every device that has never staged a run.
+        is Done -> buildString {
+            append(context.getString(R.string.residue_log_clear, removed, left.size))
+            if (kept.isNotEmpty()) {
+                append(' ')
+                append(
+                    context.getString(
+                        R.string.residue_log_clear_kept,
+                        kept.size,
+                        kept.joinToString(", ") { path -> path.substringAfterLast('/') },
+                    ),
+                )
+            }
+        }
     }
 }
 
@@ -172,8 +196,15 @@ internal object StagingSweep {
      * through the clear rather than through a row.
      */
     fun remove(paths: List<String>): SweepOutcome {
-        if (paths.isEmpty()) return SweepOutcome.Done(emptyList(), emptyList(), "")
-        val command = command(paths)
+        // The run's own files come out here, before a command is built at all, and this is the one place
+        // that has to do it: every delete this app performs reaches a shell through this function, so a
+        // rule enforced here cannot be bypassed by a new caller, a re-ordered dialog or a name that
+        // somebody added to a list. See [StagedResidue.heldForTheRun] for why they are not this app's.
+        val (held, wanted) = paths.partition { path ->
+            path.substringAfterLast('/') in StagedResidue.heldForTheRun
+        }
+        if (wanted.isEmpty()) return SweepOutcome.Done(emptyList(), emptyList(), "", kept = held)
+        val command = command(wanted)
         // Root first, then Shizuku's own shell: whichever one put the files there can take them away,
         // and the order keeps the quiet route - a Shizuku server that already answers as root - first.
         val result = KernelSuRuntime.rootShell(command)
@@ -187,6 +218,7 @@ internal object StagingSweep {
             complaint = pathsIn(result.output, SAID_PREFIX)
                 .joinToString(", ")
                 .take(COMPLAINT_LIMIT),
+            kept = held,
         )
     }
 
@@ -214,6 +246,11 @@ internal object StagingSweep {
      * That is a wider claim than `rm` of known names, so the screen that offers it names what is about
      * to go, and this refuses while a run is in flight: the payload is executed out of this directory,
      * which is the one thing here another process may be mid-way through using.
+     *
+     * Wide, and not absolute: the files a run reads ([StagedResidue.heldForTheRun]) are left where they
+     * are even here, because "empty this directory" is a claim about this app's residue and those two are
+     * the run's - a directory that keeps them is the honest answer, and it is reported as [Done.kept]
+     * rather than passed over.
      */
     fun clearWhenQuiet(context: Context): SweepOutcome {
         if (RunInFlight.holder(context) != null) return SweepOutcome.SkippedRun
@@ -232,32 +269,55 @@ internal object StagingSweep {
             complaint = pathsIn(result.output, SAID_PREFIX)
                 .joinToString(", ")
                 .take(COMPLAINT_LIMIT),
+            // The command names what it left on purpose, so the screen can say it rather than leaving a
+            // person to wonder why the directory they emptied is not empty.
+            kept = pathsIn(result.output, KEPT_PREFIX),
         )
     }
 
     /**
-     * The clear, as one command: say what is there, delete all of it with `rm -rf`, say what `rm` said,
-     * say what is still there.
+     * The clear, as one command: sort every entry into "a run's" or "the sweep's", say which is which,
+     * delete the second kind one entry at a time, say what `rm` said, say what is still there.
      *
-     * The globs are the same two the listing uses, and for the same reason: a dot-name is exactly the
-     * shape a staging marker takes. `-r` because a leftover can be a directory - `dalvik-cache` is one
-     * on a real device - and `-f` so that an unmatched glob is silence rather than an error. The
-     * directory itself is never removed, only its contents: it is a system directory with a mode this
-     * app has no business rewriting.
+     * The two globs are the same the listing uses, and for the same reason: a dot-name is exactly the
+     * shape a staging marker takes. Entry by entry rather than one `rm -rf` over the globs, because the
+     * run's own two files are *in* that expansion and the wider claim - empty this directory - may not
+     * include them: `rm` cannot be told to skip a name, so the loop is what makes the rule possible. A
+     * leftover can be a directory - `dalvik-cache` is one on a real device - hence `-r`, and `-f` so an
+     * entry that went between the test and the delete is not an error. The directory itself is never
+     * removed, only its contents: it is a system directory with a mode this app has no business
+     * rewriting.
      */
     internal fun clearCommand(directory: String = StagedResidue.DIRECTORY): String {
         val globs = "$directory/* $directory/.[!.]*"
-        fun askedUnder(prefix: String) = "for e in $globs; do [ -e \"\$e\" ] || continue; " +
-            "printf '$prefix%s\\n' \"\$e\"; done"
-        return askedUnder(FOUND_PREFIX) +
-            "\nrm_out=\$(rm -rf -- $globs 2>&1)\n" +
+        // The held names as the shell's own alternation. Literal patterns and not quoted words, because
+        // that is what `case` takes; they are this app's own constants - `ksud-s25u-kdp` and
+        // `.ksud-stage` - so there is no character in them for a glob to read.
+        val held = StagedResidue.heldForTheRun.joinToString("|")
+        return "rm_out=''\n" +
+            "for e in $globs; do [ -e \"\$e\" ] || continue; " +
+            "case \"\${e##*/}\" in $held) printf '$KEPT_PREFIX%s\\n' \"\$e\"; continue;; esac; " +
+            "printf '$FOUND_PREFIX%s\\n' \"\$e\"; " +
+            "out=\$(rm -rf -- \"\$e\" 2>&1); " +
+            "[ -n \"\$out\" ] && rm_out=\"\$rm_out\${rm_out:+, }\$out\"; done\n" +
             "[ -n \"\$rm_out\" ] && printf '$SAID_PREFIX%s\\n' \"\$rm_out\"\n" +
-            askedUnder(LEFT_PREFIX) +
-            "\nexit 0"
+            "for e in $globs; do [ -e \"\$e\" ] || continue; " +
+            "case \"\${e##*/}\" in $held) continue;; esac; " +
+            "printf '$LEFT_PREFIX%s\\n' \"\$e\"; done\n" +
+            "exit 0"
     }
 
     /** What a path still there is reported under. Both are prefixes of a whole line, not of a name. */
     internal const val FOUND_PREFIX = "had "
+
+    /**
+     * What a path the delete refused to name is reported under.
+     *
+     * Its own prefix rather than the leftover one, because a person reading the output has to be able to
+     * tell a file `rm` could not take from a file the app declined to hand it - and the outcome carries
+     * them in different lists for the same reason.
+     */
+    internal const val KEPT_PREFIX = "kept "
 
     /** What a path that survived the delete is reported under. */
     internal const val LEFT_PREFIX = "left "

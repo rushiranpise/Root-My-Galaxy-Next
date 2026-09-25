@@ -200,13 +200,18 @@ internal class ResidueSection(
      * Only what is present: `rm -f` is silent about a path that was never there, so naming the absent
      * ones would put a list of paths in the command that the answer then reports as "not found" - a
      * complaint about a file nobody ever had.
+     *
+     * And never the files a run reads ([StagedResidue.heldForTheRun]), whatever this scope is: the guard
+     * that counts is the one inside [StagingSweep.remove], and this is the same rule said where the list
+     * is built, so a held name cannot reach the screen as a delete button in the first place.
      */
     val deletablePaths: List<String>
         get() = if (!scope.deletable) {
             emptyList()
         } else {
-            (presentNamed.map { it.staged.path } + unreadableNamed.map { it.staged.path }) +
-                (presentEntries.map { it.path } + unreadableEntries.map { it.path })
+            ((presentNamed.map { it.staged.path } + unreadableNamed.map { it.staged.path }) +
+                (presentEntries.map { it.path } + unreadableEntries.map { it.path }))
+                .filterNot { path -> path.substringAfterLast('/') in StagedResidue.heldForTheRun }
         }
 }
 

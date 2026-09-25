@@ -121,6 +121,26 @@ class ResidueScopesTest {
     }
 
     @Test
+    fun `a file a run reads is never a path a list offers to delete`() {
+        // The second half of the guard in the sweep, and the one a person meets first: a path in this
+        // list becomes a delete button or a line in the delete-all command, so a held name that reached
+        // it would be refused two layers down - with nothing on the screen saying why.
+        val held = StagedResidue.heldForTheRun.map { name ->
+            ResidueFinding(StagedPath("$SYSTEM_DIRECTORY/$name", ResidueRole.Daemon), present(4_230_864L))
+        }
+        val section = ResidueSection(
+            scope = ResidueScope.SystemDirectory,
+            named = held + ResidueFinding(
+                StagedPath(SYSTEM_STAGED_DAEMON, ResidueRole.Daemon),
+                present(4_230_864L),
+            ),
+        )
+
+        assertTrue("the held files were not in the section to begin with", section.presentNamed.size > held.size)
+        assertEquals(listOf(SYSTEM_STAGED_DAEMON), section.deletablePaths)
+    }
+
+    @Test
     fun `a closed folder's heading says what it holds in that folder's own words`() {
         // The line that makes closing a folder the right default: the heading has to answer "what is in
         // here" for the three together to be readable at a glance. The three empty cases stay distinct,

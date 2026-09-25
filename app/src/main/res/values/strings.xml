@@ -81,21 +81,23 @@
     <string name="residue_delete_refused">The shell rejected %1$s: %2$s</string>
     <string name="residue_log_delete">Preparing files: deleted %1$s (%2$s)</string>
     <string name="residue_clear_title">Delete everything listed?</string>
-    <string name="residue_clear_body">This empties /data/local/tmp - including %1$d entries that aren\'t this app\'s - and removes the %2$d files the app left in /data/system. /data/adb isn\'t touched.</string>
+    <string name="residue_clear_body">This empties /data/local/tmp - including %1$d entries that aren\'t this app\'s - and removes the %2$d files the app left in /data/system. /data/adb isn\'t touched, and the files a run reads are kept.</string>
     <string name="residue_clear_confirm">Delete</string>
     <string name="residue_folder_tally">%1$d file(s) \u00b7 %2$s</string>
     <string name="residue_folder_clear">Delete everything in %1$s?</string>
     <string name="residue_folder_clear_desc">Delete everything in %1$s</string>
-    <string name="residue_folder_clear_glob">This empties %1$s, %2$d entries that aren\'t this app\'s included. The other two directories are untouched.</string>
+    <string name="residue_folder_clear_glob">This empties %1$s, %2$d entries that aren\'t this app\'s included. The other two directories are untouched, and the files a run reads are kept.</string>
     <string name="residue_folder_clear_named">This removes the %1$d paths this app lists for %2$s. The other two directories are untouched.</string>
     <string name="residue_folder_clear_named_title">Delete the paths this app lists in %1$s?</string>
     <string name="residue_folder_clear_named_desc">Delete the paths this app lists in %1$s</string>
     <string name="residue_clear_done">Deleted %1$d item(s).</string>
+    <string name="residue_clear_done_kept">Deleted %1$d item(s); %2$d kept, because a run reads them.</string>
     <string name="residue_clear_left">%1$d could not be deleted; they are still listed above.</string>
     <string name="residue_clear_refused">The shell rejected some of them: %1$s</string>
     <string name="residue_clear_no_shell">Nothing was deleted because no shell was available. Root or Shizuku is needed to clear this folder.</string>
     <string name="residue_clear_skipped">Nothing was deleted: a run is in flight in another process, and the payload is executed from this directory.</string>
     <string name="residue_log_clear">Preparing files: cleared /data/local/tmp through a shell: removed %1$d item(s), %2$d could not be removed</string>
+    <string name="residue_log_clear_kept">kept %1$d file(s) a run reads (%2$s)</string>
     <string name="residue_log_clear_none">Preparing files: asked for /data/local/tmp to be cleared and no shell answered</string>
     <string name="residue_log_clear_skipped">Preparing files: asked for /data/local/tmp to be cleared and stood down, a run is in flight in another process</string>
     <string name="residue_clean_listed_body">The directory is empty. None of the %1$d paths used by the app are present, and there are no other entries.</string>
@@ -112,6 +114,8 @@
 
     <string name="residue_blind_body">The app can\'t read /data/local/tmp</string>
     <string name="residue_row_detail">%1$s · %2$s · %3$s</string>
+    <string name="residue_row_kept">Kept: a run reads this file, so the app never deletes it.</string>
+    <string name="residue_row_kept_detail">The exploit reads it while it runs, and a boot that has staged a run cannot get it back without a reboot.</string>
     <string name="residue_copy">Copy list</string>
     <string name="residue_role_daemon">KernelSU daemon</string>
     <string name="residue_role_helper">root helper</string>

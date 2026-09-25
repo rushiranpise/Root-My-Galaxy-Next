@@ -127,6 +127,15 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
 internal data class StagedPath(val path: String, val role: ResidueRole) {
     /** The name on the device, which is what a detector's own catalog matches on. */
     val name: String get() = path.substringAfterLast('/')
+
+    /**
+     * Whether a run reads this file, which makes it this app's never to delete.
+     *
+     * Asked of the name rather than carried as a field per entry, so that the one list in
+     * [StagedResidue.heldForTheRun] is the whole answer - a flag on each row would be a second place for
+     * the same fact to live, and the row that forgot it is the row that gets removed.
+     */
+    val heldForTheRun: Boolean get() = name in StagedResidue.heldForTheRun
 }
 
 /** What looking for a [StagedPath] found. */
@@ -476,8 +485,41 @@ internal object StagedResidue {
      * different reason: `temp_su.sock` is the daemon's, created by the staged binary rather than by
      * anything in this source tree. It is still this app's residue - it appears on a device because a
      * run of this app put the daemon there - and it is the one path no scan of this code could discover.
+     *
+     * Being in this catalogue is a reading and not a permission to delete: the two names a run reads are
+     * in here so that the screen reports them, and they are held out of every delete by
+     * [heldForTheRun].
      */
     val catalog: List<StagedPath> = staged + legacy
+
+    /**
+     * The two names in this directory a run reads, which nothing in this app may delete.
+     *
+     * A run reads these out of `/data/local/tmp` *after* this app has decided to start it, and it reads
+     * them the way the daemon's own code names them rather than the way this app does:
+     *
+     * - [DfrInstall.DAEMON_STAGE_PATH] - the copy the daemon's `late-load` renames onto `/data/adb/ksud`
+     *   as its first act. Without it a run ends with "Failed to stage ksud" *after* the module is already
+     *   in the kernel, which is a boot spent on an error the log reads as a mis-typed path.
+     * - [DfrInstall.PAYLOAD_STAGED_DAEMON] - the daemon the run's staging copies from, and the one source
+     *   it trusts: the installed `/data/adb/ksud` may be another KernelSU project's build, and a run that
+     *   hands the exploit one of those panics the kernel. Measured on the phone this was written from as
+     *   four reboots in twenty minutes, every one of them from a run whose own staged copy was gone.
+     *
+     * Neither is precious for its own sake - the next run writes both again - and that is exactly why
+     * losing one costs a boot instead of nothing. A boot that has armed the exploit cannot start a run
+     * again, so the run that follows this app's next stage is the *payload's* retry, which reads what was
+     * left here and can re-stage nothing. Deleting one of these is therefore not cleaning up: it is
+     * choosing which of the phone's boots will be spent on a failure that looks like the exploit's.
+     *
+     * Named from [DfrInstall]'s own constants, which is the code that writes them, so a rename moves both
+     * the writer and this list. On the device nothing else reads these files, which is why the names are
+     * taken as they are written rather than typed out here.
+     */
+    val heldForTheRun: Set<String> = setOf(
+        DfrInstall.PAYLOAD_STAGED_DAEMON.substringAfterLast('/'),
+        DfrInstall.DAEMON_STAGE_PATH.substringAfterLast('/'),
+    )
 
     /**
      * The names both installs write, and can therefore write at the same time.
