@@ -63,7 +63,7 @@ class DfrAfterRootTest {
         val activity = mainActivity()
         assertTrue(
             "the app restarts after the helper's run without asking the setting, so a phone whose owner " +
-                "turned Auto Soft reboot off is rebooted anyway",
+                "turned Auto soft reboot off is rebooted anyway",
             activity.contains("AppPreferences.restartAfterRoot(this)"),
         )
         assertTrue(
@@ -71,9 +71,9 @@ class DfrAfterRootTest {
             activity.indexOf("AppPreferences.restartAfterRoot(this)") < activity.indexOf("runRecoveryAction("),
         )
         assertTrue(
-            "a run that loaded KernelSU with Auto Soft reboot off leaves no line anywhere, so the load " +
+            "a run that loaded KernelSU with Auto soft reboot off leaves no line anywhere, so the load " +
                 "looks like it did nothing",
-            activity.contains("Auto Soft reboot is off"),
+            activity.contains("Auto soft reboot is off"),
         )
         assertTrue(
             "the restart is not something the app's own log can be read for afterwards",

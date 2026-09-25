@@ -255,7 +255,7 @@ class Stage2Activity : Activity() {
         runButton.isEnabled = false
         recheckButton.isEnabled = false
         progress.visibility = View.VISIBLE
-        summaryView.text = "Running the exploit. The log below shows what is happening."
+        summaryView.text = "Running. The log below shows what is happening."
         summaryView.setTextColor(palette.onSurfaceVariant)
         runInBackground {
             var result = -1
@@ -270,9 +270,9 @@ class Stage2Activity : Activity() {
                 // and a line about the run itself would overwrite that with news that is already in the log.
                 append(
                     if (success) {
-                        "\n[+] Root access obtained. The manager can act on it now."
+                        "\n[+] Root obtained. The manager can use it now."
                     } else {
-                        "\n[x] The process stopped at $result. The lines above say where."
+                        "\n[x] Stopped at $result. See the lines above."
                     },
                 )
                 Log.i(TAG, "Run finished with $result")
@@ -298,20 +298,18 @@ class Stage2Activity : Activity() {
      */
     private fun blockReason(): String {
         if (BootState.armed()) {
-            return "The exploit is already active (${BootState.ARMED_MARKER} exists), so it cannot be run " +
-                "again. Only a full device reboot will clear it. A soft reboot will not."
+            return "The exploit already ran this boot, so it cannot run again. Only a full reboot clears it."
         }
         if (BootState.rootLive()) {
-            return "KernelSU is already loaded in this boot's kernel, and a second late-load is not run into " +
-                "a kernel that already has the module. Reboot, or soft reboot, and root again from there."
+            return "KernelSU is already loaded this boot. Reboot or soft reboot, then root again."
         }
         val reading = needs
-            ?: return "The files this boot's run needs have not been read yet, so a run was not started."
+            ?: return "The files a run needs have not been read yet, so nothing was started."
         if (!reading.ready) {
             val blocking = reading.blocking
-            return "The run is refused: ${blocking.size} of the ${reading.items.count { it.need.required }} " +
-                "files it hands over are not there - " + blocking.joinToString(", ") { it.need.path } +
-                ". The list is on the card."
+            return "A run needs ${reading.items.count { it.need.required }} files, and ${blocking.size} " +
+                "of them are missing: " + blocking.joinToString(", ") { it.need.path } +
+                ". They are listed on the card."
         }
         return ""
     }
@@ -323,9 +321,9 @@ class Stage2Activity : Activity() {
         val binder = awaitController(CONTROLLER_TIMEOUT_MS)
         if (binder == null) {
             append(
-                "[x] No controller was found within ${CONTROLLER_TIMEOUT_MS / 1000}s. " +
-    "The exploit may not have worked, or network_stack took too long. " +
-    "Check the log above for details.",
+                "[x] No controller after ${CONTROLLER_TIMEOUT_MS / 1000}s. " +
+                    "The exploit may have failed, or network_stack was too slow. " +
+                    "See the log above.",
             )
             return result
         }
@@ -466,16 +464,16 @@ class Stage2Activity : Activity() {
         stateView.background = palette.pillBackground(tint)
 
         summaryView.text = when {
-            busy -> "Running the exploit. The log below shows what is happening."
-            rootLive -> "KernelSU is loaded in this boot's kernel. Reboot, or soft reboot, before rooting again."
-            armed -> "The exploit has already run this boot. Reboot to root this boot again."
+            busy -> "Running. The log below shows what is happening."
+            rootLive -> "KernelSU is already loaded this boot. Reboot or soft reboot before rooting again."
+            armed -> "The exploit already ran this boot. Reboot to root again."
             !ready -> if (reading == null) {
-                "Reading the files this boot's run needs…"
+                "Reading the files a run needs…"
             } else {
                 "${blocking.size} of ${reading.items.count { it.need.required }} files missing: " +
                     blocking.joinToString(", ") { it.need.path }
             }
-            else -> "All ${reading.items.count { it.need.required }} files this boot's run needs are present."
+            else -> "All ${reading.items.count { it.need.required }} files a run needs are present."
         }
         summaryView.setTextColor(if (busy || rootLive || armed || !ready) palette.onSurfaceVariant else palette.success)
 
@@ -504,19 +502,19 @@ class Stage2Activity : Activity() {
         val reading = needs
         needsRows.removeAllViews()
         if (reading == null) {
-            needsHeaderView.text = "Files  ·  reading…"
+            needsHeaderView.text = "Files needed  ·  reading…"
             needsRows.visibility = View.GONE
             return
         }
         val blocking = reading.blocking.size
         val needed = reading.items.count { it.need.required }
         val notSeen = reading.notSeenReadings().size
-        val tail = if (notSeen == 0) "" else "  ·  $notSeen of the phone's not visible here"
+        val tail = if (notSeen == 0) "" else "  ·  $notSeen not visible here"
         needsHeaderView.text = when {
-            needsExpanded -> "Files  ·  ${needed - blocking} of $needed needed present$tail"
-            blocking > 0 -> "Files  ·  $blocking needed missing$tail"
-            notSeen > 0 -> "Files  ·  all $needed needed present$tail"
-            else -> "Files  ·  all $needed needed present"
+            needsExpanded -> "Files needed  ·  ${needed - blocking} of $needed present$tail"
+            blocking > 0 -> "Files needed  ·  $blocking of $needed missing$tail"
+            notSeen > 0 -> "Files needed  ·  all $needed present$tail"
+            else -> "Files needed  ·  all $needed present"
         }
         needsRows.visibility = if (needsExpanded || blocking > 0) View.VISIBLE else View.GONE
         reading.items.forEach { checked ->
@@ -542,9 +540,8 @@ class Stage2Activity : Activity() {
             if (!checked.need.required && checked.presence != StageNeeds.Presence.Present) {
                 needsRows.addView(
                     text(
-                        "      not visible from this process${checked.because?.let { " ($it)" }.orEmpty()}: " +
-                            "the exploit reads, patches or execs it from its own context, so this reading " +
-                            "cannot stop a run",
+                        "      Not visible here${checked.because?.let { " ($it)" }.orEmpty()}. The " +
+                            "exploit uses it in its own process, so this does not block a run.",
                         11f,
                         palette.onSurfaceVariant,
                         Typeface.DEFAULT,

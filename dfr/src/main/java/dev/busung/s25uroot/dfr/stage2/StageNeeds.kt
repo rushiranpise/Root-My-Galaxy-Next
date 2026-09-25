@@ -129,7 +129,7 @@ internal object StageNeeds {
 
         /** The log's form: one line per file, which is the list itself rather than a summary of it. */
         fun report(): String = buildString {
-            append("[*] What this boot's run needs (${items.size} files, this is the whole list):\n")
+            append("[*] Files a run needs (${items.size}):\n")
             items.forEach { checked ->
                 append(
                     when (checked.presence) {
@@ -141,8 +141,8 @@ internal object StageNeeds {
                 append(checked.need.path)
                 when (checked.presence) {
                     Presence.Present -> append("  ").append("%,d".format(checked.size)).append(" bytes")
-                    Presence.Absent -> append("  NOT THERE").append(checked.because?.let { " ($it)" }.orEmpty())
-                    Presence.Unreadable -> append("  not readable from here")
+                    Presence.Absent -> append("  missing").append(checked.because?.let { " ($it)" }.orEmpty())
+                    Presence.Unreadable -> append("  not readable")
                         .append(checked.because?.let { " ($it)" }.orEmpty())
                 }
                 append("  (").append(checked.need.group.label)
@@ -150,17 +150,16 @@ internal object StageNeeds {
             }
             blocking.forEach { append("    without it: ").append(it.need.why).append('\n') }
             if (ready) {
-                append("[+] every file this run hands over is present, so it can start")
+                append("[+] Every file a run needs is present, so it can start")
                 if (notSeenReadings().isNotEmpty()) {
                     append(" (").append(notSeenReadings().size)
-                    append(" of the phone's own files were not visible from here, which is this screen's ")
-                    append("problem and not a run's)")
+                    append(" not visible from here, which does not affect a run)")
                 }
                 append('\n')
             } else {
                 append("[x] ").append(blocking.size).append(" of the ")
                 append(items.count { it.need.required })
-                append(" files this run needs are not there, so it is refused before it spends this boot\n")
+                append(" files a run needs are missing, so the run is refused\n")
             }
         }
     }
@@ -220,54 +219,49 @@ internal object StageNeeds {
     internal fun needs(nativeLibraryDir: String): List<Need> = listOf(
         Need(
             KsudStage.DEST,
-            "the daemon the exploit bind-mounts and execs as `late-load`. This helper stages it from " +
-                "KsudStage.STAGED_BY_THE_APP, which the app writes from the payload it verified for this " +
-                "device while it has root",
+            "The KernelSU service the exploit starts. The app stages it while it has root.",
             Group.Staged,
         ),
         Need(
             LATE_LOAD_SOURCE,
-            "what that daemon's own late-load renames onto /data/adb/ksud before it loads anything. A missing " +
-                "copy fails the command with \"Failed to stage ksud\" - after the module is already in the " +
-                "kernel - and every load consumes it, so the app writes it again after each one",
+            "KernelSU needs this to finish loading, and every load uses it up. The app writes it again " +
+                "before each run.",
             Group.Staged,
         ),
         Need(
             "$nativeLibraryDir/$EXPLOIT_LIBRARY",
-            "the exploit, loaded into network_stack. The APK extracts its libraries at install, so a copy " +
-                "missing here is a helper whose install was not the one this screen is running from",
+            "The exploit, loaded into network_stack. It is installed with the helper, so a missing copy " +
+                "means the installed helper is not the one this screen came from.",
             Group.Helper,
         ),
         Need(
             CRASH_DUMP,
-            "patched first and exec'd next: the exploit's earliest step, and the file its page-cache write " +
-                "is proved on. Nothing after it can happen without it",
+            "The first file the exploit patches and runs. Nothing after it can happen without it.",
             Group.Phone,
         ),
         Need(
             LIBC,
-            "patched so the loader runs the staged payload where the module was asked for",
+            "Patched so the loader runs the staged payload.",
             Group.Phone,
         ),
         Need(
             LIBCXX,
-            "patched so init's own exec is the one that runs the shellcode",
+            "Patched so init's own call runs the shellcode.",
             Group.Phone,
         ),
         Need(
             MODPROBE,
-            "the process both stages of the shellcode run in: each compares its own argv[0] against this " +
-                "path before it does anything, so a phone whose modprobe moved does not match at all",
+            "The process both stages of the exploit run in. This phone's copy has to match.",
             Group.Phone,
         ),
         Need(
             MODULE_SLOT,
-            "where the module is written through - the vendor file this exploit path patches a module into",
+            "Where the exploit writes the KernelSU module.",
             Group.Phone,
         ),
         Need(
             LOGCAT,
-            "the path the daemon is bind-mounted over and exec'd as, so the process reads as a logcat",
+            "The path the service is started as.",
             Group.Phone,
         ),
     )

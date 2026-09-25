@@ -573,7 +573,7 @@ class MainActivity : ComponentActivity() {
      * Two guards, and neither is a formality. The caller has to be the helper, because this extra names a
      * reboot and any app on the phone can start an exported activity: a screen that accepted one from
      * whatever sent it would be a reboot any app could ask for. And the setting has to be on, because that is
-     * exactly what *Auto Soft reboot* means - and a restart is the one action here that cannot be offered and
+     * exactly what *Auto soft reboot* means - and a restart is the one action here that cannot be offered and
      * then taken back.
      */
     private fun maybeRestartAfterTheHelper(intent: Intent?) {
@@ -588,7 +588,7 @@ class MainActivity : ComponentActivity() {
         if (!AppPreferences.restartAfterRoot(this)) {
             AppLog.info(
                 AppLogTags.RESTART,
-                "The helper loaded KernelSU; Auto Soft reboot is off, so the restart is the user's to make",
+                "The helper loaded KernelSU; Auto soft reboot is off, so the restart is the user's to make",
             )
             return
         }
