@@ -134,6 +134,36 @@ class ShizukuStagingTest {
     }
 
     @Test
+    fun anIncompleteReadIsARouteThatDidNotRunIt() {
+        // The process being over is not the answer being complete. A reader still draining when its grace
+        // runs out has not read the whole of what the command said, and the part that arrived is worse than
+        // nothing: a caller greps it for a fact and reads its absence as the fact being absent, when the
+        // route may have said yes. So it is refused rather than reported - the same null the window above
+        // gives, said in the same place a caller already reads.
+        val body = declaration(transportSource(), "fun shell(")
+
+        assertTrue(
+            "the reader is joined without a grace, so a stalled read is waited on instead of ended: $body",
+            body.contains("reader.join(READER_GRACE_MILLIS)"),
+        )
+        val afterTheJoin = body.substringAfter("reader.join(READER_GRACE_MILLIS)")
+            .substringBefore("exitValue()")
+        assertTrue(
+            "a reader still running after its grace is not asked about, so a partial read is reported as " +
+                "the command's whole answer: $body",
+            afterTheJoin.contains("reader.isAlive"),
+        )
+        assertTrue(
+            "a reader still running after its grace no longer answers as a route that did not run it: $body",
+            afterTheJoin.contains("return null"),
+        )
+        assertTrue(
+            "the incomplete read is not logged the way the window's own ending is: $body",
+            afterTheJoin.contains("AppLog.warn"),
+        )
+    }
+
+    @Test
     fun theWindowIsAskedOfTheRemoteRatherThanInheritedFromProcess() {
         // The trap this exists for: `Process.waitFor(long, TimeUnit)` is a loop around `exitValue()`, and it
         // catches only `IllegalThreadStateException` - what a *local* process throws while its child is still

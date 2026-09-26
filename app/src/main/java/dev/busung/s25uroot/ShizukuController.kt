@@ -146,6 +146,12 @@ object ShizukuController {
      * gives about a `su` that never answered: "this route did not run it" rather than "this route ran
      * it and it failed". The two routes have to say it the same way, because a caller picks between
      * them and reads whichever answered.
+     *
+     * Null is also the answer for a command that ended while its output was still being read, for the
+     * same reason one step later: the process is over, but the reader has not read the whole of what the
+     * command said, and the part that did arrive is not an account any caller can act on. A caller that
+     * greps a half-read answer for a fact reads its absence as the fact being absent - which is a refusal
+     * from a route that may have said yes - so the incomplete read is refused instead of reported.
      */
     fun shell(command: String, timeoutMillis: Long? = null): ShellResult? {
         val process = exec(arrayOf(SHIZUKU_SHELL, "-c", "$command 2>&1"))
@@ -176,6 +182,16 @@ object ShizukuController {
                 return null
             }
             reader.join(READER_GRACE_MILLIS)
+            if (reader.isAlive) {
+                // Left to itself rather than stopped: the process this is reading has already ended, so the
+                // pipe closes under it - and it is a daemon, so refusing to wait for it cannot hold the app
+                // open after the run that refused has given up.
+                AppLog.warn(
+                    AppLogTags.SHIZUKU,
+                    "A command did not finish being read within ${READER_GRACE_MILLIS}ms",
+                )
+                return null
+            }
             val exitCode = runCatching { process.exitValue() }.getOrNull() ?: return null
             return ShellResult(exitCode, synchronized(output) { output.toString().trim() })
         } finally {
