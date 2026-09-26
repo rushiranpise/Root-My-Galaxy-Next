@@ -102,8 +102,17 @@ class Stage2Activity : Activity() {
     @Volatile
     private var needs: StageNeeds.Reading? = null
 
-    /** Whether the app asked for the run on its way in, which is a reading the log still carries. */
+    /** Whether the app asked for the run on its way in, and was allowed to - see [Autorun]. */
     private var autorun = false
+
+    /**
+     * What this launch asked for, whether or not it was allowed to have it.
+     *
+     * Kept beside [autorun] rather than folded into it because the two answer different questions and the
+     * log needs both: [autorun] is whether a run starts itself, and this is what to say about a launch that
+     * asked for one and did not get it. A refusal nobody can read is a boot that quietly stopped rerooting.
+     */
+    private var autorunVerdict = AutorunVerdict.NotRequested
 
     /** What the app's own reroot-at-boot setting was, or null when the app did not say. Reported in the log. */
     private var rerootAtBoot: Boolean? = null
@@ -132,7 +141,14 @@ class Stage2Activity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        autorun = intent?.getBooleanExtra(EXTRA_AUTORUN, false) == true
+        // The extra says a run was wanted; [Autorun.launchedFromUid] says whether the process that sent it
+        // is one the app's own launches come from. Asked of the platform rather than taken from the extra,
+        // because an exported component that acts on an extra acts on anyone's extra - see [Autorun].
+        autorunVerdict = Autorun.verdict(
+            requested = intent?.getBooleanExtra(EXTRA_AUTORUN, false) == true,
+            launchedFromUid = Autorun.launchedFromUid(this),
+        )
+        autorun = autorunVerdict.runs
         rerootAtBoot = intent?.takeIf { it.hasExtra(EXTRA_REROOT_AT_BOOT) }
             ?.getBooleanExtra(EXTRA_REROOT_AT_BOOT, false)
         payloadFlavor = KsudStage.flavorOf(intent?.getStringExtra(EXTRA_FLAVOR))
@@ -218,14 +234,20 @@ class Stage2Activity : Activity() {
         val manager = payloadFlavor?.label
             ?: installed.firstOrNull()?.label
             ?: "no manager"
-        val started = if (autorun) {
-            "started by the app" + when (rerootAtBoot) {
+        val started = when (autorunVerdict) {
+            AutorunVerdict.Granted -> "started by the app" + when (rerootAtBoot) {
                 true -> " (reroot at boot on)"
                 false -> " (reroot at boot off)"
                 null -> ""
             }
-        } else {
-            "started by hand"
+
+            AutorunVerdict.NotRequested -> "started by hand"
+
+            AutorunVerdict.Refused ->
+                "started by something that is neither this app nor a shell: the run it asked for was refused"
+
+            AutorunVerdict.Unanswerable ->
+                "started by something else, and this build cannot read who: the run it asked for was refused"
         }
         return "[*] pid=${Process.myPid()} uid=$uid${if (uid == Process.SYSTEM_UID) " (system)" else ""} " +
             "${selinuxContext()} · manager $manager · $started"
