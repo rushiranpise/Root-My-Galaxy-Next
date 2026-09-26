@@ -134,6 +134,26 @@ internal enum class DebugAuthorizationResult {
 }
 
 /**
+ * What a caller may say about this device's ADB authorization, from [AdbPairing.authorizeDebugging].
+ *
+ * Three answers rather than two, because one of the five [DebugAuthorizationResult] values is neither a
+ * success nor a refusal: a setting that could not be read says nothing about whether the authorization
+ * will expire. Folding it into the success answer - which is what this used to be - tells a caller the
+ * pairing was made to last when nothing on the device was ever read back, and the symptom of that is
+ * exactly the weekly code the write exists to remove.
+ */
+enum class DebugPermanence {
+    /** Written, or already there, and read back as never expiring. */
+    Permanent,
+
+    /** The device refused the write, or gives no route to the setting: the authorization will expire. */
+    NotPermanent,
+
+    /** The setting could not be read, so neither of the two answers above can be given. */
+    Unconfirmed,
+}
+
+/**
  * Android's own default for how long an ADB authorization lasts, in milliseconds.
  *
  * Not a number this app chose: it is the framework's, and it is why a device that was paired once asks
@@ -161,6 +181,27 @@ internal fun debugAuthorizationResult(
     route == WirelessAdbEnableRoute.Unavailable -> DebugAuthorizationResult.Unavailable
     after == null -> DebugAuthorizationResult.Unknown
     else -> DebugAuthorizationResult.Refused
+}
+
+/**
+ * What a caller may say about the device, from what the write did.
+ *
+ * Pure, so the case this exists for can be checked without a device: an unreadable setting is its own
+ * answer, not a success. Only the two readings that say the timeout is zero are reported as permanent -
+ * a write that returned without throwing proves nothing on its own.
+ */
+internal fun debugPermanence(result: DebugAuthorizationResult): DebugPermanence = when (result) {
+    DebugAuthorizationResult.AlreadyPermanent,
+    DebugAuthorizationResult.MadePermanent,
+    -> DebugPermanence.Permanent
+
+    // Told apart from an unreadable setting on purpose: these two are a device that said no or gives no
+    // route to the setting, so the authorization is known to expire, not merely unconfirmed.
+    DebugAuthorizationResult.Refused,
+    DebugAuthorizationResult.Unavailable,
+    -> DebugPermanence.NotPermanent
+
+    DebugAuthorizationResult.Unknown -> DebugPermanence.Unconfirmed
 }
 
 /**
@@ -390,19 +431,12 @@ object AdbPairing {
      * Zero is a deliberate weakening of a device default, which is why it is spelled out here rather
      * than left implicit: a key that a device would have thrown away after a week now lasts until the
      * user revokes it in Developer options. That trade is the entire point of this function.
+     *
+     * The answer is a [DebugPermanence] rather than a boolean because a setting that could not be read
+     * afterwards is not an arrangement: it is [DebugPermanence.Unconfirmed], and a caller that was told
+     * `true` for it would report a permanence nobody ever verified.
      */
-    fun authorizeDebugging(context: Context): Boolean = when (tryAuthorizeDebugging(context)) {
-        // A could-not-read is not a failure: the write is attempted either way, and refusing to report
-        // it as arranged would have callers redo work on a device that may already be arranged.
-        DebugAuthorizationResult.AlreadyPermanent,
-        DebugAuthorizationResult.MadePermanent,
-        DebugAuthorizationResult.Unknown,
-        -> true
-
-        DebugAuthorizationResult.Refused,
-        DebugAuthorizationResult.Unavailable,
-        -> false
-    }
+    fun authorizeDebugging(context: Context): DebugPermanence = debugPermanence(tryAuthorizeDebugging(context))
 
     internal fun tryAuthorizeDebugging(context: Context): DebugAuthorizationResult {
         val before = allowedConnectionTimeMillis(context)

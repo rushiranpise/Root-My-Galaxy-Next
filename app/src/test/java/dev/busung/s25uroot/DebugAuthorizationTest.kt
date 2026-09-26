@@ -109,6 +109,62 @@ class DebugAuthorizationTest {
     }
 
     /**
+     * The case this change exists for: an unreadable setting is not an arrangement. Reporting it as one
+     * is a pairing the user is told will last, right up until the week is up and the code comes back.
+     */
+    @Test
+    fun `a setting nobody could read back is unconfirmed rather than permanent`() {
+        assertEquals(
+            DebugPermanence.Unconfirmed,
+            debugPermanence(DebugAuthorizationResult.Unknown),
+        )
+    }
+
+    /** Only the two readings that say the timeout is zero are a permanence anybody verified. */
+    @Test
+    fun `only a reading that says never is reported as permanent`() {
+        assertEquals(
+            DebugPermanence.Permanent,
+            debugPermanence(DebugAuthorizationResult.AlreadyPermanent),
+        )
+        assertEquals(
+            DebugPermanence.Permanent,
+            debugPermanence(DebugAuthorizationResult.MadePermanent),
+        )
+    }
+
+    /**
+     * A device that refused the write and one with no route to the setting are both known to expire -
+     * which is a different answer from one whose setting could not be read at all.
+     */
+    @Test
+    fun `a refusal and no route are both known to expire`() {
+        assertEquals(DebugPermanence.NotPermanent, debugPermanence(DebugAuthorizationResult.Refused))
+        assertEquals(
+            DebugPermanence.NotPermanent,
+            debugPermanence(DebugAuthorizationResult.Unavailable),
+        )
+    }
+
+    /**
+     * The wrapper no longer collapses the answer to a boolean: a `true` for an unreadable setting is
+     * exactly the report this change removes, and the caller tells the three outcomes apart in its log.
+     */
+    @Test
+    fun `the pairing reports an unconfirmable permanence instead of a confirmed one`() {
+        assertTrue(
+            "the authorization wrapper still answers with a boolean, so an unreadable setting would " +
+                "still read as a permanence that was never verified",
+            !sourceOf("AdbPairing.kt").contains("fun authorizeDebugging(context: Context): Boolean"),
+        )
+        assertTrue(
+            "the service does not tell an unconfirmed permanence from a confirmed expiry, so the only " +
+                "warning it can give is the wrong one for the setting it could not read",
+            sourceOf("AdbPairingService.kt").contains("DebugPermanence.Unconfirmed"),
+        )
+    }
+
+    /**
      * The settings the fork this was taken from writes, and that Android reads: without both, the
      * switch that lets a host be authorized at all is missing, or the week is never written away.
      */
