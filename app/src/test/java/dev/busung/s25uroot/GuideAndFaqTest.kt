@@ -41,8 +41,8 @@ class GuideAndFaqTest {
     @Test
     fun `the notification step is the notification permission itself`() {
         val home = source("MainActivity.kt")
-        // The ask has to be the runtime permission and not a row that opens settings: the reason the guide
-        // gives for it is that a run turns the screen off, and a phone that declined still has Settings.
+        // The ask has to be the runtime permission and not a row that opens settings: the guide says a run
+        // reports itself in the notification, and a phone that declined still has Settings.
         assertTrue(home.contains("ActivityResultContracts.RequestPermission()"))
         assertTrue(home.contains("permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)"))
         assertTrue(source("strings.xml").contains("name=\"guide_notifications_body\""))
