@@ -1197,6 +1197,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                 }
+                // The other half of telling someone a run failed. The two are gated on the same endings -
+                // a stop was asked for, and a boot gate ran with nobody at the screen - so what is left is
+                // the run nobody was watching, which is the one a notification in the shade does not reach.
+                runFailureBuzz(
+                    context = app,
+                    verdict = runVerdict(mutableState.value.phase, busy = false),
+                    unattended = runIsUnattended,
+                )
                 // Last, and in its own time: the record is written and the result is in the shade by the
                 // time this starts, so the screen coming back is not part of any of it.
                 wakeTheScreenAgain()

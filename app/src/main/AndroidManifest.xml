@@ -19,6 +19,12 @@
       notification as an ordinary ongoing one.
     -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!--
+      The one-shot buzz a failed run gives, which is the only vibration this app asks for itself: the taps
+      in it use the view haptic feedback, which needs no permission at all. Nothing throws without this being
+      declared - the call fails silently - so a missing line here would read as the feature never working.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Needed to reach the device's own adbd on loopback and to discover its port.-->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

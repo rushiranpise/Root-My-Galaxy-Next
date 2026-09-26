@@ -95,6 +95,10 @@ class ManifestPermissionTest {
             // whose manifest asks for this one. Nothing throws without it; the run simply stays an ordinary
             // notification, which is the failure that would never be noticed as one.
             "setRequestPromotedOngoing" to "android.permission.POST_PROMOTED_NOTIFICATIONS",
+            // The buzz a failed run gives. Unlike the promoted-notification case above this one is not
+            // quietly degraded: the call throws, and it throws inside the run's own ending, so the failure
+            // that would be left behind is a run that died while reporting itself.
+            "createOneShot" to "android.permission.VIBRATE",
         )
     }
 }
