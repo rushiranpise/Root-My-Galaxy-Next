@@ -9,10 +9,11 @@ import org.junit.Test
 class BootSettleTest {
 
     @Test
-    fun `the default is a wait, not zero`() {
-        // The gate exists because a cold device makes the racy stage worse, so shipping it off would
-        // ship it not at all.
-        assertTrue(BootSettle.DEFAULT_SECONDS > 0)
+    fun `the default is no wait at all`() {
+        // Off by default: a run starts when it is asked for. The floor exists because a cold device makes
+        // the racy stage worse, and it stays a setting rather than a constant because that is a device
+        // condition the person holding the phone is the one who knows about.
+        assertEquals(0, BootSettle.DEFAULT_SECONDS)
         assertTrue(BootSettle.allowedSeconds.contains(BootSettle.DEFAULT_SECONDS))
     }
 
@@ -23,12 +24,11 @@ class BootSettleTest {
         // claims about how settled a device has to be, and a phone that stayed unrooted because they
         // disagreed is not a thing anyone could tell apart from the exploit failing.
         //
-        // It is still not the manual floor: both gates are woken by `BOOT_COMPLETED`, which has already
-        // waited out part of the boot, and a person tuning automation must not be changing how long a
-        // manual run pauses.
+        // Still its own constant rather than the manual one: both gates are woken by `BOOT_COMPLETED`,
+        // which has already waited out part of the boot, and a person tuning automation must not be
+        // changing how long a manual run pauses.
         assertTrue(BootSettle.allowedSeconds.contains(BootSettle.GATE_DEFAULT_SECONDS))
-        assertTrue(BootSettle.GATE_DEFAULT_SECONDS > 0)
-        assertTrue(BootSettle.GATE_DEFAULT_SECONDS < BootSettle.DEFAULT_SECONDS)
+        assertEquals(0, BootSettle.GATE_DEFAULT_SECONDS)
     }
 
     @Test

@@ -14,14 +14,21 @@ import kotlinx.coroutines.delay
  * freshly booted device, and a race attempted while the system is still settling fails for reasons the
  * payload cannot fix.
  *
- * The default is not zero. The exploit this app runs has a racy stage that a cold device makes worse,
- * and the wait costs two minutes once per boot against a failed attempt that costs the whole run. It
- * is a floor rather than a hard block: [InstallViewModel.skipBootSettle] ends the wait on the user's
- * word, because someone who knows their device just booted cleanly is better informed than a constant.
+ * Off by default, and the reason the setting exists is not: the exploit this app runs has a racy stage
+ * that a cold device makes worse, so a device that wants the floor asks for it rather than having it
+ * chosen for it. It is a floor rather than a hard block: [InstallViewModel.skipBootSettle] ends the
+ * wait on the user's word, because someone who knows their device just booted cleanly is better
+ * informed than a constant.
  */
 internal object BootSettle {
-    /** What a manual run waits for unless it is told otherwise. */
-    const val DEFAULT_SECONDS = 120
+    /**
+     * What a manual run waits for unless it is told otherwise, which is the setting's own `Off`.
+     *
+     * A run starts when it is asked for, and a phone that has just booted is not held back by a
+     * constant this app chose. [allowedSeconds] is what the setting offers to a device that does want
+     * the wait.
+     */
+    const val DEFAULT_SECONDS = 0
 
     /**
      * What both unattended gates wait for, and deliberately not [DEFAULT_SECONDS].
@@ -32,13 +39,14 @@ internal object BootSettle {
      * came back unrooted because one of them was left at a value the other was not is not a thing
      * anyone could tell apart from the exploit failing.
      *
-     * It is still not [DEFAULT_SECONDS], and the reason is the one thing the two gates do not share
-     * with a manual run: an unattended gate is woken by `BOOT_COMPLETED`, so the part of the boot that
-     * precedes it has already been waited out, and it is this boot's own elapsed time - not a pause
-     * per attempt - that both read. If an unattended gate read the manual setting, then tuning
-     * automation would silently rewrite what a manual run does next time.
+     * Its own constant rather than [DEFAULT_SECONDS] even though the two happen to agree at zero, and
+     * the reason is the one thing the two gates do not share with a manual run: an unattended gate is
+     * woken by `BOOT_COMPLETED`, so the part of the boot that precedes it has already been waited out,
+     * and it is this boot's own elapsed time - not a pause per attempt - that both read. If an
+     * unattended gate read the manual setting, then tuning automation would silently rewrite what a
+     * manual run does next time.
      */
-    const val GATE_DEFAULT_SECONDS = 60
+    const val GATE_DEFAULT_SECONDS = 0
 
     /**
      * What the setting offers. Rounded to these rather than free-form: a value nobody tested is not a
