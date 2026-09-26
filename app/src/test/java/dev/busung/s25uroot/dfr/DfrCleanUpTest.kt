@@ -1,0 +1,254 @@
+package dev.busung.s25uroot.dfr
+
+import dev.busung.s25uroot.dfr.DfrMode.Check
+import dev.busung.s25uroot.dfr.DfrMode.Inject
+import dev.busung.s25uroot.dfr.DfrMode.Uninstall
+import java.io.File
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * What a clean-up is allowed to claim, read off the uninstall's own output.
+ *
+ * The clean-up does two things and clears a record for each of them - the key in `android.uid.system`,
+ * and the helper installed under that shared user. The record is not decoration: it is the instant the
+ * flow compares against uptime to decide whether a reboot has happened since, so a record cleared by a
+ * clean-up that did not run reads as "this phone was never injected" - the same wrong direction as the
+ * two stamps that once made the flow skip its own reboot step.
+ *
+ * What can be tested on a JVM is the reading itself, against logs built by the injector's own line
+ * formatters ([PackagesXml.keyAbsentLine], [PackagesXml.keyRemovedLine]). The write needs a device; the
+ * sentence does not.
+ */
+class DfrCleanUpTest {
+
+    private val target = "android.uid.system"
+
+    /** A log with the shape a real uninstall prints when it removed certs and re-read the file. */
+    private fun removedLog(): String = """
+        [*] uid=0 apk=
+        [+] read 4711054 bytes from /data/system/packages.xml
+        [+] removed our pastSigs from android.uid.system
+        ${PackagesXml.keyChangedLine()}
+        ${PackagesXml.keyRemovedLine(target, gone = true)}
+        [*] restorecon rc=0
+        [+] DONE. our key removed; soft reboot to apply
+    """.trimIndent()
+
+    @Test
+    fun `an uninstall that removed the key is evidence`() {
+        val result = DfrResult(Uninstall, ok = true, log = removedLog())
+        assertTrue("the key is gone by the injector's own re-read", result.uninstalled)
+    }
+
+    @Test
+    fun `an uninstall on a file that never had the key is evidence too`() {
+        // Nothing to remove is the same answer to the question being asked: our key is not in the file.
+        // It is *not* the same answer to "does the phone owe a restart" - see the two tests below.
+        val log = """
+            [*] read 4711054 bytes from /data/system/packages.xml
+            ${PackagesXml.keyAbsentLine()}
+            [+] DONE. our key was not in the file; nothing to apply
+        """.trimIndent()
+        val result = DfrResult(Uninstall, ok = true, log = log)
+        assertTrue("our key is out of the file", result.uninstalled)
+        assertFalse("and nothing is waiting on a restart", result.keyTakenOut)
+    }
+
+    @Test
+    fun `an uninstall that changed the file owes a restart`() {
+        // The one case the working system has not caught up with: the certs are gone from packages.xml and
+        // the Package Manager that started before the change still holds them. The app records the instant
+        // from this, and the screen asks for the restart that makes it true.
+        val result = DfrResult(Uninstall, ok = true, log = removedLog())
+        assertTrue("the file was changed", result.keyTakenOut)
+
+        // The verification failed, so nothing was written - the injector prints its "changed" line before
+        // it verifies, which is exactly why the verdict is part of this reading and not only the line.
+        val unverified = DfrResult(
+            Uninstall,
+            ok = false,
+            log = "${PackagesXml.keyChangedLine()}\n[x] FAILED: verify FAILED for $target",
+        )
+        assertFalse("a run that failed earns no restart", unverified.keyTakenOut)
+        assertFalse("and does not read as a removal either", unverified.uninstalled)
+    }
+
+    @Test
+    fun `a failed verification is not evidence`() {
+        // The injector throws on a false verify, so the process exits non-zero and carries the failure
+        // line. Either half alone has to be enough to keep the record.
+        val log = """
+            [*] read 4711054 bytes from /data/system/packages.xml
+            ${PackagesXml.keyRemovedLine(target, gone = false)}
+            [x] FAILED: verify FAILED for android.uid.system (key still present)
+        """.trimIndent()
+        assertFalse("nothing was confirmed gone", DfrResult(Uninstall, ok = false, log = log).uninstalled)
+        assertFalse(
+            "and not on an exit code alone either",
+            DfrResult(Uninstall, ok = true, log = log).uninstalled,
+        )
+    }
+
+    @Test
+    fun `a refusal before the write is not evidence`() {
+        val log = """
+            [!] structural check: only 12 package entries, refusing to write
+            [x] FAILED: refusing to rewrite a file that is not this file
+        """.trimIndent()
+        assertFalse(DfrResult(Uninstall, ok = false, log = log).uninstalled)
+    }
+
+    @Test
+    fun `an empty log is not evidence`() {
+        // What DfrInstall.run returns when nothing answered is null, and the screen's guard is that null;
+        // this is the same bug one layer down: a property that read an empty string as a confirmed
+        // removal would clear the record on an uninstall that never ran.
+        assertFalse(DfrResult(Uninstall, ok = false, log = "").uninstalled)
+    }
+
+    @Test
+    fun `no root shell clears neither record`() {
+        // What DfrInstall.run answers when nothing answered, and the same null from the helper's `pm
+        // uninstall`. The clean-up reports "no root" and the two instants stay where they were: a phone
+        // whose packages.xml still carries our key must not start reading as one that was never touched.
+        val outcome = DfrCleanUpOutcome.of(uninstall = null, helper = null)
+        assertFalse("the inject record is kept", outcome.keyGone)
+        assertFalse("the install record is kept", outcome.helperGone)
+    }
+
+    @Test
+    fun `a refusal keeps its own record and clears nothing`() {
+        val refused = DfrResult(Uninstall, ok = false, log = "[x] FAILED: verify FAILED for $target")
+        val failedInstall = DfrAction(ok = false, log = "Failure [not installed for 0]")
+        val outcome = DfrCleanUpOutcome.of(refused, failedInstall)
+        assertFalse("the key was not confirmed gone", outcome.keyGone)
+        assertFalse("and the helper was not removed", outcome.helperGone)
+    }
+
+    @Test
+    fun `each half clears only its own record`() {
+        // The key removal landing while the helper's does not is the ordinary case on a phone where the
+        // stage two was never installed: `pm uninstall` answers Failure. The install record has to stay,
+        // because the flow reads the package itself - and keeping it costs nothing, while clearing it on
+        // the other half's evidence is what a shared "clean-up succeeded" flag would do.
+        val removed = DfrResult(Uninstall, ok = true, log = removedLog())
+        val notInstalled = DfrAction(ok = false, log = "Failure [not installed for 0]")
+        val outcome = DfrCleanUpOutcome.of(removed, notInstalled)
+        assertTrue("the key is gone", outcome.keyGone)
+        assertFalse("the helper was never there, so nothing confirms its removal", outcome.helperGone)
+
+        val both = DfrCleanUpOutcome.of(removed, DfrAction(ok = true, log = "Success"))
+        assertTrue("and with both halves landed, both records go", both.keyGone && both.helperGone)
+    }
+
+    @Test
+    fun `another mode's output is not evidence`() {
+        // `--check` prints the same target name and the same word "injected"; only an uninstall can report
+        // a removal, so the mode is part of the reading rather than a detail of the caller.
+        val checkLog = "[check] $target injected=true\n[check] all_injected=true"
+        assertFalse(DfrResult(Check, ok = true, log = checkLog).uninstalled)
+        assertFalse(
+            "and an inject's own log is not a removal",
+            DfrResult(Inject, ok = true, log = removedLog()).uninstalled,
+        )
+    }
+
+    /**
+     * The one thing about a clean-up that no reading can catch: what its two writes are ordered against.
+     *
+     * `pm uninstall` is a Package Manager write, and Package Manager writes `packages.xml` from its own
+     * memory - the copy it read at boot, which still holds our key while a clean-up is running - on its own
+     * schedule, which is not this app's. So a press that takes the helper off *and* removes the key has the
+     * key put back into the file afterwards (measured on this device: 45 s later, with no restart between),
+     * and the phone boots the list the press was supposed to be done with - a clean-up that only works the
+     * second time, on a phone whose helper is already gone. Ordering the two commands cannot beat a write
+     * neither of them issued, which is why the helper is not in this press at all: the flow offers it as the
+     * step after the restart the removal owes. Both halves are correct on their own and the flow's reading of
+     * each is correct; only the sequence is wrong, which is why this assertion reads the source rather than
+     * any result.
+     */
+    @Test
+    fun `the clean-up removes the key and leaves the helper for the restart`() {
+        val body = cleanUpBody()
+        val key = body.indexOf("DfrInstall.run(context, DfrMode.Uninstall)")
+        val helper = body.indexOf("DfrInstall.uninstallStageTwo()")
+        assertTrue("the clean-up does not remove the key", key >= 0)
+        assertTrue("the clean-up no longer uninstalls the helper at all", helper >= 0)
+        assertTrue(
+            "the helper's uninstall runs before the key removal, so Package Manager rewrites the file from " +
+                "the memory that still holds the key and the removal never lands",
+            key < helper,
+        )
+        assertTrue(
+            "the helper is uninstalled whatever the key removal did, so a press that wrote the file also " +
+                "takes the helper off and the write that puts the key back is this app's own",
+            body.substring(key, helper).contains("keyTakenOut"),
+        )
+        assertTrue(
+            "the removal is recorded before the last write to packages.xml, so the instant it stamps is " +
+                "not the one the phone has to restart past",
+            key < body.indexOf("setDfrKeyRemovedAt"),
+        )
+    }
+
+    /**
+     * The restart the removal owes is asked for in the same command as the removal - the same window, one
+     * layer down.
+     *
+     * A second command is issued when the first one's answer arrives, so everything between the two is time
+     * nothing is holding, and the writer that can put the key back is Package Manager's own, on its own
+     * schedule. One shell command has no room in it for anything else, which is the whole of the fix.
+     */
+    @Test
+    fun `the removal and the restart are one command, and a failed removal restarts nothing`() {
+        val command = DfrInstall.removalAndRestartCommand("/data/app/rmgnext/base.apk")
+        val removal = command.indexOf("--uninstall")
+        val restart = command.indexOf("soft-reboot")
+        assertTrue("the command does not remove the key", removal >= 0)
+        assertTrue("the command does not ask for the restart", restart >= 0)
+        assertTrue("the restart is not asked for after the removal", removal < restart)
+        assertTrue(
+            "the restart is asked for whatever the removal did: a restart with the key still in the file " +
+                "is every app on the phone closed to arrive back at the same step",
+            command.substring(removal, restart).contains("rc"),
+        )
+        assertTrue(
+            "the restart is not the installed daemon's, which is the only one that owns the userspace",
+            command.contains("/data/adb/ksud"),
+        )
+
+        // And the reading of it: the two halves are one command, so the injector's own verdicts say nothing
+        // about whether the daemon was ever reached.
+        val asked = DfrResult(Uninstall, ok = true, log = "x\n${DfrInstall.RESTART_REQUESTED}\ny")
+        assertTrue("the restart line is not read", asked.restartRequested)
+        assertFalse(
+            "an answer with no restart line reads as a restart that happened, where the phone is sitting on " +
+                "an unanswered removal and the step has to keep saying so",
+            DfrResult(Uninstall, ok = true, log = "x\n[+] DONE. our key removed; soft reboot to apply\ny")
+                .restartRequested,
+        )
+    }
+
+    /**
+     * The clean-up's own body, as the screen writes it.
+     *
+     * Read to the end of the file rather than to the method's closing brace, which is what the two tests
+     * above need: the removals and the branch between them are one slice of source, and a slice that stopped
+     * at the first `}` would be a different function's code by the time the second half is read.
+     */
+    private fun cleanUpBody(): String {
+        val source = uiSource()
+        val start = source.indexOf("fun cleanUp()")
+        assertTrue("no `fun cleanUp()` in the screen's source", start >= 0)
+        return source.substring(start)
+    }
+
+    /** The screen's own source, wherever the test JVM was started from. */
+    private fun uiSource(): String {
+        val relative = "app/src/main/java/dev/busung/s25uroot/DfrUi.kt"
+        return listOf(File(relative), File("../$relative")).firstOrNull { it.isFile }?.readText()
+            ?: error("neither $relative nor ../$relative exists, so this test read nothing")
+    }
+}

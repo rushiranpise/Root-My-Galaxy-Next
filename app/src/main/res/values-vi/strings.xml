@@ -110,8 +110,6 @@
     <string name="action_continue">Vẫn tiếp tục</string>
     <string name="action_next">Tiếp theo</string>
     <string name="advanced">Nâng cao</string>
-    <string name="advanced_mode">Chế độ nâng cao</string>
-    <string name="advanced_mode_description">Tự chọn payload tương thích với thiết bị khi cài đặt</string>
     <string name="shizuku_mode">Sử dụng Shizuku</string>
     <string name="shizuku_mode_description">Dùng Shizuku để chạy payload. Điều này có thể cải thiện độ tin cậy.</string>
     <string name="shizuku_not_running_title">Shizuku không chạy</string>

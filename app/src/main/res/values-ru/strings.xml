@@ -119,8 +119,6 @@
     <string name="action_continue">Всё равно продолжить</string>
     <string name="action_next">Далее</string>
     <string name="advanced">Дополнительно</string>
-    <string name="advanced_mode">Расширенный режим</string>
-    <string name="advanced_mode_description">Выбрать совместимый с устройством payload вручную во время установки</string>
     <string name="shizuku_mode">Использовать Shizuku</string>
     <string name="shizuku_mode_description">Использовать Shizuku для запуска payload. Это может повысить надёжность.</string>
     <string name="shizuku_not_running_title">Shizuku не запущен</string>

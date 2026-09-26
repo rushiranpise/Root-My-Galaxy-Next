@@ -7,11 +7,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,14 +66,15 @@ internal fun ReadOnlyWallNotice(
                 color = LocalContentColor.current.copy(alpha = 0.8f),
             )
         }
-        TextButton(
-            onClick = {
+        // The app's link shape, in whatever this is drawn on rather than in the theme's primary: this
+        // notice appears on an error card and inside two dialogs, and a colour of its own would be one
+        // of the three reading wrong.
+        AppTextAction(
+            AppAction(R.string.action_open_setting) {
                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                 onOpenSetting()
             },
-            colors = ButtonDefaults.textButtonColors(contentColor = LocalContentColor.current),
-        ) {
-            Text(stringResource(R.string.action_open_setting))
-        }
+            contentColor = LocalContentColor.current,
+        )
     }
 }

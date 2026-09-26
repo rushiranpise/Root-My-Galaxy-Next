@@ -11,6 +11,9 @@ private const val ACCEPTED = "/data/local/tmp/.rmgnext-restart-zygote-accepted"
 // what these tests check is that the script writes and reads back the path it is handed.
 private const val REPORT = "/data/user/0/dev.rushiranpise.rmgnext/files/framework-restart-report"
 
+/** Where a reboot-and-unroot leaves its account of the wipe, the one action that publishes one. */
+private const val SUMMARY = "/data/local/tmp/.rmgnext-reboot-wipe"
+
 
 class RootRecoveryTest {
 
@@ -319,7 +322,7 @@ class RootRecoveryTest {
         val scripts = listOf(
             RootRecovery.restartZygoteScript(BOOT, ACCEPTED, REPORT),
             RootRecovery.softRebootScript(BOOT, ACCEPTED),
-            RootRecovery.rebootScript(BOOT, ACCEPTED),
+            RootRecovery.rebootScript(BOOT, ACCEPTED, SUMMARY),
         )
 
         scripts.forEach { script ->
@@ -387,7 +390,7 @@ class RootRecoveryTest {
 
     @Test
     fun `the reboot flushes what the app persisted before it goes`() {
-        val script = RootRecovery.rebootScript(BOOT, ACCEPTED)
+        val script = RootRecovery.rebootScript(BOOT, ACCEPTED, SUMMARY)
 
         val accepted = script.indexOf("publish_handoff \"\$ACCEPTED_VALUE\"")
         assertTrue(accepted > 0)
@@ -398,12 +401,12 @@ class RootRecoveryTest {
 
     @Test
     fun `the root form of the reboot still checks for root`() {
-        assertTrue(RootRecovery.rebootScript(BOOT, ACCEPTED).contains("'not-root'"))
+        assertTrue(RootRecovery.rebootScript(BOOT, ACCEPTED, SUMMARY).contains("'not-root'"))
     }
 
     @Test
     fun `the shell form of the reboot asks with the shell user's own permission`() {
-        val script = RootRecovery.rebootScript(BOOT, ACCEPTED, requiresRoot = false)
+        val script = RootRecovery.rebootScript(BOOT, ACCEPTED, SUMMARY, requiresRoot = false)
 
         // A plain Shizuku shell cannot run `/system/bin/reboot`, but the `shell` user holds the reboot
         // permission - which is how `adb reboot` works - so the same action is asked for through `svc`.
@@ -526,7 +529,7 @@ class RootRecoveryTest {
             RootRecovery.reloadModulesScript(BOOT, ACCEPTED),
             RootRecovery.restartZygoteScript(BOOT, ACCEPTED, REPORT),
             RootRecovery.softRebootScript(BOOT, ACCEPTED),
-            RootRecovery.rebootScript(BOOT, ACCEPTED),
+            RootRecovery.rebootScript(BOOT, ACCEPTED, SUMMARY),
         )
 
         scripts.forEach { script ->

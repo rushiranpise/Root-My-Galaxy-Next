@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -80,44 +79,53 @@ internal fun WirelessAdbDialog(
             }
         },
         confirmButton = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // First, because it is the one action that needs nothing already arranged on the device.
-                if (writeSecureSettingsMissing) {
-                    TextButton(enabled = !busy, onClick = onGrantPermission) {
-                        Text(stringResource(R.string.grant_action))
-                    }
-                }
-                TextButton(
-                    enabled = !busy,
-                    onClick = { onPair(snapshot?.keyPresent == true) },
-                ) {
-                    Text(
-                        stringResource(
-                            // With a key already stored, pairing again has to clear it first, which is
-                            // the only way out of a pairing the device has forgotten.
-                            if (snapshot?.keyPresent == true) R.string.wireless_adb_pair_again
-                            else R.string.wireless_adb_pair,
-                        ),
-                    )
-                }
-                // The screen the code is generated in, reachable without leaving with an instruction
-                // to find it: "open Developer options" as a sentence is what this button replaces.
-                TextButton(enabled = !busy, onClick = onOpenDeveloperOptions) {
-                    Text(stringResource(R.string.adb_pair_open_developer_options))
-                }
-                TextButton(enabled = !busy, onClick = onTest) {
-                    Text(stringResource(R.string.wireless_adb_test))
-                }
-                if (snapshot?.keyPresent == true) {
-                    TextButton(enabled = !busy, onClick = onForget) {
-                        Text(stringResource(R.string.wireless_adb_forget))
-                    }
-                }
-            }
+            // The set this dialog asks with, in the same shape as every other screen's - see
+            // [AppDialogActions] - which is what turned six stacked answers into two rows.
+            AppDialogActions(
+                listOfNotNull(
+                    // First, because it is the one action that needs nothing already arranged on the
+                    // device.
+                    if (writeSecureSettingsMissing) {
+                        AppAction(R.string.grant_action, AppActionRole.Standard, enabled = !busy) {
+                            onGrantPermission()
+                        }
+                    } else {
+                        null
+                    },
+                    // The answer this dialog exists for: the one filled cell in the set.
+                    AppAction(
+                        // With a key already stored, pairing again has to clear it first, which is the
+                        // only way out of a pairing the device has forgotten.
+                        label = if (snapshot?.keyPresent == true) {
+                            R.string.wireless_adb_pair_again
+                        } else {
+                            R.string.wireless_adb_pair
+                        },
+                        role = AppActionRole.Priority,
+                        enabled = !busy,
+                    ) { onPair(snapshot?.keyPresent == true) },
+                    // The screen the code is generated in, reachable without leaving with an instruction
+                    // to find it: "open Developer options" as a sentence is what this button replaces.
+                    AppAction(
+                        R.string.adb_pair_open_developer_options,
+                        AppActionRole.Standard,
+                        !busy,
+                    ) { onOpenDeveloperOptions() },
+                    AppAction(R.string.wireless_adb_test, AppActionRole.Standard, !busy) { onTest() },
+                    // The one answer here that takes something away rather than arranging it, and the
+                    // reason it wears the error colours: forgetting the stored key ends the pairing.
+                    if (snapshot?.keyPresent == true) {
+                        AppAction(R.string.wireless_adb_forget, AppActionRole.Destructive, !busy) {
+                            onForget()
+                        }
+                    } else {
+                        null
+                    },
+                    AppAction(R.string.action_cancel) { onDismiss() },
+                ),
+            )
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-        },
+        dismissButton = null,
     )
 }
 

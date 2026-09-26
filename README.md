@@ -24,7 +24,7 @@ The device feed and native payloads used here are maintained in
 
 ## Application
 
-<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: KernelSU and KernelSU-Next flavours" src="docs/screenshots/payload-picker.png" />
+<img width="200" alt="Home: live KernelSU and Shizuku status" src="docs/screenshots/home.png" /> <img width="200" alt="Choosing a payload: the flavour chips, and the candidates that stage each one" src="docs/screenshots/payload-picker.png" />
 <img width="200" alt="Settings, grouped into sections" src="docs/screenshots/settings.png" />
 <img width="200" alt="The app log" src="docs/screenshots/logs.png" />
 
@@ -85,7 +85,20 @@ Output:
 ```text
 app/build/outputs/apk/debug/app-debug.apk
 app/build/outputs/apk/release/app-release.apk
+dfr/build/outputs/apk/debug/dfr-debug.apk      # the helper the system-uid flow installs
 ```
+
+The `:dfr` module builds the helper APK that **Settings → System Management → System UID install**
+injects a certificate for and then installs as a system app. `:app` stages that artifact into its own
+assets when it is built, so the helper is always the one from the same commit; a helper built on its own
+reaches a phone only by building the app. Both modules read the launcher icon from `launcher-icon/` at
+the repository root — two APKs sitting in one launcher draw one icon, from one set of files.
+
+Package Manager reads `packages.xml` only when it starts, so both halves of that flow come into force a
+boot later: an inject and a clean-up each get their own *restart to apply* step, and the screen works out
+which one is owed by comparing the instant it recorded against the app's own clock since boot
+(`SystemClock.elapsedRealtime()` — not `/proc/uptime`, which an app domain is denied on this phone and
+which failed to zero when it was read that way, making every step look already applied).
 
 ## The app's screens
 
@@ -120,11 +133,11 @@ starts open, so the page a fresh install shows is the whole page.
 |---|---|
 | Appearance | theme mode, material colour, language |
 | Payload Management | payload mode, payload sources, cached payload, local payload |
-| Run Management | advanced mode, disable KSU modules, protect image partitions, boot settle, run limits, run plan |
+| Run Management | disable KSU modules, protect image partitions, boot settle, run limits, run plan |
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start token, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
-| Root Management | KernelSU flavour, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
-| Recovery Management | reload modules, restart Zygote, KernelSU soft reboot, reboot and unroot — each confirms first |
+| Root Management | KernelSU flavour (a readout of the payload), install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft reboot, root on boot |
+| Recovery Management | reload modules, restart Zygote, KernelSU soft reboot, reboot and unroot (which also empties /data/adb and /data/local/tmp) — each confirms first |
 | System Management | the battery-optimisation exemption a run with the screen off depends on, and what the app has left in `/data/local/tmp` |
 
 The two boot-time settings are filed under their own subsystem rather than together: *auto start Shizuku
@@ -137,10 +150,15 @@ check are not here at all: they are on Home, beside the version they are about.
 lists the GitHub `owner/repository` and branch of every catalog the app may use, with a checkbox
 per entry to enable or disable it and a delete action to drop it. The sheet is the right shape
 for this form: it rises with the keyboard, so the repository and branch fields and their Add
-button stay visible on a short screen, where an alert dialog's buttons end up behind the IME. The built-in feed
-([Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads)) is the
-default entry and can be restored with one button, so pointing the list at a testing branch
-for payloads that are not in it yet does not cost you that catalog.
+button stay visible on a short screen, where an alert dialog's buttons end up behind the IME. Two feeds are configured by default: this fork's
+([Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads)) and the official
+one it was forked from
+([BuSung-dev/Root-My-Galaxy-Payloads](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads)). Both are
+read, and every target the picker lists carries the feed that served it — the official catalog is where
+this fork's artifacts come from, and it publishes builds of targets this fork has not rebuilt, so
+dropping it would leave that half of the list unreachable. Either can be disabled or removed, and
+whichever is missing can be restored with one button, so pointing the list at a testing branch for
+payloads that are not in it yet does not cost you those catalogs.
 
 Adding a source reads it before it is saved: the repository is resolved to a commit, its
 `support/targets-v3.json` is downloaded and parsed, and only then does it join the list, so a
@@ -401,15 +419,15 @@ A run is one attempt at the exploit, and the app is not one thing: the boot gate
 `:autoroot_gate`, a run started from a screen is in the UI process, and that process can hold two screens
 with a view model each. Every guard the app had against a second attempt - the screen's own job, the gate's
 one-attempt-per-boot claim - was a guard about its *own* process, so a run could be started beside a run,
-which is two payloads racing one kernel and one of them being swept or overwritten while it works.
+which is two payloads racing one kernel and one of them overwriting what the other staged while it works.
 
 So a run writes down that it is running, in a form this app's other processes can read, and a start is
 refused when that record names a run that is not this screen's own. The record carries three things: the
 boot id, the pid, and the **start time** from `/proc/<pid>/stat`. The start time is not decoration - a pid is
 handed out again once its process is gone, and this record outlives its process by design, so on a long boot
 the number alone would name a stranger and refuse a legitimate run. It also carries the history entry its
-owner is writing, which is what lets a reader - the sweep, the notification, this guard - tell *which* run
-is in flight rather than only that somebody is.
+owner is writing, which is what lets a reader - the notification, the residue screen's delete, this guard -
+tell *which* run is in flight rather than only that somebody is.
 
 The refusal is reported as a failure with no history entry behind it: nothing was attempted, so there is
 nothing to record and the next run's history is not this one's. What the card offers is the app's ordinary
@@ -441,17 +459,31 @@ still there.
 
 ## Two KernelSUs, one at a time
 
-**Settings → Root Management → KernelSU flavour** picks which KernelSU the app installs and drives:
-KernelSU (`me.weishu.kernelsu`, releases from `tiann/KernelSU`) or KernelSU-Next
-(`com.rifsxd.ksunext`, releases from `KernelSU-Next/KernelSU-Next`). They are separate projects with
-separate kernels, separate managers and separate daemons, and they **cannot both be in the kernel at
-once** — each hooks the same syscall paths — so a boot carries one of them or neither.
+The app drives one KernelSU at a time: KernelSU (`me.weishu.kernelsu`, releases from `tiann/KernelSU`),
+KernelSU-Next (`com.rifsxd.ksunext`, releases from `KernelSU-Next/KernelSU-Next`) or ReSukiSU. They are
+separate projects with separate kernels, separate managers and separate daemons, and they **cannot both
+be in the kernel at once** — each hooks the same syscall paths — so a boot carries one of them or neither.
 
-That is why the choice is stored for the app rather than passed to a single run: it decides which daemon
-a run stages, which manager is offered and opened afterwards, and which module *root on boot* puts back.
-Changing it therefore takes effect after a restart, and the row says so with the reason — which flavour
-this boot is actually holding — rather than only that a restart is owed, because "after a restart" on
-its own leaves the reason to be guessed.
+**Which one is not a setting. It follows the payload.** The flavour decides which daemon a run stages,
+which manager is offered and looked for, which releases the version dialog lists, and which module *root
+on boot* puts back — every one of those a fact about the KernelSU a payload stages — so the payload that
+resolves for this phone is what writes it. The alternative was tried and is the reason for the rule: a
+setting standing beside the payload could disagree with it, and setting KernelSU while a KernelSU-Next
+payload resolved for this device made the app offer and look for official KernelSU's manager against a
+kernel whose only manager is KernelSU-Next's — with nothing on the screen saying so. Deriving it removes
+that state rather than warning about it.
+
+Where it is chosen, then, is the payload sheet: its **flavour chips** (Any, KernelSU, KernelSU-Next,
+ReSukiSU) narrow the candidate list to the payloads that stage one KernelSU, and the line under them says
+what the selected name is. Any is the default and the filter is not stored, because it is a way to find
+a payload of a kind rather than a setting — a sheet that reopened filtered would hide the entry somebody
+came back for. Picking a payload of another flavour is the override, and it is the only one: there is no
+second switch to forget. **Settings → Root Management → KernelSU flavour** is a readout of that decision
+("Set by the payload you pick for this device") rather than a picker, and tapping it opens the sheet.
+
+A flavour that differs from what this boot loaded takes effect after a restart, and the row says so with
+the reason — which flavour this boot is actually holding — rather than only that a restart is owed,
+because "after a restart" on its own leaves the reason to be guessed.
 
 The flavour is the feed's word too, not only the app's. A payload entry declares `"flavor":
 "kernelsu-next"`, an entry that declares nothing is KernelSU — which is what keeps every manifest written
@@ -459,10 +491,9 @@ before flavours existed readable — and an id that is neither is refused rather
 since a manifest that says `"kernel-su"` was written for something and installing the other project's
 kernel on a phone that asked for this one is not a repair.
 
-**The flavour is a preference when the catalog is read, not a filter.** A catalog that only carries the
-other flavour for this device is still a catalog that roots it, and refusing to use it would leave
-someone who picked the wrong flavour with no run at all and no way to tell why. Which flavour a profile
-takes is a property of the profile, the run log states it, and the run refuses only the one thing that
+**The flavour narrows the sheet, and resolution still falls back.** A catalog that only carries the
+other flavour for this device is still a catalog that roots it — the run takes that payload and the
+flavour follows it, rather than refusing to run at all. The run then refuses only the one thing that
 cannot work: a load into a boot that already has the *other* flavour in the kernel. That refusal says
 which one is loaded and asks for a restart, because the two cannot share a boot.
 
@@ -471,8 +502,8 @@ may declare `"version": "3.4.0"` on its `kernelsu` artifact — the release its 
 the app then offers that release's manager, because the daemon a run stages and the manager that talks to
 it have to come from the same release and only the feed knows which release that is. The app records it
 at the three moments it decides what this device will run — a run resolving its payload, a payload picked
-by hand in the target sheet, and the offline cache being loaded — so the settings rows can offer it
-without re-reading the sources. A version typed into the manager field still wins over everything; an
+by hand in the target sheet, and the offline cache being loaded — which are also the moments the flavour
+is set, so the settings rows can offer it without re-reading the sources. A version typed into the manager field still wins over everything; an
 entry that declares none, which is every entry written before the field existed, falls back to the
 flavour's own release (3.4.0 for KernelSU-Next, 3.3.0 for KernelSU — the newest each project has
 published), and that release is also the only one whose APK file name the app knows, so it is the only
@@ -592,7 +623,8 @@ reboot asked for from the screen that has just finished, at the moment that deci
 **Settings → Root Management → Auto Soft reboot** takes it for you: with it on, a run that loaded
 KernelSU asks for the soft reboot itself, after the result has been written, because the restart ends
 everything the process is in the middle of. A refusal there is a line in the log rather than a failure,
-since the run has already succeeded. It is off by default, as a userspace restart closes whatever is open.
+since the run has already succeeded. It is on by default, because a load whose modules nothing has picked
+up yet is not a finished job; the restart closes whatever is open, so it can be turned off.
 
 **A failed run offers a choice rather than one retry button**, because the boot's single attempt has just
 been spent and the three answers do not have the same odds:
@@ -617,37 +649,62 @@ Two things take the wait away instead of offering it uselessly: a boot whose pip
 where only a restart refills it, and a payload that may still be running, where starting a second one can
 lock the phone up.
 
-## What the app leaves in `/data/local/tmp`
+## What the app leaves on the device
 
 The daemon, the helper and the exploit have to be executable by a shell, and `/data/local/tmp` is the one
 directory that is both writable by the transports this app uses and outside the app's own sandbox — so
 the app stages there, and the staging is *public in the way that matters*: the directory is mode `0771`,
 any app on the device may reach a path inside it by name, and the files themselves are world-readable. A
 detector needs no root and no shell to find them; it needs the names, and the names this app uses are
-fixed and published in its own source.
+fixed and published in its own source. The system-uid flow leaves its own files in `/data/system` instead,
+which is the same problem the other way round: no app on the phone can read that directory at all, and the
+two files an inject leaves there are a copy of the package database and the daemon the helper stages.
 
-**The sweep.** After every run — a successful one included — the app deletes what it staged, through a
-shell it already has: KernelSU's `su`, or the `shell`-uid server Shizuku provides, whose uid *owns* the
-directory and is the only reason deletion is possible at all, since the app's own uid may not write
-there. A device with no shell has no way to clean up, and asking for one — starting Shizuku, turning on
-wireless debugging — to delete a few files would cost far more than the files are worth, so a sweep that
-finds no shell says so and the files stay until there is one. Nothing staged is spared: the payload's
-helper bind-mounts the staged daemon over `logcat` for the late-load, but that request is made inside the
-run, so by the time the run is over the file has no reader left.
+**Nothing deletes itself.** A run used to end by sweeping what it staged, and every launch used to sweep
+again for the runs that never got that far; both are gone. Deleting is now a thing a person asks for,
+from the screen that lists what is there. The automatic version was not wrong about the facts, it was
+wrong about who decides: `/data/local/tmp/ksud-s25u-kdp` is read by the payload during a run and by
+nothing afterwards, which is a fact about a *moment* — and the sweep that ran after a failed run was the
+one that could take a file a retry was about to use. The last straw was the system-uid flow's own two
+files in `/data/system`: a pre-inject copy of `packages.xml` is a rescue, and an automatic clean-up threw
+it away as part of a button whose name said nothing about it.
 
-**The reading.** **Settings → System Management** carries a *Shared temp directory* card that reads the
-directory the way a detector would — from the app's own context rather than through a shell, because a
-shell reading answers "what is on disk" where the interesting question is what another app can see. The
-`--x` on the directory is what makes the check a name-by-name `stat`: an app may traverse it and may not
-list it. Those names come from the same constants the staging code uses, and that alone was the first
-version's whole answer — wrong in the direction that matters, because a name the catalog does not know —
-a payload's own log, a marker written by a script — left the card reading *Nothing left*, which is the
-same sentence as a clean device and the opposite of the truth. So there are two halves now: the catalog
-is stat-ed, and the directory is *listed* through a shell as well, with anything the listing names that
-the catalog does not carried as an extra. An extra is enough to stop the card reading clean, something
-that cannot be read is reported as unreadable rather than as absent, and a card with no listing says the
-weaker sentence it has earned. Rows can be deleted one at a time, and **Delete All** empties the
-directory.
+Deletion still needs a shell — KernelSU's `su`, or the `shell`-uid server Shizuku provides, whose uid
+*owns* the temp directory and is the only reason deletion there is possible at all, since the app's own
+uid may not write in it. A device with no shell deletes nothing and says so; the files stay listed.
+
+**The reading.** **Settings → System Management** carries a *Residue* card opening a screen with three
+folders, because one directory was never the whole picture:
+
+- **`/data/local/tmp`** — the shared temp directory, mode `0771`, reached by any app on the phone by
+  name. Read from the app's own context as well as through a shell, because a shell reading answers "what
+  is on disk" where the interesting question is what another app can see. The `--x` on the directory is
+  what makes the check a name-by-name `stat`: an app may traverse it and may not list it. Those names
+  come from the same constants the staging code uses, and that alone was the first version's whole
+  answer — wrong in the direction that matters, because a name the catalog does not know — a payload's
+  own log, a marker written by a script — left the card reading *Nothing left*, which is the same
+  sentence as a clean device and the opposite of the truth. So the catalog is stat-ed and the directory
+  is *listed* as well, with anything the listing names that the catalog does not carried as an extra.
+- **`/data/system`** — root-only, which is exactly why the system-uid flow works there: the daemon the
+  exploit execs, the second copy the helper stages *from* (that helper runs inside `system_server`, whose
+  context may not read the shell's temp directory, so the daemon is left for it here rather than in
+  `/data/local/tmp`), and the inject's own copies of `packages.xml`. Read by name from a catalog rather than
+  listed, because the directory holds hundreds of files belonging to the platform and to every app.
+- **`/data/adb`** — KernelSU's own. Listed, and never deleted from: everything in it is the root this app
+  has just obtained, so no row there has a delete button, and neither does the folder.
+
+Nothing found is reported as absent when it could not be read: an entry that cannot be stat-ed counts as
+present and is shown as *not readable*, and a directory that could not be listed says that rather than
+reading as empty. That distinction is the point of the screen — "nothing there" and "not allowed to
+look" are opposite answers, and a detector's finding is usually checked against this list.
+
+Each folder is a **closed heading** that carries what it holds — a count and a size, or the sentence its
+empty reading earned — and opens on a tap. Closed is the default because a list drawn in full puts the
+directory a detector found something in below the two that are clean. Inside, a row's own delete removes
+that one file; the delete in a folder's heading removes everything in **that folder only**, confirmed
+first, by whichever route the folder allows: the temp directory is emptied by glob, `/data/system` by
+naming the paths the catalog lists. **Delete All** at the bottom of the screen is the wider action, which
+is why it is asked for and confirmed.
 
 ## KernelSU readiness
 
@@ -986,7 +1043,18 @@ name, which is the point.
   comes from KernelSU rather than from us.
 - **Reboot and unroot** clears *root on boot* first and then reboots, because a reboot that happened
   first would come back rooted; if the request is refused, the setting is put back and the screen
-  follows the stored value rather than the value it hoped for.
+  follows the stored value rather than the value it hoped for. The reboot is only half of it: KernelSU
+  lives in the running kernel and its *modules*, *superuser grants* and *daemon* live in `/data/adb`,
+  and every root solution on the phone writes into the shared `/data/local/tmp`, so both directories
+  are **emptied** — contents only, since KernelSU and init created them with modes the platform relies
+  on — in the same action, while there is still a root shell to do it with. That is the last chance:
+  after the restart nothing here can be deleted any more. The wipe runs first, then the account of it
+  is published and read, and only then does the child restart, so an accepted outcome is never a
+  promise about work that has not happened. Entries that survive — a file in use, an immutable
+  attribute, or anything out of reach of a shell that is not root — are **named in the report** rather
+  than treated as a failure: a restart with one busy file left behind is still the unroot that was
+  asked for. The one thing the wipe will not do is delete *through* a mount: a leftover bind mount from
+  a run is detached lazily first, and if it is still mounted it is reported instead of removed.
 
 Three of them need a root shell, and there are two ways to get one: through Shizuku when it is running
 and has granted this app, and otherwise by asking KernelSU's own `su` directly, which needs nothing else

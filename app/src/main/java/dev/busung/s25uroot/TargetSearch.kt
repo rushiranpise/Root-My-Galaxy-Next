@@ -3,19 +3,26 @@ package dev.busung.s25uroot
 /**
  * What the target sheet shows, out of everything the sources returned.
  *
- * Pure and separate from the sheet because the sheet's two controls answer the same question - "which
- * of these could this phone run" - and the list they are drawn from is rebuilt on every recomposition.
- * Kept here, the two compose in one place instead of one filtering the other's output at the call
- * site, and the empty list has a nameable cause: the device filter, the search, or a catalog that
+ * Pure and separate from the sheet because the sheet's controls answer the same question - "which of
+ * these could this phone run" - and the list they are drawn from is rebuilt on every recomposition.
+ * Kept here, they compose in one place instead of one filtering another's output at the call site, and
+ * the empty list has a nameable cause: the device filter, the search, the flavour, or a catalog that
  * genuinely holds nothing.
+ *
+ * [flavor] is a lens rather than a decision: it narrows the list to the payloads that stage one KernelSU,
+ * and it is null by default so the sheet opens showing everything the sources carry. Which flavour this
+ * app will actually use is not this - it follows the payload that gets picked, one line up in the sheet.
  */
 internal fun visibleTargets(
     profiles: List<TargetProfile>,
     device: DeviceSnapshot,
     fitsDeviceOnly: Boolean,
     query: String,
+    flavor: KernelSuFlavor? = null,
 ): List<TargetProfile> = profiles.filter { profile ->
-    (!fitsDeviceOnly || profile.matches(device)) && profile.matchesQuery(query)
+    (flavor == null || profile.flavor == flavor) &&
+        (!fitsDeviceOnly || profile.matches(device)) &&
+        profile.matchesQuery(query)
 }
 
 /**

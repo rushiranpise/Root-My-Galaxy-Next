@@ -110,8 +110,6 @@
     <string name="action_continue">Yine de devam et</string>
     <string name="action_next">İleri</string>
     <string name="advanced">Gelişmiş</string>
-    <string name="advanced_mode">Gelişmiş mod</string>
-    <string name="advanced_mode_description">Yükleme sırasında cihazla uyumlu payload\'ı manuel olarak seçin</string>
     <string name="shizuku_mode">Shizuku kullan</string>
     <string name="shizuku_mode_description">Payload\'ı çalıştırmak için Shizuku kullanın. Bu, güvenilirliği artırabilir.</string>
     <string name="shizuku_not_running_title">Shizuku çalışmıyor</string>

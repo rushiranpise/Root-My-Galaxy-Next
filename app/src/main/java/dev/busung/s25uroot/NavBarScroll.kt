@@ -1,20 +1,26 @@
 package dev.busung.s25uroot
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 
 /**
- * The floating bar's answer to a page being scrolled, and the connection the page scroll arrives on.
+ * The two things that move the floating bar out of the way: a page being scrolled, and a step that has taken
+ * the whole window.
  *
- * The bar is the app shell's, but the thing that decides where it goes is the page underneath - and the shell
- * has no idea what any page is doing: the list, its state and its direction all belong to the page. The one
- * mechanism that crosses that line without threading a parameter through five screens is nested scroll, which
- * a scrolling list already dispatches to every ancestor that asks for it. So the shell asks, and a page does
- * not have to know that anything is listening.
+ * The bar is the app shell's, but the thing that decides where it goes is the screen underneath - and the
+ * shell has no idea what any screen is doing: the list, its state and its direction all belong to the page.
+ * The one mechanism that crosses that line without threading a parameter through five screens is nested
+ * scroll, which a scrolling list already dispatches to every ancestor that asks for it. So the shell asks,
+ * and a page does not have to know that anything is listening.
  *
  * Attached to the pages rather than to the whole screen, which matters: the sheets and dialogs are drawn as
  * siblings of the pages, and scrolling a payload list inside one of them is not a page moving under the bar.
+ *
+ * A step inside a page has no scroll to be read from and says so directly instead - see [FullScreenStep].
  */
 
 /**
@@ -82,5 +88,37 @@ internal fun navBarScrollConnection(report: (Boolean) -> Unit): NestedScrollConn
             }
             return Offset.Zero
         }
+    }
+}
+
+/**
+ * The bar's answer to a screen that has taken the whole window, for a step that is not a page.
+ *
+ * The scroll rule above hides the bar because the page underneath is moving: the bar is in the way of a list,
+ * and the list is what is being read, so the page itself is the thing that decides. A step opened over a page
+ * is the same problem with nothing to notice it by. It owns every edge of the window, so the bar is not
+ * covering a page - it is covering the step's own footer - and a page that fits its screen has no scroll to
+ * be read from: on the payload sources screen the pill sat on Cancel and Save with nothing below them that
+ * could be pulled up.
+ *
+ * So the step says so instead, and the way it says so is [FullScreenStep]: the window is claimed for as long as
+ * the step is composed and handed back when it leaves. Provided by the shell, because where the bar goes is
+ * the shell's decision and this only reports what the screen is doing.
+ */
+internal val LocalFullScreenStep = staticCompositionLocalOf<(Boolean) -> Unit> { { _ -> } }
+
+/**
+ * Takes the window from the floating bar until the step being composed is gone.
+ *
+ * Called by a step rather than by a page: a page is what the bar navigates between, and one that hid the bar
+ * would hide the way to the next one. Placed in the step's own content, so it lasts exactly as long as the
+ * step does - released on the way out however the step is left, including when something else closes it.
+ */
+@Composable
+internal fun FullScreenStep() {
+    val claim = LocalFullScreenStep.current
+    DisposableEffect(Unit) {
+        claim(true)
+        onDispose { claim(false) }
     }
 }

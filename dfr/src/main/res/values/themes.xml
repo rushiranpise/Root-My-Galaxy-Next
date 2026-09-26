@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The helper's window.
+
+  `DeviceDefault.DayNight` is the point of this file: the platform's own default theme does not follow the
+  phone's light/dark setting, and this module's screen reads its colours out of the theme it is drawn in -
+  so a fixed theme is a screen that stays light on a phone that is dark, with the palette's own answers
+  disagreeing with everything around it.
+
+  There is no `DeviceDefault.DayNight.NoActionBar` in the platform, so the action bar is taken off here
+  instead. Nothing else is set: every colour on the screen is resolved from this theme at runtime.
+-->
+<resources>
+    <style name="Theme.RmgHelper" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

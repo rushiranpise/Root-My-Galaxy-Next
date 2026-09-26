@@ -112,6 +112,28 @@ class AdbPairingService : Service() {
         var text: String
         if (success) {
             AppPreferences.setAdbPaired(this, true)
+            // The moment the authorization exists is the only moment it can be made to last: Android
+            // revokes a host's key a week after it was accepted, which would turn this one pairing into
+            // a code the user types every week.
+            when (AdbPairing.authorizeDebugging(this)) {
+                DebugPermanence.Permanent ->
+                    AppLog.info(AppLogTags.WIRELESS_ADB, "The paired authorization does not expire")
+
+                DebugPermanence.NotPermanent ->
+                    AppLog.warn(
+                        AppLogTags.WIRELESS_ADB,
+                        "The paired authorization will still expire; keep it with ${AdbPairing.GRANT_COMMAND}",
+                    )
+
+                // Not the same warning as a refusal: nothing on the device was read back, so this is a
+                // pairing whose permanence is unknown rather than known to be temporary - and the code
+                // the write exists to remove may or may not be a week away.
+                DebugPermanence.Unconfirmed ->
+                    AppLog.warn(
+                        AppLogTags.WIRELESS_ADB,
+                        "The paired authorization could not be confirmed as permanent; it may still expire",
+                    )
+            }
             title = getString(R.string.adb_pair_success_title)
             text = getString(R.string.adb_pair_success_text)
             // A device that already has KernelSU can use the transport this pairing just created, so

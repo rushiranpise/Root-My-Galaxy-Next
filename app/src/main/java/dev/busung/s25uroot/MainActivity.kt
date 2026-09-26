@@ -85,6 +85,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BatterySaver
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Bolt
@@ -100,6 +101,8 @@ import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Difference
+import androidx.compose.material.icons.rounded.MenuBook
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Folder
@@ -130,8 +133,6 @@ import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -139,7 +140,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -150,7 +150,6 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -161,10 +160,10 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -213,9 +212,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import dev.busung.s25uroot.dfr.DfrInstall
+import dev.busung.s25uroot.dfr.DfrStageArming
+import dev.busung.s25uroot.dfr.DfrStageReading
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -234,13 +239,13 @@ class MainActivity : ComponentActivity() {
     private var resumedOnce = false
     private var accentColor by mutableStateOf(AccentColor.Dynamic)
     private var themeMode by mutableStateOf(AppThemeMode.System)
-    private var advancedMode by mutableStateOf(false)
 	private var disableKsuModules by mutableStateOf(false)
     private var loadKernelSu by mutableStateOf(true)
     private var kernelsuFlavor by mutableStateOf(KernelSuFlavor.Default)
     private var shizukuMode by mutableStateOf(false)
     private var payloadSources by mutableStateOf<List<PayloadSource>>(emptyList())
     private var bootRootMode by mutableStateOf(false)
+    private var rerootAtBoot by mutableStateOf(false)
     private var armedRetry by mutableStateOf<ArmedRetry?>(null)
 
     /**
@@ -280,10 +285,10 @@ class MainActivity : ComponentActivity() {
      * recorded, which is a state worth naming too: the restart then falls back to the cached payload.
      */
     private var retryPayload by mutableStateOf<CachedPayload?>(null)
-    private var restartAfterRoot by mutableStateOf(false)
+    private var restartAfterRoot by mutableStateOf(true)
     private var shizukuBootMode by mutableStateOf(false)
     private var bootSettleSeconds by mutableStateOf(BootSettle.DEFAULT_SECONDS)
-    private var autoRootSettleSeconds by mutableStateOf(BootSettle.AUTO_ROOT_DEFAULT_SECONDS)
+    private var bootGateSettleSeconds by mutableStateOf(BootSettle.GATE_DEFAULT_SECONDS)
     private var runLimits by mutableStateOf(
         RunLimitsSettings(
             totalSeconds = RunLimits.DEFAULT_TOTAL_SECONDS,
@@ -296,6 +301,7 @@ class MainActivity : ComponentActivity() {
     private var exploitOverride by mutableStateOf(ExploitOverride.defaults())
     private var shizukuToken by mutableStateOf("")
     private var partitionReadOnly by mutableStateOf(false)
+    private var screenOffDuringRun by mutableStateOf(false)
     private var payloadMode by mutableStateOf(PayloadMode.Online)
     private var notificationPermissionAsked = false
     private var batteryUnrestricted by mutableStateOf(false)
@@ -375,27 +381,29 @@ class MainActivity : ComponentActivity() {
         window.isNavigationBarContrastEnforced = false
         accentColor = AppPreferences.accentColor(this)
         themeMode = AppPreferences.themeMode(this)
-        advancedMode = AppPreferences.advancedMode(this)
 		disableKsuModules = AppPreferences.disableKsuModules(this)
         loadKernelSu = AppPreferences.loadKernelSu(this)
         kernelsuFlavor = AppPreferences.kernelsuFlavor(this)
         shizukuMode = AppPreferences.shizukuMode(this)
         payloadSources = AppPreferences.payloadSources(this)
         bootRootMode = AppPreferences.bootRootMode(this)
+        rerootAtBoot = AppPreferences.rerootAtBoot(this)
         armedRetry = readArmedRetry()
         retryPayload = readArmedRetryPayload()
         restartAfterRoot = AppPreferences.restartAfterRoot(this)
         shizukuBootMode = AppPreferences.shizukuBootMode(this)
         bootSettleSeconds = AppPreferences.bootSettleSeconds(this)
-        autoRootSettleSeconds = AppPreferences.autoRootSettleSeconds(this)
+        bootGateSettleSeconds = AppPreferences.bootGateSettleSeconds(this)
         runLimits = AppPreferences.runLimits(this)
         exploitOverride = AppPreferences.exploitOverride(this)
         shizukuToken = AppPreferences.shizukuAutomationToken(this)
         partitionReadOnly = AppPreferences.partitionReadOnlyMode(this)
+        screenOffDuringRun = AppPreferences.screenOffDuringRun(this)
         payloadMode = AppPreferences.payloadMode(this)
         settingsTarget = SettingsTarget.named(intent?.getStringExtra(SettingsTarget.EXTRA))
         openedRunId = intent?.getStringExtra(EXTRA_RUN_ID)
         restartShortcut = restartShortcutOf(intent?.action)
+        maybeRestartAfterTheHelper(intent)
         batteryUnrestricted = isBatteryUnrestricted()
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
@@ -403,23 +411,24 @@ class MainActivity : ComponentActivity() {
                     installViewModel = installViewModel,
                     accentColor = accentColor,
                     themeMode = themeMode,
-                    advancedMode = advancedMode,
 					disableKsuModules = disableKsuModules,
                     loadKernelSu = loadKernelSu,
                     kernelsuFlavor = kernelsuFlavor,
                     shizukuMode = shizukuMode,
                     payloadSources = payloadSources,
                     bootRootMode = bootRootMode,
+                    rerootAtBoot = rerootAtBoot,
                     armedRetry = armedRetry,
                     retryPayload = retryPayload,
                     restartAfterRoot = restartAfterRoot,
                     shizukuBootMode = shizukuBootMode,
                     bootSettleSeconds = bootSettleSeconds,
-                    autoRootSettleSeconds = autoRootSettleSeconds,
+                    bootGateSettleSeconds = bootGateSettleSeconds,
                     runLimits = runLimits,
                     exploitOverride = exploitOverride,
                     shizukuToken = shizukuToken,
                     partitionReadOnly = partitionReadOnly,
+                    screenOffDuringRun = screenOffDuringRun,
                     payloadMode = payloadMode,
                     batteryUnrestricted = batteryUnrestricted,
                     onStartArmedRetry = ::startArmedRetry,
@@ -434,10 +443,6 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setThemeMode(this, mode)
                         themeMode = mode
                     },
-                    onAdvancedModeChanged = { enabled ->
-                        AppPreferences.setAdvancedMode(this, enabled)
-                        advancedMode = enabled
-                    },
 					onDisableKsuModulesChanged = { enabled ->
 						AppPreferences.setDisableKsuModules(this, enabled)
 						disableKsuModules = enabled
@@ -446,10 +451,11 @@ class MainActivity : ComponentActivity() {
                         AppPreferences.setLoadKernelSu(this, enabled)
                         loadKernelSu = enabled
                     },
-                    onKernelsuFlavorChanged = { flavor ->
-                        AppPreferences.setKernelsuFlavor(this, flavor)
-                        kernelsuFlavor = flavor
-                    },
+                    // Not a preference any more: the payload decides the flavour and
+                    // [rememberResolvedPayload] writes it, so this only moves the copy the screens are
+                    // drawn from - otherwise the rows would keep showing the previous flavour until the
+                    // app was opened again.
+                    onPayloadFlavorResolved = { flavor -> kernelsuFlavor = flavor },
                     // Stored per flavour, so naming one for KernelSU does not name one for
                     // KernelSU-Next as well - they are different projects with different versions.
                     onManagerVersionChanged = { version ->
@@ -466,21 +472,38 @@ class MainActivity : ComponentActivity() {
                     onBootRootModeChanged = { enabled ->
                         AppPreferences.setBootRootMode(this, enabled)
                         bootRootMode = enabled
-                        // Turning it off has to reach a gate that is already waiting, not just the
-                        // next boot: a foreground service left running would install anyway.
-                        if (!enabled) AutoRootService.stop(this)
+                        // The preference turns the helper's gate off with this one, so its row has to move
+                        // with this one rather than keep showing what the phone no longer holds.
+                        if (enabled) rerootAtBoot = false
+                        // Either way a gate that is already waiting has to be reached, not just the next
+                        // boot: a foreground service left running would install - or start the helper -
+                        // anyway. Turning this one on stops the helper's gate, which is the alternative it
+                        // just replaced; turning it off stops this gate.
+                        if (enabled) DfrBootService.stop(this) else AutoRootService.stop(this)
                     },
                     onRestartAfterRootChanged = { enabled ->
                         AppPreferences.setRestartAfterRoot(this, enabled)
                         restartAfterRoot = enabled
                     },
+                    onRerootAtBootChanged = { enabled ->
+                        AppPreferences.setRerootAtBoot(this, enabled)
+                        rerootAtBoot = enabled
+                        // Same as the install gate's own toggle: the preference turns the other gate off,
+                        // so its row moves too.
+                        if (enabled) bootRootMode = false
+                        // The same reach the install gate's own toggle has, for the same reason: a gate
+                        // that is already waiting on a shell would otherwise start the helper minutes
+                        // after the user turned the setting that asked for it off - and turning this one
+                        // on stops the install gate, which is the alternative it just replaced.
+                        if (enabled) AutoRootService.stop(this) else DfrBootService.stop(this)
+                    },
                     onBootSettleChanged = { seconds ->
                         AppPreferences.setBootSettleSeconds(this, seconds)
                         bootSettleSeconds = seconds
                     },
-                    onAutoRootSettleChanged = { seconds ->
-                        AppPreferences.setAutoRootSettleSeconds(this, seconds)
-                        autoRootSettleSeconds = seconds
+                    onBootGateSettleChanged = { seconds ->
+                        AppPreferences.setBootGateSettleSeconds(this, seconds)
+                        bootGateSettleSeconds = seconds
                     },
                     onRunLimitChanged = { limit, seconds ->
                         AppPreferences.setRunLimit(this, limit, seconds)
@@ -499,6 +522,10 @@ class MainActivity : ComponentActivity() {
                     onPartitionReadOnlyChanged = { enabled ->
                         AppPreferences.setPartitionReadOnlyMode(this, enabled)
                         partitionReadOnly = enabled
+                    },
+                    onScreenOffDuringRunChanged = { enabled ->
+                        AppPreferences.setScreenOffDuringRun(this, enabled)
+                        screenOffDuringRun = enabled
                     },
                     onPayloadModeChanged = { mode ->
                         AppPreferences.setPayloadMode(this, mode)
@@ -541,6 +568,70 @@ class MainActivity : ComponentActivity() {
         // The shortcut's own second case: the app is already in the back stack, so the restart is asked for in
         // the window that exists rather than in a second one.
         restartShortcut = restartShortcutOf(intent.action)
+        maybeRestartAfterTheHelper(intent)
+    }
+
+    /**
+     * The restart a helper run leaves owing, asked for by the helper as it finishes.
+     *
+     * What a run through the helper loads is KernelSU, and a loaded KernelSU does nothing until the Android
+     * userspace is built again - which is KernelSU's own soft reboot. The helper cannot ask for it: that is
+     * the installed `ksud` run as root, and the helper is the system uid inside `system_server`, which the
+     * daemon hands no shell to. This app can, with a grant the user already gave it, and the restart has its
+     * own script and its own lock here so two of them cannot start at once. So the helper's whole message is
+     * "root is live" and the decision is this side's.
+     *
+     * Two guards, and neither is a formality. The caller has to be the helper, because this extra names a
+     * reboot and any app on the phone can start an exported activity: a screen that accepted one from
+     * whatever sent it would be a reboot any app could ask for. And the setting has to be on, because that is
+     * exactly what *Auto soft reboot* means - and a restart is the one action here that cannot be offered and
+     * then taken back.
+     */
+    private fun maybeRestartAfterTheHelper(intent: Intent?) {
+        if (intent?.getBooleanExtra(DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA, false) != true) return
+        if (!launchedByTheHelper()) {
+            AppLog.warn(
+                AppLogTags.RESTART,
+                "The restart-after-root extra arrived from something other than the helper, so it was ignored",
+            )
+            return
+        }
+        if (!AppPreferences.restartAfterRoot(this)) {
+            AppLog.info(
+                AppLogTags.RESTART,
+                "The helper loaded KernelSU; Auto soft reboot is off, so the restart is the user's to make",
+            )
+            return
+        }
+        AppLog.info(AppLogTags.RESTART, "The helper loaded KernelSU; restarting the userspace to apply it")
+        lifecycleScope.launch {
+            val outcome = runRecoveryAction(this@MainActivity, RecoveryTool.SoftReboot)
+            AppLog.info(
+                AppLogTags.RESTART,
+                if (outcome.accepted) {
+                    "KernelSU accepted the soft reboot the helper's run asked for"
+                } else {
+                    "The soft reboot the helper's run asked for was refused: ${outcome.detail}"
+                },
+            )
+        }
+    }
+
+    /**
+     * Whether the helper started this window, which is the only caller allowed to ask for the restart.
+     *
+     * `getLaunchedFromPackage()` is the accurate accessor and the one this prefers; `callingPackage` answers
+     * the same question on the versions before it and is the only one of the two that exists there.
+     * Two accessors rather than one because the older one is documented not to be the launching app in every
+     * case, and this is a decision about a reboot.
+     */
+    private fun launchedByTheHelper(): Boolean {
+        val from = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            launchedFromPackage
+        } else {
+            callingPackage
+        }
+        return from == DfrInstall.STAGE_TWO_PACKAGE
     }
 
     private fun openInstaller(selectionId: String? = null) {
@@ -655,33 +746,33 @@ private fun RootApp(
     installViewModel: InstallViewModel,
     accentColor: AccentColor,
     themeMode: AppThemeMode,
-    advancedMode: Boolean,
 	disableKsuModules: Boolean,
     loadKernelSu: Boolean,
     kernelsuFlavor: KernelSuFlavor,
     shizukuMode: Boolean,
     payloadSources: List<PayloadSource>,
     bootRootMode: Boolean,
+    rerootAtBoot: Boolean,
     armedRetry: ArmedRetry?,
     retryPayload: CachedPayload?,
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
     bootSettleSeconds: Int,
-    autoRootSettleSeconds: Int,
+    bootGateSettleSeconds: Int,
     runLimits: RunLimitsSettings,
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
     partitionReadOnly: Boolean,
+    screenOffDuringRun: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
     onStartArmedRetry: () -> Unit,
     onCancelArmedRetry: () -> Unit,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
-    onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
-    onKernelsuFlavorChanged: (KernelSuFlavor) -> Unit,
+    onRerootAtBootChanged: (Boolean) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -689,13 +780,16 @@ private fun RootApp(
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
-    onAutoRootSettleChanged: (Int) -> Unit,
+    onBootGateSettleChanged: (Int) -> Unit,
     onRunLimitChanged: (RunLimit, Int) -> Unit,
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
+    onScreenOffDuringRunChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
+    /** The flavour of the payload that has just become the one a run would use. */
+    onPayloadFlavorResolved: (KernelSuFlavor) -> Unit,
     requestNotificationPermission: () -> Unit,
     onRequestBatteryExemption: () -> Unit,
     openInstaller: (String?) -> Unit,
@@ -809,13 +903,18 @@ private fun RootApp(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    shizukuStartResult = null
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                // A report, not a question: one answer, and it wears the filled fill because there is
+                // nothing here to choose between and a lone quiet button under a log reads as disabled.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            shizukuStartResult = null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -861,18 +960,6 @@ private fun RootApp(
         }
         frameworkRestart = report
     }
-    // What earlier runs left in /data/local/tmp, taken away here because here is the one screen every
-    // launch goes through. A sweep after every run is what keeps the directory empty; this is what
-    // handles the files a run could not sweep for itself - one that was killed, one whose app was
-    // never opened again, and everything staged by the builds that came before the sweep existed.
-    //
-    // Silent when there is nothing to say. A device with no shell keeps its files and is not told
-    // about it: that is the normal state before a first run, and a notice about it would be an alarm
-    // about the app not having rooted the phone yet.
-    LaunchedEffect(Unit) {
-        val sweep = withContext(Dispatchers.IO) { StagingSweep.sweepWhenQuiet(context) }
-        sweep.logLine(context)?.let { line -> AppLog.info(AppLogTags.STAGING, line) }
-    }
     // The updater stands down while a run is in flight, and says so when it is asked.
     //
     // A run's delicate part is the payload's own timing, and an update check or a download beside it is
@@ -904,8 +991,7 @@ private fun RootApp(
     LaunchedEffect(installState.phase) {
         cachedPayload = withContext(Dispatchers.IO) { KnownGoodPayloadStore.describe(context) }
     }
-    // Built on demand rather than on every recomposition: it reads the boot id to report the
-    // cached offset, and only the run-plan dialog needs it.
+    // Built on demand rather than on every recomposition: only the run-plan dialog needs it.
     val runPlan: () -> RunPlanDisplay = {
         // Offline mode resolves nothing: the run it is about to start is the cached payload, so the
         // plan describes that one. Reading the catalog here would describe a run the mode exists to
@@ -997,13 +1083,16 @@ private fun RootApp(
             },
             text = { Text(stringResource(R.string.updater_run_in_progress)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    updateRefusedDuringRun = false
-                }) {
-                    Text(stringResource(R.string.action_close))
-                }
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_close, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            updateRefusedDuringRun = false
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -1026,9 +1115,12 @@ private fun RootApp(
             onNext = { profile ->
                 selectedProfile = profile
                 // A payload picked by hand is a decision about which KernelSU this phone will load, so
-                // the manager rows follow it from here - before the run that proves it works, because
-                // the manager is installed to drive the load that run performs.
+                // the flavour follows it from here - before the run that proves it works, because the
+                // manager is installed to drive the load that run performs. The state is updated with
+                // the preference: the rows that read it are on other screens and are drawn from this
+                // one's value.
                 rememberResolvedPayload(context, profile)
+                onPayloadFlavorResolved(profile.flavor)
                 showTargetPicker = false
                 compatibilityWarning = when {
                     !profile.matchesDevice(device) -> CompatibilityWarning.Device
@@ -1074,86 +1166,46 @@ private fun RootApp(
                 )
             },
             confirmButton = {
-                FilledTonalButton(
-                    onClick = {
-                        clickHaptic(view)
-                        compatibilityWarning = when (warning) {
-                            CompatibilityWarning.Device -> if (!profile.matchesKernelVersion(device)) {
-                                CompatibilityWarning.KernelVersion
-                            } else {
-                                null
+                // Continue is the recommended answer and Back is the safe one, which is the shape this
+                // pair had already chosen when it was a tonal button beside a text button - so the tones
+                // move to the set rather than the judgement changing. Back is quiet rather than
+                // destructive: it undoes a choice, it does not take anything away.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_continue, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            compatibilityWarning = when (warning) {
+                                CompatibilityWarning.Device -> if (!profile.matchesKernelVersion(device)) {
+                                    CompatibilityWarning.KernelVersion
+                                } else {
+                                    null
+                                }
+                                CompatibilityWarning.KernelVersion -> null
                             }
-                            CompatibilityWarning.KernelVersion -> null
-                        }
-                        if (compatibilityWarning == null) {
-                            showInstallConfirmation = true
-                        }
-                    },
-                ) {
-                    Text(stringResource(R.string.action_continue))
-                }
+                            if (compatibilityWarning == null) {
+                                showInstallConfirmation = true
+                            }
+                        },
+                        AppAction(R.string.action_back) {
+                            clickHaptic(view)
+                            compatibilityWarning = null
+                            showTargetPicker = true
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        compatibilityWarning = null
-                        showTargetPicker = true
-                    },
-                ) {
-                    Text(stringResource(R.string.action_back))
-                }
-            },
+            dismissButton = null,
         )
     }
-
-    if (showInstallConfirmation) {
-        AlertDialog(
-            onDismissRequest = { showInstallConfirmation = false },
-            icon = { Icon(Icons.Rounded.Security, contentDescription = null) },
-            title = {
-                DialogDimAmount(0.34f)
-                Text(stringResource(R.string.install_confirm_title))
-            },
-            text = { Text(stringResource(R.string.install_confirm_body)) },
-            confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    showInstallConfirmation = false
-                    openInstaller(selectedProfile?.selectionId)
-                    selectedProfile = null
-                }) {
-                    Text(stringResource(R.string.action_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    showInstallConfirmation = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
-
-    // The bar's own two states, both decided here because both are the shell's: whether it is away, and how
-    // far it travels to get there - which is its own height, known only once it has been laid out.
-    var navBarHidden by remember { mutableStateOf(false) }
-    var navBarHeight by remember { mutableStateOf(0.dp) }
-    val navBarShift by animateDpAsState(
-        targetValue = if (navBarHidden) navBarHeight else 0.dp,
-        label = "navBarShift",
-    )
-    // A page change brings it back: the pages keep their own scroll states and are rebuilt at the top when
-    // one is switched to, so a bar that stayed away would be away over a list that has nowhere to go.
-    LaunchedEffect(selectedPage) { navBarHidden = false }
-    val density = LocalDensity.current
 
     // Declared by the shell rather than by a page, because two pages read the phone's state and both
     // go stale on the same event: coming back to the foreground. A manager is installed by another
     // app's installer, a Shizuku grant is made in another app, and each page that kept its own counter
     // would be a second place to remember the same thing.
+    //
+    // Declared above the sheet below rather than beside the pages that read it, because that sheet reads it
+    // too: the manager this app would install for the payload's flavour is another app's business, and the
+    // sheet that offers to install it has to be right about it when the app comes back from the installer.
     var resumeTick by remember { mutableStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -1165,146 +1217,238 @@ private fun RootApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    if (showInstallConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showInstallConfirmation = false },
+            icon = { Icon(Icons.Rounded.Security, contentDescription = null) },
+            title = {
+                DialogDimAmount(0.34f)
+                Text(stringResource(R.string.install_confirm_title))
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Nothing is said about the manager, in either state. The run installs the
+                    // flavour's manager itself when the phone has none, so this dialog could only state
+                    // that fact twice: once as an offer, which is the run's step and not the dialog's,
+                    // and once as a reading, which the home card already carries for the payload the
+                    // person just picked.
+                    Text(stringResource(R.string.install_confirm_body))
+                }
+            },
+            confirmButton = {
+                // Confirm is the recommended answer and Cancel is the quiet one. Confirm is not
+                // destructive even though a run replaces the kernel: what this dialog asks is whether to
+                // start, and everything a run can report comes after it.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_confirm, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            showInstallConfirmation = false
+                            openInstaller(selectedProfile?.selectionId)
+                            selectedProfile = null
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            showInstallConfirmation = false
+                        },
+                    ),
+                )
+            },
+            dismissButton = null,
+        )
+    }
+
+    // The bar's own two states, both decided here because both are the shell's: whether it is away, and how
+    // far it travels to get there - which is its own height, known only once it has been laid out.
+    //
+    // Away has two causes and they are kept apart, because only one of them is a scroll's to undo: a page has
+    // been scrolled past the point where the bar is in the way, or a step inside a page has taken the whole
+    // window, where there is no page under the bar to come back to.
+    var navBarScrolledAway by remember { mutableStateOf(false) }
+    var stepOwnsWindow by remember { mutableStateOf(false) }
+    val navBarHidden = stepOwnsWindow || navBarScrolledAway
+    var navBarHeight by remember { mutableStateOf(0.dp) }
+    val navBarShift by animateDpAsState(
+        targetValue = if (navBarHidden) navBarHeight else 0.dp,
+        label = "navBarShift",
+    )
+    // One lambda for the life of the shell, so that offering it does not recompose the pages under it.
+    val claimWindow = remember { { owned: Boolean -> stepOwnsWindow = owned } }
+    // A page change brings it back: the pages keep their own scroll states and are rebuilt at the top when
+    // one is switched to, so a bar that stayed away would be away over a list that has nowhere to go. A step
+    // opening or closing is that same event for the same reason - the scroll that put the bar away belonged
+    // to the screen that just left, and the one arriving has not been scrolled at all.
+    LaunchedEffect(selectedPage, stepOwnsWindow) { navBarScrolledAway = false }
+    val density = LocalDensity.current
+
+    // The other half of what that tick is for: an app that has root is an app that can put the daemon back
+    // where the next boot's late-load will look for it. That file is *consumed* by every late-load - a run's
+    // and the system-uid helper's - so a phone that has root now and is restarted later can find nothing
+    // left to arm the exploit with, and what the helper says when it finds nothing is that the exploit
+    // failed. Nothing is asked of a phone without root, and an app that already armed this boot copies
+    // nothing: see [DfrInstall.armStageForNextBoot] for the check that makes that true.
+    LaunchedEffect(resumeTick) {
+        withContext(Dispatchers.IO) {
+            if (DfrInstall.armStageForNextBoot(context) == DfrStageArming.Failed) {
+                // Said, because it is the one outcome here that the next boot cannot recover from on its
+                // own: silently, the phone would simply be unrerootable after a restart.
+                AppLog.warn(
+                    AppLogTags.KERNEL_SU,
+                    "The KernelSU daemon is not staged for the next boot: a reboot without root would " +
+                        "have nothing to late-load",
+                )
+            }
+        }
+    }
+
     // The bar floats over the pages rather than being handed a strip of its own. A pill that reserved its
     // row left the bottom of every screen empty - the page stopped above it and the last card sat in the
     // middle of the screen with an empty band below - while the pill itself covered nothing that could not
     // be scrolled past. As a sibling it costs no layout at all: the pages run to the navigation inset and
     // the bar is drawn last, over whatever is under it.
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            // One undo surface for the whole app, because the two deletions that can be undone are on
-            // different pages and both want the same shape: a message that says what went, and a button that
-            // puts it back.
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-        ) { padding ->
-            AnimatedContent(
-                targetState = selectedPage,
-                label = "page",
-                // The pages only. The sheets and dialogs are drawn outside this one, and scrolling a list
-                // inside one of them is not a page moving under the bar.
-                modifier = Modifier.nestedScroll(
-                    remember { navBarScrollConnection { hidden -> navBarHidden = hidden } },
-                ),
-            ) { page ->
-                when (page) {
-                    AppPage.Overview -> OverviewPage(
-                        padding = padding,
-                        device = device,
-                        installState = installState,
-                        armedRetry = armedRetry,
-                        retryPayload = retryPayload,
-                        updateStatus = updateStatus,
-                        updateCardDismissed = updateCardDismissed,
-                        onDismissUpdateCard = { updateCardDismissed = true },
-                        frameworkRestart = frameworkRestart.takeIf { !frameworkRestartDismissed },
-                        onDismissFrameworkRestart = { frameworkRestartDismissed = true },
-                        onStartDownload = startDownload,
-                        onCheckForUpdate = checkForUpdate,
-                        onStartArmedRetry = onStartArmedRetry,
-                        onCancelArmedRetry = onCancelArmedRetry,
-                        onOpenSettings = { selectedPage = AppPage.Settings },
-                        // Opened from the button rather than from a shortcut, so there is no attempt
-                        // behind it to report on.
-                        onOpenReboot = {
-                            rebootNotice = null
-                            showRebootSheet = true
-                        },
-                        resumeTick = resumeTick,
-                        onInstall = {
-                            selectedProfile = null
-                            if (advancedMode) {
+    //
+    // The claim is offered from here rather than from a page, because any step in any page is the screen this
+    // is about - a step is composed inside the page it was opened from, and the page has no way to reach the
+    // shell that draws over it.
+    CompositionLocalProvider(LocalFullScreenStep provides claimWindow) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                // One undo surface for the whole app, because the two deletions that can be undone are on
+                // different pages and both want the same shape: a message that says what went, and a button that
+                // puts it back.
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) { padding ->
+                AnimatedContent(
+                    targetState = selectedPage,
+                    label = "page",
+                    // The pages only. The sheets and dialogs are drawn outside this one, and scrolling a list
+                    // inside one of them is not a page moving under the bar.
+                    modifier = Modifier.nestedScroll(
+                        remember { navBarScrollConnection { hidden -> navBarScrolledAway = hidden } },
+                    ),
+                ) { page ->
+                    when (page) {
+                        AppPage.Overview -> OverviewPage(
+                            padding = padding,
+                            device = device,
+                            kernelsuFlavor = kernelsuFlavor,
+                            installState = installState,
+                            armedRetry = armedRetry,
+                            retryPayload = retryPayload,
+                            updateStatus = updateStatus,
+                            updateCardDismissed = updateCardDismissed,
+                            onDismissUpdateCard = { updateCardDismissed = true },
+                            frameworkRestart = frameworkRestart.takeIf { !frameworkRestartDismissed },
+                            onDismissFrameworkRestart = { frameworkRestartDismissed = true },
+                            onStartDownload = startDownload,
+                            onCheckForUpdate = checkForUpdate,
+                            onStartArmedRetry = onStartArmedRetry,
+                            onCancelArmedRetry = onCancelArmedRetry,
+                            onOpenSettings = { selectedPage = AppPage.Settings },
+                            // Opened from the button rather than from a shortcut, so there is no attempt
+                            // behind it to report on.
+                            onOpenReboot = {
+                                rebootNotice = null
+                                showRebootSheet = true
+                            },
+                            resumeTick = resumeTick,
+                            // One press, one question: which payload this run spends. The picker is the
+                            // only way into a run, because the payload is the one thing about it a person
+                            // can still get wrong - and the confirmation that follows states the choice
+                            // rather than asking for it a second time.
+                            onInstall = {
+                                selectedProfile = null
                                 showTargetPicker = true
                                 installViewModel.loadTargetCatalog()
-                            } else {
-                                showInstallConfirmation = true
-                            }
-                        },
-                    )
-                    AppPage.History -> HistoryPage(
-                        padding = padding,
-                        history = history,
-                        snackbarHostState = snackbarHostState,
-                        onDeleteEntries = installViewModel::deleteHistoryEntries,
-                        onRestoreEntries = installViewModel::restoreHistoryEntries,
-                        onOpenHome = { selectedPage = AppPage.Overview },
-                        openEntryId = openedRunEntry,
-                        onEntryOpened = onOpenedRunEntryHandled,
-                        onReloadHistory = installViewModel::reloadHistory,
-                    )
-                    AppPage.Logs -> LogsPage(padding)
-                    AppPage.Settings -> SettingsPage(
-                        padding = padding,
-                        device = device,
-                        accentColor = accentColor,
-                        themeMode = themeMode,
-                        advancedMode = advancedMode,
-                        disableKsuModules = disableKsuModules,
-                        loadKernelSu = loadKernelSu,
-                        kernelsuFlavor = kernelsuFlavor,
-                        shizukuMode = shizukuMode,
-                        payloadSources = payloadSources,
-                        bootRootMode = bootRootMode,
-                        restartAfterRoot = restartAfterRoot,
-                        shizukuBootMode = shizukuBootMode,
-                        bootSettleSeconds = bootSettleSeconds,
-                        autoRootSettleSeconds = autoRootSettleSeconds,
-                        runLimits = runLimits,
-                        exploitOverride = exploitOverride,
-                        shizukuToken = shizukuToken,
-                        partitionReadOnly = partitionReadOnly,
-                        payloadMode = payloadMode,
-                        batteryUnrestricted = batteryUnrestricted,
-                        resumeTick = resumeTick,
-                        onAccentColorChanged = onAccentColorChanged,
-                        onThemeModeChanged = onThemeModeChanged,
-                        onAdvancedModeChanged = onAdvancedModeChanged,
-                        onDisableKsuModulesChanged = onDisableKsuModulesChanged,
-                        onLoadKernelSuChanged = onLoadKernelSuChanged,
-                        onKernelsuFlavorChanged = onKernelsuFlavorChanged,
-                        onManagerVersionChanged = onManagerVersionChanged,
-                        onShizukuModeChanged = onShizukuModeChanged,
-                        onPayloadSourcesChanged = onPayloadSourcesChanged,
-                        onBootRootModeChanged = onBootRootModeChanged,
-                        onRestartAfterRootChanged = onRestartAfterRootChanged,
-                        onShizukuBootModeChanged = onShizukuBootModeChanged,
-                        onBootSettleChanged = onBootSettleChanged,
-                        onAutoRootSettleChanged = onAutoRootSettleChanged,
-                        onRunLimitChanged = onRunLimitChanged,
-                        onExploitOverrideChanged = onExploitOverrideChanged,
-                        onShizukuTokenChanged = onShizukuTokenChanged,
-                        onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
-                        onPayloadModeChanged = onPayloadModeChanged,
-                        onForgetCachedPayload = onForgetCachedPayload,
-                        onRequestNotificationPermission = requestNotificationPermission,
-                        onRequestBatteryExemption = onRequestBatteryExemption,
-                        shizukuStarting = shizukuStarting,
-                        startShizuku = startShizuku,
-                        requestShizukuPermission = requestShizukuPermission,
-                        runPlan = runPlan,
-                        openTarget = settingsTarget,
-                        onOpenTargetHandled = onSettingsTargetHandled,
-                    )
+                            },
+                        )
+                        AppPage.History -> HistoryPage(
+                            padding = padding,
+                            history = history,
+                            snackbarHostState = snackbarHostState,
+                            onDeleteEntries = installViewModel::deleteHistoryEntries,
+                            onRestoreEntries = installViewModel::restoreHistoryEntries,
+                            onOpenHome = { selectedPage = AppPage.Overview },
+                            openEntryId = openedRunEntry,
+                            onEntryOpened = onOpenedRunEntryHandled,
+                            onReloadHistory = installViewModel::reloadHistory,
+                        )
+                        AppPage.Logs -> LogsPage(padding)
+                        AppPage.Settings -> SettingsPage(
+                            padding = padding,
+                            device = device,
+                            accentColor = accentColor,
+                            themeMode = themeMode,
+                            disableKsuModules = disableKsuModules,
+                            loadKernelSu = loadKernelSu,
+                            kernelsuFlavor = kernelsuFlavor,
+                            shizukuMode = shizukuMode,
+                            payloadSources = payloadSources,
+                            bootRootMode = bootRootMode,
+                            rerootAtBoot = rerootAtBoot,
+                            restartAfterRoot = restartAfterRoot,
+                            shizukuBootMode = shizukuBootMode,
+                            bootSettleSeconds = bootSettleSeconds,
+                            bootGateSettleSeconds = bootGateSettleSeconds,
+                            runLimits = runLimits,
+                            exploitOverride = exploitOverride,
+                            shizukuToken = shizukuToken,
+                            partitionReadOnly = partitionReadOnly,
+                            screenOffDuringRun = screenOffDuringRun,
+                            payloadMode = payloadMode,
+                            batteryUnrestricted = batteryUnrestricted,
+                            resumeTick = resumeTick,
+                            onAccentColorChanged = onAccentColorChanged,
+                            onThemeModeChanged = onThemeModeChanged,
+                            onDisableKsuModulesChanged = onDisableKsuModulesChanged,
+                            onLoadKernelSuChanged = onLoadKernelSuChanged,
+                            onRerootAtBootChanged = onRerootAtBootChanged,
+                            onManagerVersionChanged = onManagerVersionChanged,
+                            onShizukuModeChanged = onShizukuModeChanged,
+                            onPayloadSourcesChanged = onPayloadSourcesChanged,
+                            onBootRootModeChanged = onBootRootModeChanged,
+                            onRestartAfterRootChanged = onRestartAfterRootChanged,
+                            onShizukuBootModeChanged = onShizukuBootModeChanged,
+                            onBootSettleChanged = onBootSettleChanged,
+                            onBootGateSettleChanged = onBootGateSettleChanged,
+                            onRunLimitChanged = onRunLimitChanged,
+                            onExploitOverrideChanged = onExploitOverrideChanged,
+                            onShizukuTokenChanged = onShizukuTokenChanged,
+                            onPartitionReadOnlyChanged = onPartitionReadOnlyChanged,
+                            onScreenOffDuringRunChanged = onScreenOffDuringRunChanged,
+                            onPayloadModeChanged = onPayloadModeChanged,
+                            onForgetCachedPayload = onForgetCachedPayload,
+                            onRequestNotificationPermission = requestNotificationPermission,
+                            onRequestBatteryExemption = onRequestBatteryExemption,
+                            shizukuStarting = shizukuStarting,
+                            startShizuku = startShizuku,
+                            requestShizukuPermission = requestShizukuPermission,
+                            runPlan = runPlan,
+                            openTarget = settingsTarget,
+                            onOpenTargetHandled = onSettingsTargetHandled,
+                        )
+                    }
                 }
             }
-        }
 
-        AppNavBar(
-            selected = selectedPage,
-            onSelect = { page ->
-                clickHaptic(view)
-                selectedPage = page
-            },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // Measured rather than assumed: the bar carries the navigation inset, and this has no idea
-                // how tall that is. Its own height is also exactly how far it has to travel to be out of the
-                // way, so the pill ends below the screen edge rather than peeking at the bottom of it.
-                .onGloballyPositioned { coordinates ->
-                    navBarHeight = with(density) { coordinates.size.height.toDp() }
-                }
-                .offset(y = navBarShift),
-        )
+            AppNavBar(
+                selected = selectedPage,
+                onSelect = { page ->
+                    clickHaptic(view)
+                    selectedPage = page
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    // Measured rather than assumed: the bar carries the navigation inset, and this has no idea
+                    // how tall that is. Its own height is also exactly how far it has to travel to be out of the
+                    // way, so the pill ends below the screen edge rather than peeking at the bottom of it.
+                    .onGloballyPositioned { coordinates ->
+                        navBarHeight = with(density) { coordinates.size.height.toDp() }
+                    }
+                    .offset(y = navBarShift),
+            )
+        }
     }
 }
 
@@ -1467,6 +1611,14 @@ private fun OverviewPage(
     retryPayload: CachedPayload?,
     updateStatus: UpdateStatus,
     updateCardDismissed: Boolean,
+    /**
+     * The flavour this device's payload loads, which is the only manager this page reports on.
+     *
+     * Handed in rather than read again here, because it is the same value the Settings screen's flavour
+     * row shows and the same one the run's transport uses: one reading of a fact about the payload, so a
+     * page cannot report on a manager the next run would never open.
+     */
+    kernelsuFlavor: KernelSuFlavor,
     onDismissUpdateCard: () -> Unit,
     /** What the last framework restart came back with, until it is dismissed. */
     frameworkRestart: FrameworkRestartReport?,
@@ -1512,6 +1664,11 @@ private fun OverviewPage(
     // Reachable from here as well as from Settings: the version and the links are what a reader wants
     // after a run, which is the one thing this screen is about.
     var showAbout by remember { mutableStateOf(false) }
+    var showFaq by remember { mutableStateOf(false) }
+    // Read once, at the first composition of this page, because that is the moment a launch begins: the
+    // guide is for the phone that has never been through it, and it is stored rather than derived so a
+    // re-read from Home cannot bring it back on its own.
+    var showGuide by remember { mutableStateOf(!AppPreferences.guideAccepted(context)) }
     // A report is two dozen readings and a log file, so the row says it is working rather than looking
     // like a tap that did nothing.
     LaunchedEffect(installState.phase, resumeTick) {
@@ -1639,8 +1796,11 @@ private fun OverviewPage(
                 )
             }
         }
-        item { ReadinessCard(readiness, onOpenSettings) }
+        item { ReadinessCard(readiness, kernelsuFlavor, onOpenSettings) }
         item { DeviceCard(device) }
+        // After the phone's own readings, and last of the cards for that reason: everything above says what
+        // this phone is doing, and this is the one thing here for a phone the catalog does not cover yet.
+        item { KernelCheckCard(device) }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
         // there to do". Logs is not repeated here - the bar at the bottom already goes there.
@@ -1666,6 +1826,18 @@ private fun OverviewPage(
                     },
                 )
                 HomeLinkRow(
+                    icon = Icons.Rounded.MenuBook,
+                    title = stringResource(R.string.guide_reread),
+                    position = SettingsCardPosition.Middle,
+                    onClick = { showGuide = true },
+                )
+                HomeLinkRow(
+                    icon = Icons.Rounded.QuestionAnswer,
+                    title = stringResource(R.string.faq_title),
+                    position = SettingsCardPosition.Middle,
+                    onClick = { showFaq = true },
+                )
+                HomeLinkRow(
                     icon = Icons.Rounded.Info,
                     title = stringResource(R.string.about),
                     position = SettingsCardPosition.Bottom,
@@ -1676,6 +1848,20 @@ private fun OverviewPage(
     }
     if (showAbout) {
         AboutDialog(onDismiss = { showAbout = false })
+    }
+    if (showFaq) {
+        FaqDialog(onDismiss = { showFaq = false })
+    }
+    if (showGuide) {
+        GuideDialog(
+            onFinish = {
+                AppPreferences.setGuideAccepted(context, true)
+                showGuide = false
+            },
+            // A guide opened from Home is not a first launch: it already happened, and the notification
+            // is asked for by the step it has rather than again here.
+            alreadyAccepted = AppPreferences.guideAccepted(context),
+        )
     }
 }
 
@@ -1839,12 +2025,16 @@ private fun UpdateCard(
                     )
                 }
                 else -> {
-                    FilledTonalButton(onClick = {
-                        clickHaptic(view)
-                        onStartDownload(info)
-                    }) {
-                        Text(stringResource(R.string.updater_button_download))
-                    }
+                    // The banner's one action, so it is the loud one.
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.updater_button_download,
+                            role = AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            onStartDownload(info)
+                        },
+                    )
                 }
             }
         }
@@ -2033,29 +2223,31 @@ private fun ArmedRetryCard(
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        onCancel()
-                    },
-                ) {
-                    Text(stringResource(R.string.retry_armed_cancel))
-                }
-                if (retry.afterReboot) {
-                    Button(
-                        onClick = {
+            // A set of answers rather than two buttons pushed to one end, so this card's pair is laid out
+            // by the same rule every dialog's is - see [AppDialogActions]. Starting is offered only for an
+            // attempt that is waiting for the next boot; there is nothing to start otherwise, and a card
+            // that is only reporting an armed retry has one answer.
+            AppDialogActions(
+                buildList {
+                    add(
+                        AppAction(R.string.retry_armed_cancel) {
                             clickHaptic(view)
-                            onStart()
+                            onCancel()
                         },
-                    ) {
-                        Text(stringResource(R.string.retry_armed_start))
+                    )
+                    if (retry.afterReboot) {
+                        add(
+                            AppAction(
+                                label = R.string.retry_armed_start,
+                                role = AppActionRole.Priority,
+                            ) {
+                                clickHaptic(view)
+                                onStart()
+                            },
+                        )
                     }
-                }
-            }
+                },
+            )
         }
     }
 }
@@ -2233,7 +2425,11 @@ private fun InstallStatusCard(installState: InstallUiState, onInstall: () -> Uni
  * boot exists.
  */
 @Composable
-private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
+private fun ReadinessCard(
+    readiness: Readiness,
+    kernelsuFlavor: KernelSuFlavor,
+    onOpenSettings: () -> Unit,
+) {
     val view = LocalView.current
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize(),
@@ -2278,16 +2474,18 @@ private fun ReadinessCard(readiness: Readiness, onOpenSettings: () -> Unit) {
                     onOpenSettings()
                 },
             )
-            // One row per project, from the same list the flavour picker offers: the manager a run
-            // leaves the phone needing is the one for the flavour it loaded, and a project added to
-            // that list gets a row here without a second edit to remember.
-            for (flavor in KernelSuFlavor.entries) {
-                ManagerRow(
-                    label = stringResource(R.string.readiness_manager_row, flavor.label),
-                    installed = readiness.managers.installed(flavor),
-                    onClick = onOpenSettings,
-                )
-            }
+            // One row, for the flavour the payload set - see [kernelsuFlavor] - and not one per project.
+            // The other two are managers this phone will never open and this app will never look for, so
+            // listing them was a choice nobody has: the flavour is not a setting to compare against any
+            // more, it is what the resolved payload loads, and its row is the only one that can be acted
+            // on. What is still worth a line is whether *this* one is installed: root with no manager is a
+            // phone that cannot be managed without installing one, and a manager with no root is a phone
+            // whose install has not been run yet.
+            ManagerRow(
+                label = stringResource(R.string.readiness_manager_row, kernelsuFlavor.label),
+                installed = readiness.managers.installed(kernelsuFlavor),
+                onClick = onOpenSettings,
+            )
         }
     }
 }
@@ -2345,6 +2543,362 @@ private fun DeviceCard(device: DeviceSnapshot) {
             InfoRow(Icons.Rounded.Security, stringResource(R.string.system_abi), "${device.abi} (${device.pageSize / 1024}K)")
         }
     }
+}
+
+/**
+ * What the last kernel check left behind, if it left anything.
+ *
+ * Called once, as this screen is first composed, because that is the moment a launch begins and the record is
+ * about the launch before it. Two readings are possible and they mean different things: a check that was
+ * running in one boot and is read in another stopped because the phone restarted, which is the bug doing what
+ * only it can do to a kernel it is in; and the same record read in the same boot says the app went away while
+ * the phone did not, which says nothing about the kernel at all.
+ *
+ * The record is closed as it is read, so the answer it produces is shown once rather than reappearing at every
+ * launch - which is also what stops a restart from being reported twice.
+ */
+private fun leftoverCheck(context: Context): KernelCheckState {
+    val pending = KernelCheckRecord.pending(context) ?: return KernelCheckState.Idle
+    KernelCheckRecord.finish(context)
+    val restarted = restartedSince(pending.bootToken, AutoRootSupport.currentBootToken())
+    AppLog.info(
+        AppLogTags.KERNEL_CHECK,
+        "Kernel check was left unfinished by the check started at ${pending.startedAtMillis}: the phone " +
+            (if (restarted) "restarted under it." else "did not restart."),
+    )
+    return KernelCheckState.Interrupted(restarted)
+}
+
+/**
+ * The kernel check, on the screen somebody with an unsupported phone opens.
+ *
+ * This exists for one user in particular: the one whose model and kernel are not in any catalog, who today
+ * is told only that nothing matches and cannot tell whether that is a gap this project will close or a phone
+ * it will never cover. Those two are different answers and the phone can give both: a kernel carrying the
+ * fix is one no payload of ours will ever load into, while a kernel still vulnerable is one a payload could
+ * cover as soon as somebody ports it. So the card asks the phone - see [VulnerabilityProbe] - and says which
+ * of the two this is.
+ *
+ * Three things are deliberately true of it. It is never automatic: the test is offered and run only when
+ * pressed, because on a phone with the bug it can leave a task nothing but a restart clears, and a diagnostic
+ * nobody asked for must not be able to do that. It never reports a table's answer as a measured one - the
+ * verdict carries where it came from and the card says so. And it is not a run: it installs nothing, needs no
+ * payload, takes no privilege, and a phone that has just been tested is exactly as it was.
+ *
+ * When the version alone already answers it - at or above the fixed release on a branch this app knows - the
+ * card says so without starting anything. That is the one case where asking the kernel could add nothing, and
+ * a kernel above the fix is not one to wedge for confirmation.
+ */
+@Composable
+private fun KernelCheckCard(device: DeviceSnapshot) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    // Written by the Stop answer and read between attempts by the probe, which is why it is not a snapshot
+    // state: the reader is a background thread that must not be handed a composition value.
+    val stopped = remember { AtomicBoolean(false) }
+    // Read once, because it is about the last time this screen was open rather than about now: a check that
+    // was running when this app went away is the one case where the answer arrived while nobody was here to
+    // write it down - see [KernelCheckRecord].
+    var state by remember { mutableStateOf(leftoverCheck(context)) }
+    var confirming by remember { mutableStateOf(false) }
+    var explaining by remember { mutableStateOf(false) }
+    // The version's own answer, pure and free, read once per kernel: it decides whether the test runs at
+    // all, and it is shown before the test so that a measured answer either confirms it or departs from it.
+    val table = remember(device.kernelVersion) { KernelVulnerability.read(device.kernelVersion) }
+    val binary = remember(context) {
+        VulnerabilityProbe.binaryUnder(context.applicationInfo.nativeLibraryDir.orEmpty())
+    }
+
+    // Typed, because the branches of the `when` below end in different things - a launch returns a job - and
+    // what the card wants from all of them is that the press was handled.
+    val start: () -> Unit = {
+        confirming = false
+        stopped.set(false)
+        when {
+            table.verdict == KernelVulnerability.Verdict.Patched -> {
+                state = KernelCheckState.Done(
+                    verdict = VulnerabilityProbe.Verdict.Patched,
+                    byVersion = true,
+                    fixedIn = table.fixedIn?.toString(),
+                )
+                AppLog.info(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check answered by version alone: ${device.kernelRelease} is at or above " +
+                        "${table.fixedIn} on its branch.",
+                )
+            }
+
+            !binary.isFile -> {
+                state = KernelCheckState.NotPossible
+                AppLog.warn(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check cannot run: no test at ${binary.absolutePath}.",
+                )
+            }
+
+            else -> {
+                state = KernelCheckState.Running(1)
+                AppLog.info(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check started on ${device.model} kernel ${device.kernelRelease}, which the " +
+                        "version alone reads as ${table.verdict}.",
+                )
+                // Written before the first attempt, because the failure this record exists for takes the app
+                // with it: a note made afterwards would only ever be written for the tests that did not need
+                // one.
+                KernelCheckRecord.begin(
+                    context = context,
+                    bootToken = AutoRootSupport.currentBootToken(),
+                    startedAtMillis = System.currentTimeMillis(),
+                    attempts = VulnerabilityProbe.ATTEMPTS,
+                )
+                scope.launch {
+                    val outcome = withContext(Dispatchers.IO) {
+                        VulnerabilityProbe.run(
+                            binary = binary,
+                            attemptStarted = { number ->
+                                scope.launch { state = KernelCheckState.Running(number) }
+                            },
+                            say = { line -> AppLog.info(AppLogTags.KERNEL_CHECK, line) },
+                            isStopped = { stopped.get() },
+                        )
+                    }
+                    KernelCheckRecord.finish(context)
+                    if (stopped.get()) {
+                        // Not an answer, and must not be drawn as one: a test the user stopped has the same
+                        // verdict as one that never ran.
+                        state = KernelCheckState.Idle
+                        AppLog.info(
+                            AppLogTags.KERNEL_CHECK,
+                            "Kernel check stopped after ${outcome.attempts.size} of " +
+                                "${VulnerabilityProbe.ATTEMPTS} attempts.",
+                        )
+                    } else {
+                        state = KernelCheckState.Done(
+                            verdict = outcome.verdict,
+                            byVersion = false,
+                            fixedIn = table.fixedIn?.toString(),
+                        )
+                        AppLog.info(
+                            AppLogTags.KERNEL_CHECK,
+                            "Kernel check finished: ${outcome.verdict} after ${outcome.attempts.size} of " +
+                                "${VulnerabilityProbe.ATTEMPTS} attempts.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(stringResource(R.string.kernel_check), style = MaterialTheme.typography.titleMedium)
+
+            when (val current = state) {
+                KernelCheckState.Idle -> {
+                    Text(stringResource(R.string.kernel_check_body), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = stringResource(R.string.kernel_check_why),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Nothing above the steps while the test runs: the spinner that says which step is working
+                // belongs to the step it is working in, and a second one up here would be two accounts of
+                // the same minute.
+                is KernelCheckState.Running -> Unit
+
+                // Both answers land here: the one the test reached, and the one it found by being restarted
+                // mid-attempt. They are different findings with the same consequence, so what they must not
+                // do is diverge in what the card says about whether this phone can be rooted.
+                is KernelCheckState.Done, is KernelCheckState.Interrupted -> {
+                    val verdict = kernelVerdictOf(current)
+                    val restarted = current is KernelCheckState.Interrupted && current.restarted
+                    val headline = when {
+                        restarted -> R.string.kernel_check_restarted
+                        verdict == VulnerabilityProbe.Verdict.Vulnerable -> R.string.kernel_check_vulnerable
+                        verdict == VulnerabilityProbe.Verdict.Patched -> R.string.kernel_check_patched
+                        // The record that shows a check was running in the same boot says the app went away and
+                        // the phone did not, which is not an answer about the kernel either way.
+                        current is KernelCheckState.Interrupted -> R.string.kernel_check_unfinished
+                        else -> R.string.kernel_check_undecided
+                    }
+                    val lines = buildList {
+                        when {
+                            restarted -> {
+                                add(R.string.kernel_check_restarted_body)
+                                add(R.string.kernel_check_vulnerable_support)
+                            }
+
+                            verdict == VulnerabilityProbe.Verdict.Vulnerable -> {
+                                add(R.string.kernel_check_vulnerable_body)
+                                // Only a measured answer gets the support line and the restart advice: the
+                                // table's answer wedged nothing, and a phone that was not tested needs no
+                                // restart.
+                                if (current is KernelCheckState.Done && !current.byVersion) {
+                                    add(R.string.kernel_check_vulnerable_support)
+                                    add(R.string.kernel_check_needs_restart)
+                                }
+                            }
+
+                            verdict == VulnerabilityProbe.Verdict.Patched ->
+                                add(R.string.kernel_check_patched_body)
+
+                            else -> add(R.string.kernel_check_undecided_body)
+                        }
+                    }
+                    val icon = when {
+                        restarted || verdict == VulnerabilityProbe.Verdict.Vulnerable ->
+                            Icons.Rounded.LockOpen
+                        verdict == VulnerabilityProbe.Verdict.Patched -> Icons.Rounded.CheckCircle
+                        else -> Icons.Rounded.Warning
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp),
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(stringResource(headline), style = MaterialTheme.typography.titleSmall)
+                            lines.forEach { line ->
+                                Text(
+                                    text = stringResource(line),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                KernelCheckState.NotPossible -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.kernel_check_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // What the version alone says, before and after the test - so a measured answer reads as either
+            // a confirmation of it or a departure from it, and last of the readings because the steps below
+            // are what the press acts on.
+            table.fixedIn?.let { fixed ->
+                Text(
+                    text = stringResource(
+                        R.string.kernel_check_from_version,
+                        fixed.toString(),
+                        device.kernelVersion,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            KernelCheckSteps(
+                state = state,
+                versionRead = table.verdict != KernelVulnerability.Verdict.Undecided,
+                onExplain = { explaining = true },
+            )
+
+            // One press, and which press it is follows from where the steps are: a check that has finished
+            // or has not started offers the test, and one in progress offers the way out of it.
+            if (state is KernelCheckState.Running) {
+                AppActionButton(
+                    action = AppAction(R.string.kernel_check_stop) {
+                        clickHaptic(view)
+                        stopped.set(true)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                AppActionButton(
+                    action = AppAction(
+                        label = if (state is KernelCheckState.Idle) {
+                            R.string.kernel_check_start
+                        } else {
+                            R.string.kernel_check_again
+                        },
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        confirming = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+
+    if (confirming) {
+        KernelCheckDialog(onConfirm = start, onDismiss = { confirming = false })
+    }
+    if (explaining) {
+        StepGuideDialog(onDismiss = { explaining = false })
+    }
+}
+
+/**
+ * The one question the check asks before it runs, which the version table cannot answer for it.
+ *
+ * The warning is a real one and belongs before the press rather than after it: on a phone that still has the
+ * bug the test succeeds by making a task impossible to stop, and the only thing that clears it is a restart.
+ * Saying that up front is what makes the press informed, and it is why this is not the kind of confirmation
+ * that is dismissed without reading.
+ */
+@Composable
+private fun KernelCheckDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val view = LocalView.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            DialogDimAmount(0.34f)
+            Text(stringResource(R.string.kernel_check_warning_title))
+        },
+        text = { Text(stringResource(R.string.kernel_check_warning_body)) },
+        confirmButton = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.kernel_check_warning_continue, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onConfirm()
+                    },
+                    AppAction(R.string.action_cancel, AppActionRole.Standard) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
+        },
+    )
 }
 
 @Composable
@@ -2807,6 +3361,19 @@ private fun historyFilterLabel(filter: HistoryFilter): Int = when (filter) {
 }
 
 @Composable
+private fun FlavorFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val view = LocalView.current
+    FilterChip(
+        selected = selected,
+        onClick = {
+            clickHaptic(view)
+            onClick()
+        },
+        label = { Text(label) },
+    )
+}
+
+@Composable
 private fun HistoryFilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val view = LocalView.current
     FilterChip(
@@ -2849,14 +3416,17 @@ private fun EmptyHistoryFilterCard(onClearFilters: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FilledTonalButton(
-                onClick = {
+            // An empty list that is empty because of a filter has one thing to do about it, so it is the
+            // loud one.
+            AppActionButton(
+                AppAction(
+                    label = R.string.history_filter_clear,
+                    role = AppActionRole.Priority,
+                ) {
                     clickHaptic(view)
                     onClearFilters()
                 },
-            ) {
-                Text(stringResource(R.string.history_filter_clear))
-            }
+            )
         }
     }
 }
@@ -2891,12 +3461,15 @@ private fun EmptyHistoryCard(onOpenHome: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    onOpenHome()
-                }) {
-                    Text(stringResource(R.string.history_empty_action))
-                }
+                AppActionButton(
+                    AppAction(
+                        label = R.string.history_empty_action,
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        onOpenHome()
+                    },
+                )
             }
         }
     }
@@ -3221,24 +3794,27 @@ private fun LogsPage(padding: PaddingValues) {
             },
             text = { Text(stringResource(R.string.logs_clear_body)) },
             confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    AppLog.clear()
-                    query = ""
-                    minLevel = AppLogLevel.Debug
-                    confirmClear = false
-                }) {
-                    Text(stringResource(R.string.logs_clear))
-                }
+                // Destructive even though the dialog exists for it: this is the line a log is kept
+                // for and it is the only copy. The rule the shared set is built on says as much - a
+                // recommendation to delete something is still a deletion - so this set has no filled
+                // answer, and the red is the meaning rather than an emphasis.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.logs_clear, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            AppLog.clear()
+                            query = ""
+                            minLevel = AppLogLevel.Debug
+                            confirmClear = false
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            confirmClear = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmClear = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -3487,12 +4063,15 @@ private fun EmptyLogsCard(filtered: Boolean, onClearFilters: () -> Unit) {
             // Only when there is a filter to clear: an unfiltered empty log has nothing to undo, and the
             // body above says what will fill it instead.
             if (filtered) {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    onClearFilters()
-                }) {
-                    Text(stringResource(R.string.logs_filter_clear))
-                }
+                AppActionButton(
+                    AppAction(
+                        label = R.string.logs_filter_clear,
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        onClearFilters()
+                    },
+                )
             }
         }
     }
@@ -3504,21 +4083,22 @@ private fun SettingsPage(
     device: DeviceSnapshot,
     accentColor: AccentColor,
     themeMode: AppThemeMode,
-    advancedMode: Boolean,
 	disableKsuModules: Boolean,
     loadKernelSu: Boolean,
     kernelsuFlavor: KernelSuFlavor,
     shizukuMode: Boolean,
     payloadSources: List<PayloadSource>,
     bootRootMode: Boolean,
+    rerootAtBoot: Boolean,
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
     bootSettleSeconds: Int,
-    autoRootSettleSeconds: Int,
+    bootGateSettleSeconds: Int,
     runLimits: RunLimitsSettings,
     exploitOverride: ExploitOverrideSettings,
     shizukuToken: String,
     partitionReadOnly: Boolean,
+    screenOffDuringRun: Boolean,
     payloadMode: PayloadMode,
     batteryUnrestricted: Boolean,
     /**
@@ -3532,10 +4112,9 @@ private fun SettingsPage(
     resumeTick: Int,
     onAccentColorChanged: (AccentColor) -> Unit,
     onThemeModeChanged: (AppThemeMode) -> Unit,
-    onAdvancedModeChanged: (Boolean) -> Unit,
 	onDisableKsuModulesChanged: (Boolean) -> Unit,
     onLoadKernelSuChanged: (Boolean) -> Unit,
-    onKernelsuFlavorChanged: (KernelSuFlavor) -> Unit,
+    onRerootAtBootChanged: (Boolean) -> Unit,
     onManagerVersionChanged: (String) -> Unit,
     onShizukuModeChanged: (Boolean) -> Unit,
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
@@ -3543,11 +4122,12 @@ private fun SettingsPage(
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
-    onAutoRootSettleChanged: (Int) -> Unit,
+    onBootGateSettleChanged: (Int) -> Unit,
     onRunLimitChanged: (RunLimit, Int) -> Unit,
     onExploitOverrideChanged: (ExploitOverrideSettings) -> Unit,
     onShizukuTokenChanged: (String) -> Unit,
     onPartitionReadOnlyChanged: (Boolean) -> Unit,
+    onScreenOffDuringRunChanged: (Boolean) -> Unit,
     onPayloadModeChanged: (PayloadMode) -> Unit,
     onForgetCachedPayload: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -3568,23 +4148,22 @@ private fun SettingsPage(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var showLanguageDialog by remember { mutableStateOf(false) }
-    var showFlavorDialog by remember { mutableStateOf(false) }
     var showManagerVersionDialog by remember { mutableStateOf(false) }
     var managerVersionDraft by remember { mutableStateOf("") }
-    var flavorMenuTop by remember { mutableStateOf(0.dp) }
     var showColorDialog by remember { mutableStateOf(false) }
-    // What this app has left in /data/local/tmp, read once when the screen is opened rather than on
-    // every pass: the staging changes during a run, not while a settings list is on screen, and the
-    // reading is a stat per catalogued path. Null is "not read yet" and is shown as such, because a
-    // check that has not answered must not look like a check that found nothing.
-    var residue by remember { mutableStateOf<ResidueReport?>(null) }
+    // What this app has left on the device, read once when the screen is opened rather than on every
+    // pass: the residue changes during a run, not while a settings list is on screen, and the reading is
+    // a stat per catalogued path plus two shell listings. Null is "not read yet" and is shown as such,
+    // because a check that has not answered must not look like a check that found nothing.
+    var residue by remember { mutableStateOf<ResidueSurvey?>(null) }
     var showResidueDialog by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        val report = withContext(Dispatchers.IO) { StagedResidue.read() }
-        residue = report
+        val survey = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+        residue = survey
         // Filed where the reading can be copied out of, because the list is worth having outside the
-        // app for exactly one reason: to compare it against what something else reports seeing.
-        AppLog.info(AppLogTags.STAGING, report.logLine(context))
+        // app for exactly one reason: to compare it against what something else reports seeing. One
+        // line per place with something in it - see [ResidueSurvey.logLines].
+        survey.logLines(context).forEach { line -> AppLog.info(AppLogTags.STAGING, line) }
     }
     var showShizukuMissingDialog by remember { mutableStateOf(false) }
     // Read live, not once at composition: Shizuku hands out its binder asynchronously after the
@@ -3623,6 +4202,7 @@ private fun SettingsPage(
     }
     var showPayloadSourcesSheet by remember { mutableStateOf(false) }
     var showLocalPayloadDialog by remember { mutableStateOf(false) }
+    var showDfrInstall by remember { mutableStateOf(false) }
     var showRunPlanDialog by remember { mutableStateOf(false) }
     var localPayloadName by remember { mutableStateOf(LocalPayload.displayName(context)) }
     var languageMenuTop by remember { mutableStateOf(32.dp) }
@@ -3630,8 +4210,8 @@ private fun SettingsPage(
     var bootSettleMenuTop by remember { mutableStateOf(32.dp) }
     var showBootSettleDialog by remember { mutableStateOf(false) }
     var showRunLimitsDialog by remember { mutableStateOf(false) }
-    var autoRootSettleMenuTop by remember { mutableStateOf(32.dp) }
-    var showAutoRootSettleDialog by remember { mutableStateOf(false) }
+    var bootGateSettleMenuTop by remember { mutableStateOf(32.dp) }
+    var showBootGateSettleDialog by remember { mutableStateOf(false) }
     var showShizukuTokenDialog by remember { mutableStateOf(false) }
     var tokenDraft by remember { mutableStateOf("") }
     var showWirelessAdbDialog by remember { mutableStateOf(false) }
@@ -3652,22 +4232,24 @@ private fun SettingsPage(
             },
             text = { Text(stringResource(R.string.shizuku_not_running_body)) },
             confirmButton = {
-                FilledTonalButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                    openShizukuManager(context)
-                }) {
-                    Text(stringResource(R.string.action_download_shizuku))
-                }
+                // The recommended answer is the one that fixes what the dialog is about - the run asked
+                // for Shizuku and there is no manager to talk to - and getting it is not a deletion of
+                // anything, so it is the filled one.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.action_download_shizuku, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            showShizukuMissingDialog = false
+                            openShizukuManager(context)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            showShizukuMissingDialog = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    showShizukuMissingDialog = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 
@@ -3707,6 +4289,10 @@ private fun SettingsPage(
             onDismiss = { showLocalPayloadDialog = false },
             onNameChanged = { name -> localPayloadName = name },
         )
+    }
+
+    if (showDfrInstall) {
+        DfrInstallDialog(onDismiss = { showDfrInstall = false })
     }
 
     if (showLanguageDialog) {
@@ -3759,19 +4345,6 @@ private fun SettingsPage(
                 onPayloadModeChanged(if (index == 1) PayloadMode.Offline else PayloadMode.Online)
             },
             onDismiss = { showPayloadModeDialog = false },
-        )
-    }
-
-    if (showFlavorDialog) {
-        SideChoiceMenu(
-            choices = KernelSuFlavor.entries.map { it.label },
-            selectedIndex = KernelSuFlavor.entries.indexOf(kernelsuFlavor).coerceAtLeast(0),
-            topOffset = flavorMenuTop,
-            onSelected = { index ->
-                showFlavorDialog = false
-                onKernelsuFlavorChanged(KernelSuFlavor.entries[index])
-            },
-            onDismiss = { showFlavorDialog = false },
         )
     }
 
@@ -3847,14 +4420,16 @@ private fun SettingsPage(
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f),
                                 )
-                                TextButton(onClick = { managerVersionDraft = running }) {
-                                    Text(
-                                        stringResource(
-                                            R.string.settings_manager_running_use,
-                                            running,
-                                        ),
-                                    )
-                                }
+                                // A link rather than a filled answer: it sits in the row naming the
+                                // running version, and the card's own answers are further down. Its label
+                                // carries the version it would name, which is why the action takes
+                                // arguments at all.
+                                AppTextAction(
+                                    AppAction(
+                                        label = R.string.settings_manager_running_use,
+                                        labelArgs = listOf(running),
+                                    ) { managerVersionDraft = running },
+                                )
                             }
                         }
                     }
@@ -3930,33 +4505,39 @@ private fun SettingsPage(
                     )
                 }
             },
-            // Both actions in one slot, for the same reason the token dialog puts them there: split
-            // across the two slots the button beside Save ends up orphaned on its own line.
+            // Save and Reset are both answers, so both are answers here: each one ends the dialog and
+            // writes the preference, which is what separates an answer from the field's own controls -
+            // the "use the running version" affordance in the body stays a text button where it is,
+            // because it edits the draft and leaves the question open. Save leads because it is the
+            // recommended one; Reset is named with the version it resets to, so it cannot be mistaken
+            // for a second save.
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (managerVersionDraft.isNotBlank()) {
-                        TextButton(
-                            onClick = {
-                                showManagerVersionDialog = false
-                                onManagerVersionChanged("")
-                            },
-                        ) {
-                            Text(
-                                stringResource(
-                                    R.string.settings_manager_version_reset,
-                                    offeredVersion,
-                                ),
-                            )
-                        }
-                    }
-                    TextButton(
-                        onClick = {
+                AppDialogActions(
+                    listOfNotNull(
+                        AppAction(R.string.action_save, AppActionRole.Priority) {
                             showManagerVersionDialog = false
                             onManagerVersionChanged(managerVersionDraft)
                         },
-                    ) { Text(stringResource(R.string.action_save)) }
-                }
+                        AppAction(R.string.action_cancel) {
+                            showManagerVersionDialog = false
+                        },
+                        if (managerVersionDraft.isNotBlank()) {
+                            AppAction(
+                                label = R.string.settings_manager_version_reset,
+                                // Named with the version it resets to, which is the whole reason this
+                                // answer is not a second, quieter "save".
+                                labelArgs = listOf(offeredVersion),
+                            ) {
+                                showManagerVersionDialog = false
+                                onManagerVersionChanged("")
+                            }
+                        } else {
+                            null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -3974,17 +4555,17 @@ private fun SettingsPage(
         )
     }
 
-    if (showAutoRootSettleDialog) {
+    if (showBootGateSettleDialog) {
         val settled = BootSettle.allowedSeconds
         SideChoiceMenu(
             choices = settled.map { BootSettle.label(it) },
-            selectedIndex = settled.indexOf(autoRootSettleSeconds).coerceAtLeast(0),
-            topOffset = autoRootSettleMenuTop,
+            selectedIndex = settled.indexOf(bootGateSettleSeconds).coerceAtLeast(0),
+            topOffset = bootGateSettleMenuTop,
             onSelected = { index ->
-                showAutoRootSettleDialog = false
-                onAutoRootSettleChanged(settled[index])
+                showBootGateSettleDialog = false
+                onBootGateSettleChanged(settled[index])
             },
-            onDismiss = { showAutoRootSettleDialog = false },
+            onDismiss = { showBootGateSettleDialog = false },
         )
     }
 
@@ -4007,30 +4588,31 @@ private fun SettingsPage(
                     )
                 }
             },
-            // All three actions in one slot. Split across the confirm and dismiss slots they interleave:
-            // a stacked dismiss column is placed beside the confirm button, so Delete ended up next to
-            // Save with Cancel orphaned on a line of its own below them.
+            // Save leads, Cancel follows, and Delete ends the row in the error colours: all three end
+            // the dialog and write something, so all three are answers - and the one that throws away a
+            // stored credential is the one that must not be the loud one.
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (shizukuToken.isNotBlank()) {
-                        TextButton(
-                            onClick = {
-                                showShizukuTokenDialog = false
-                                onShizukuTokenChanged("")
-                            },
-                        ) { Text(stringResource(R.string.history_delete)) }
-                    }
-                    TextButton(onClick = { showShizukuTokenDialog = false }) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                    TextButton(
-                        onClick = {
+                AppDialogActions(
+                    listOfNotNull(
+                        AppAction(R.string.action_save, AppActionRole.Priority) {
                             showShizukuTokenDialog = false
                             onShizukuTokenChanged(tokenDraft)
                         },
-                    ) { Text(stringResource(R.string.action_save)) }
-                }
+                        AppAction(R.string.action_cancel) {
+                            showShizukuTokenDialog = false
+                        },
+                        if (shizukuToken.isNotBlank()) {
+                            AppAction(R.string.history_delete, AppActionRole.Destructive) {
+                                showShizukuTokenDialog = false
+                                onShizukuTokenChanged("")
+                            }
+                        } else {
+                            null
+                        },
+                    ),
+                )
             },
+            dismissButton = null,
         )
     }
 
@@ -4307,19 +4889,9 @@ private fun SettingsPage(
         if (SettingsSection.Run in openSections) item(key = SettingsTarget.PartitionReadOnly) {
             SettingsSectionBody {
                 SettingsSwitchCard(
-                    // Sliders, not the memory chip this had: the chip is the kernel module the KernelSU
-                    // row below is about, and this row reveals rows rather than touching a kernel.
-                    icon = Icons.Rounded.Tune,
-                    title = stringResource(R.string.advanced_mode),
-                    description = stringResource(R.string.advanced_mode_description),
-                    checked = advancedMode,
-                    position = SettingsCardPosition.Top,
-                    onCheckedChange = {
-                        clickHaptic(view)
-                        onAdvancedModeChanged(it)
-                    },
-                )
-                SettingsSwitchCard(
+                    // Security, which is what the row is about: the module set is the one thing about a
+                    // load that can be moved aside, and the card says so rather than wearing the kernel
+                    // chip the KernelSU row below already has.
                     icon = Icons.Rounded.Security,
                     title = stringResource(R.string.disable_ksu_modules),
                     // Moving the modules aside is something a run does *around the load*, so with no
@@ -4333,7 +4905,7 @@ private fun SettingsPage(
                         },
                     ),
                     checked = disableKsuModules,
-                    position = SettingsCardPosition.Middle,
+                    position = SettingsCardPosition.Top,
                     enabled = loadKernelSu,
                     onCheckedChange = {
                         clickHaptic(view)
@@ -4374,6 +4946,19 @@ private fun SettingsPage(
                         },
                     )
                 }
+                SettingsSwitchCard(
+                    // A moon, which is what the row is about rather than a picture of the setting: the
+                    // screen is out for the run and the result arrives somewhere else.
+                    icon = Icons.Rounded.DarkMode,
+                    title = stringResource(R.string.settings_screen_off_during_run),
+                    description = stringResource(R.string.settings_screen_off_during_run_summary),
+                    checked = screenOffDuringRun,
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = {
+                        clickHaptic(view)
+                        onScreenOffDuringRunChanged(it)
+                    },
+                )
                 SettingsCard(
                     modifier = Modifier.onGloballyPositioned { coordinates ->
                         bootSettleMenuTop = with(density) { coordinates.positionInWindow().y.toDp() }
@@ -4656,34 +5241,63 @@ private fun SettingsPage(
                 // The flavour is first because everything below it is about this flavour's module:
                 // which daemon a run stages, which manager opens afterwards, and which module root
                 // on boot puts back.
+                //
+                // A readout and not a picker. It is the flavour of the payload this device resolves to,
+                // written by [rememberResolvedPayload] whenever a payload becomes the one a run would
+                // use - so it cannot disagree with the kernel that is about to be loaded, which is the
+                // state a separate switch used to be able to reach: official KernelSU's manager offered
+                // for a KernelSU-Next kernel. The override is the payload sheet, where the rows say
+                // which KernelSU each candidate stages.
                 // Re-read when the flavour changes, because the marker below is exactly the state a
                 // change produces.
                 val loadedFlavor = remember(kernelsuFlavor) { AppPreferences.loadedFlavor(context) }
                 SettingsCard(
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        flavorMenuTop = with(density) { coordinates.positionInWindow().y.toDp() }
-                    },
                     icon = Icons.Rounded.Security,
                     title = stringResource(R.string.settings_ksu_flavor),
-                    description = stringResource(kernelsuFlavor.summaryRes),
-                    // The selected flavour sits in the band every other row puts its setting in, so it
-                    // lands on their centre line instead of riding up beside the title. That band is
-                    // measured before the text column next to it, which is why these two descriptions
-                    // are one line long: anything longer wraps into a second line at half the card's
-                    // width, and reads as a row that overflowed rather than one that fits.
+                    description = stringResource(R.string.settings_ksu_flavor_from_payload),
+                    // The flavour sits in the band every other row puts its setting in, so it lands on
+                    // their centre line instead of riding up beside the title. That band is measured
+                    // before the text column next to it, which is why these two descriptions are one
+                    // line long: anything longer wraps into a second line at half the card's width, and
+                    // reads as a row that overflowed rather than one that fits.
                     value = kernelsuFlavor.label,
                     // The pending marker is the only warning this screen can give: the two flavours
-                    // cannot both be in the kernel, so a switch made in a boot that already carries
-                    // one only takes effect after a restart. It says which flavour this boot is
+                    // cannot both be in the kernel, so a payload that differs from what this boot
+                    // loaded only takes effect after a restart. It says which flavour this boot is
                     // holding, because "after a restart" on its own leaves the reason to be guessed.
                     notice = loadedFlavor
                         ?.takeIf { it != kernelsuFlavor }
                         ?.let { stringResource(R.string.settings_ksu_flavor_pending, it.label) },
                     position = SettingsCardPosition.Top,
-                    onClick = {
-                        clickHaptic(view)
-                        showFlavorDialog = true
-                    },
+                    // It is a readout, so it takes no tap. The only thing one could do here is open the
+                    // sheet where a payload is picked, and that is a choice about the *next* run: it is
+                    // made where that run is started rather than under the value it would change.
+                )
+                // The other half of what the flavour decides, next to it because it is the same subject:
+                // which daemon the next boot's late-load will find. That file is *consumed* by every run -
+                // a payload's late-load and the system-uid helper's both rename it away - so a phone that
+                // has just run something has nothing armed until the next thing holding root writes it
+                // back, and the reboot that follows is the boot this row is about. Read through a shell
+                // and off the main thread, on the same terms as the readings card above.
+                var daemonStage by remember { mutableStateOf<DfrStageReading?>(null) }
+                LaunchedEffect(kernelsuFlavor, resumeTick) {
+                    daemonStage = withContext(Dispatchers.IO) { DfrInstall.readDaemonStage(context) }
+                }
+                SettingsCard(
+                    icon = Icons.Rounded.Autorenew,
+                    title = stringResource(R.string.settings_dfr_stage),
+                    description = stringResource(R.string.settings_dfr_stage_summary),
+                    value = daemonStage?.let { stringResource(it.label) }
+                        ?: stringResource(R.string.settings_dfr_stage_reading),
+                    // The reason it is not armed, in the one shape this screen has for a line of state
+                    // rather than a paragraph. Armed is the quiet answer and adds nothing.
+                    notice = daemonStage
+                        ?.takeIf { it != DfrStageReading.Armed }
+                        ?.let { stringResource(it.detail) },
+                    position = SettingsCardPosition.Middle,
+                    // A readout, like the flavour above it: what writes this file is a run, and a row here
+                    // that armed it would be a second place for that write to happen - one that no run's
+                    // own transport is holding.
                 )
                 // The version this app offers, which is the KernelSU the payload for this device loads
                 // when the user has named nothing - so a manager installed from this row is the one
@@ -4798,20 +5412,21 @@ private fun SettingsPage(
                     // version, because "install this" is a statement about which one is wanted - so
                     // the app's own default stops disagreeing with the phone the moment it is asked.
                     action = managerMismatchTarget(versionPair.state, runningKernelSu?.daemon)?.let { target ->
-                        NoticeAction(
-                            label = stringResource(R.string.settings_manager_install_running, target),
-                            onClick = {
-                                onManagerVersionChanged(target)
-                                KernelSuManager.downloadVersion(
-                                    context = context,
-                                    flavor = kernelsuFlavor,
-                                    version = target,
-                                    onMessage = { message ->
-                                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                    },
-                                )
-                            },
-                        )
+                        AppAction(
+                            label = R.string.settings_manager_install_running,
+                            labelArgs = listOf(target),
+                        ) {
+                            clickHaptic(view)
+                            onManagerVersionChanged(target)
+                            KernelSuManager.downloadVersion(
+                                context = context,
+                                flavor = kernelsuFlavor,
+                                version = target,
+                                onMessage = { message ->
+                                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                                },
+                            )
+                        }
                     },
                     position = SettingsCardPosition.Middle,
                 )
@@ -4839,10 +5454,13 @@ private fun SettingsPage(
                         Icons.Rounded.RestartAlt
                     },
                     noticeAction = payloadBehindTarget(payloadKernel)?.let { running ->
-                        NoticeAction(
-                            label = stringResource(R.string.settings_manager_version_keep_boot, running),
-                            onClick = { onManagerVersionChanged(running) },
-                        )
+                        AppAction(
+                            label = R.string.settings_manager_version_keep_boot,
+                            labelArgs = listOf(running),
+                        ) {
+                            clickHaptic(view)
+                            onManagerVersionChanged(running)
+                        }
                     },
                     position = SettingsCardPosition.Middle,
                     onClick = {
@@ -4919,20 +5537,56 @@ private fun SettingsPage(
                         onRestartAfterRootChanged(enabled)
                     },
                 )
+                // The one record an install can leave behind that is not a setting at all: a system-uid
+                // APK accepted by Package Manager. It is a one-off action with its own screen, which is
+                // why it sits here rather than anywhere a run reads its configuration from.
+                SettingsCard(
+                    icon = Icons.Rounded.VerifiedUser,
+                    title = stringResource(R.string.dfr_title),
+                    description = stringResource(R.string.dfr_description),
+                    position = SettingsCardPosition.Middle,
+                    onClick = {
+                        clickHaptic(view)
+                        showDfrInstall = true
+                    },
+                )
+                // Under the flow rather than next to root on boot, because what it starts *is* the
+                // flow's helper: the two rows above are about installing it, and this is the only thing
+                // that ever starts it with nobody watching. Its icon is the circle of arrows rather
+                // than root on boot's bolt - the bolt row means "this app loads KernelSU by itself",
+                // and two rows meaning that would read as one setting drawn twice.
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Autorenew,
+                    title = stringResource(R.string.dfr_reroot_at_boot),
+                    description = stringResource(R.string.dfr_reroot_at_boot_detail),
+                    checked = rerootAtBoot,
+                    position = SettingsCardPosition.Middle,
+                    onCheckedChange = { enabled ->
+                        clickHaptic(view)
+                        // The reroot's whole account is its notification - there is no screen in the
+                        // loop, because the point of it is that nobody is there - so the permission is
+                        // asked for at the moment the setting is turned on, on root on boot's terms.
+                        if (enabled) onRequestNotificationPermission()
+                        onRerootAtBootChanged(enabled)
+                    },
+                )
+                // Below both toggles rather than beside either, because it is one value behind both of
+                // them: Root on boot and Reroot at boot wait the same clock from the same boot, and a row
+                // drawn twice would be the same setting pretending to be two.
                 SettingsCard(
                     modifier = Modifier.onGloballyPositioned { coordinates ->
-                        autoRootSettleMenuTop =
+                        bootGateSettleMenuTop =
                             with(density) { coordinates.positionInWindow().y.toDp() }
                     },
                     icon = Icons.Rounded.HourglassEmpty,
-                    title = stringResource(R.string.settings_autoroot_settle),
-                    description = stringResource(R.string.settings_autoroot_settle_summary),
-                    value = BootSettle.label(autoRootSettleSeconds),
+                    title = stringResource(R.string.settings_boot_gate_settle),
+                    description = stringResource(R.string.settings_boot_gate_settle_summary),
+                    value = BootSettle.label(bootGateSettleSeconds),
                     position = SettingsCardPosition.Bottom,
                     enabled = loadKernelSu,
                     onClick = {
                         clickHaptic(view)
-                        showAutoRootSettleDialog = true
+                        showBootGateSettleDialog = true
                     },
                 )
             }
@@ -5012,43 +5666,65 @@ private fun SettingsPage(
 }
 
 /**
- * What this app has left in `/data/local/tmp`, one row per file, read the way another app reads it.
+ * What this app has left behind, in the three places it can leave anything.
  *
  * Read again here rather than handed the reading the card took: the card's reading was taken when
  * Settings was opened, and a run could have happened since - the list this is for is the one that is
  * true now. The fresh reading is passed back so the card's own line follows it, which is what keeps
  * the two from disagreeing about the same device.
+ *
+ * Three sections rather than one list, because the three directories are read differently and mean
+ * different things to whoever is looking: `/data/local/tmp` is what any other app can see by name,
+ * `/data/system` is what only root can see, and `/data/adb` is the root implementation's own. [ResidueScope]
+ * says why the third has no delete button on any row.
  */
 @Composable
 private fun StagedResidueDialog(
-    initial: ResidueReport?,
+    initial: ResidueSurvey?,
     onDismiss: () -> Unit,
-    onRead: (ResidueReport) -> Unit,
+    onRead: (ResidueSurvey) -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var report by remember { mutableStateOf(initial) }
     LaunchedEffect(Unit) {
-        val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
+        val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
         report = fresh
         onRead(fresh)
     }
-    // Emptying the directory is a second step and a wider claim than anything else on this screen: it
-    // takes the names this app cannot account for as well, so it is asked for, confirmed, and only
-    // then attempted - and what came of it is said where the button was.
+    // Deleting the whole list is a second step and a wider claim than any one row: it takes the names this
+    // app cannot account for as well, so it is asked for, confirmed, and only then attempted - and what
+    // came of it is said where the button was.
     var confirmingClear by remember { mutableStateOf(false) }
     var clearOutcome by remember { mutableStateOf<SweepOutcome?>(null) }
-    // A row's own delete, waiting for its confirmation. Held with its label and whether it is this
-    // app's, because that is what the confirmation has to say: taking an entry this app did not stage
-    // out of a shared directory is a different claim from clearing up after itself.
+    // A row's own delete, waiting for its confirmation. Only two kinds of row get here: an entry this app
+    // did not stage, and a file in `/data/system`, where being root-only is the reason to read the name
+    // twice before removing it.
     var pendingDelete by remember { mutableStateOf<PendingDelete?>(null) }
     var deleteOutcome by remember { mutableStateOf<Pair<PendingDelete, SweepOutcome>?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    // What came of clearing the p0 offset cache: true if it went, false if a run was in flight and it was
+    // left alone. Null before the button has been pressed, which is the difference between "nothing to
+    // report" and "nothing was done".
+    var cacheCleared by remember { mutableStateOf<Boolean?>(null) }
+    // Which directories are open, by path, and empty to start with. Closed is the right default here
+    // because each heading carries what its folder holds: the list that opens itself is the one where a
+    // directory a detector found something in sits below two that are clean, and the reason somebody
+    // opened this screen is usually one name they were told about.
+    var openFolders by remember { mutableStateOf(emptySet<String>()) }
+    // A folder's own delete, waiting for its confirmation. One per folder rather than one per row: a
+    // detector's report names a directory, and clearing that directory is the action somebody wants
+    // after reading it - the rows are for the one file worth keeping and the rest are for the folder.
+    var pendingFolderClear by remember { mutableStateOf<PendingFolderClear?>(null) }
+    /** Opens the folder that was tapped, or closes it again. */
+    val toggleFolder: (String) -> Unit = { path ->
+        openFolders = if (path in openFolders) openFolders - path else openFolders + path
+    }
     /**
      * Removes one entry and reports what came of it.
      *
-     * A named function rather than a body inside the confirmation, because two kinds of row reach it now: one
+     * A named function rather than a body inside the confirmation, because two kinds of row reach it: one
      * that confirms first and one that does not.
      */
     val deleteNow: (PendingDelete) -> Unit = { pending ->
@@ -5058,14 +5734,14 @@ private fun StagedResidueDialog(
             val outcome = withContext(Dispatchers.IO) {
                 StagingSweep.removeWhenQuiet(context, listOf(pending.path))
             }
-            // The list is read again here for the same reason it is after a clear: a row's absence is the
-            // receipt, and a name that survived the delete has to come back.
-            val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
+            // The list is read again here for the same reason it is after a delete-all: a row's absence is
+            // the receipt, and a name that survived the delete has to come back.
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
             report = fresh
             onRead(fresh)
             AppLog.info(
                 AppLogTags.STAGING,
-                context.getString(R.string.residue_log_delete, pending.label),
+                context.getString(R.string.residue_log_delete, pending.label, pending.path),
             )
             if (outcome !is SweepOutcome.Done || outcome.left.isNotEmpty() ||
                 outcome.complaint.isNotEmpty()
@@ -5076,11 +5752,100 @@ private fun StagedResidueDialog(
             clearing = false
         }
     }
+    /**
+     * Deletes everything the three sections found.
+     *
+     * Two commands, because the temp directory goes by glob and the catalogs go by name: emptying it is
+     * the wider claim - it takes the entry this app cannot account for too - and the named delete is what
+     * clears `/data/system`. The second only runs when the first did, so a device where nobody answered
+     * the first shell is not asked for a second one that will not answer either.
+     */
+    val deleteAll: () -> Unit = {
+        clearing = true
+        clearOutcome = null
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                val emptied = StagingSweep.clearWhenQuiet(context)
+                if (emptied !is SweepOutcome.Done || emptied.left.isNotEmpty()) {
+                    emptied
+                } else {
+                    val named = report?.deletablePaths.orEmpty()
+                    combine(emptied, if (named.isEmpty()) null else StagingSweep.removeWhenQuiet(context, named))
+                }
+            }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
+            clearOutcome = outcome
+            clearing = false
+        }
+    }
+    /**
+     * Deletes one folder's contents, and only that folder's.
+     *
+     * Two routes, because the two folders are read differently and so are emptied differently: the temp
+     * directory goes by glob - it is the one place with names this app cannot account for - and
+     * `/data/system` by naming the paths the catalogue lists, which leaves every other file in a
+     * platform directory alone. This is the narrower action of the two the screen offers: everything in
+     * one directory, rather than everything the whole reading found.
+     */
+    val clearFolder: (PendingFolderClear) -> Unit = { pending ->
+        clearing = true
+        clearOutcome = null
+        scope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                if (pending.byGlob) {
+                    StagingSweep.clearWhenQuiet(context)
+                } else {
+                    StagingSweep.removeWhenQuiet(context, pending.paths)
+                }
+            }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
+            clearOutcome = outcome
+            clearing = false
+        }
+    }
+    /**
+     * Clears the cached p0 offset, which is the one delete here that needs no shell.
+     *
+     * The file is the app's own, in its own storage, so this is a `deleteSharedPreferences` rather than
+     * a command - and it is also the only action on this screen that a device with no root and no
+     * Shizuku can complete. It still stands down while a run is in flight, for the reason [P0Cache.clear]
+     * gives: a run writes its own offset back when it ends, so a clear in the middle of one is a clear
+     * that would not have happened.
+     */
+    val clearP0Cache: () -> Unit = {
+        clearing = true
+        cacheCleared = null
+        scope.launch {
+            val cleared = withContext(Dispatchers.IO) { P0Cache.clear(context) }
+            val fresh = withContext(Dispatchers.IO) { StagedResidue.survey(context) }
+            report = fresh
+            onRead(fresh)
+            AppLog.info(
+                AppLogTags.STAGING,
+                context.getString(
+                    if (cleared) {
+                        R.string.residue_log_p0_cleared
+                    } else {
+                        R.string.residue_log_p0_clear_skipped
+                    },
+                ),
+            )
+            cacheCleared = cleared
+            clearing = false
+        }
+    }
     val reading = report
-    val present = reading?.present.orEmpty()
+    val present = reading?.temp?.present.orEmpty()
     // The half a catalog cannot produce: names the app does not write, listed through a shell. Shown
     // rather than counted, because what makes them worth knowing is which names they are.
-    val extras = reading?.extras.orEmpty()
+    val extras = reading?.temp?.extras.orEmpty()
+    val tempOpen = ResidueScope.TempDirectory.path in openFolders
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.residue_dialog_title)) },
@@ -5103,21 +5868,26 @@ private fun StagedResidueDialog(
                         )
                     }
 
-                    reading.blind -> Text(
+                    reading.temp.blind -> Text(
                         stringResource(R.string.residue_blind_body),
                         style = MaterialTheme.typography.bodyMedium,
                     )
 
-                    // Two clean sentences, because there are two clean readings: an empty directory,
-                    // and a directory that could not be listed and holds none of the known names.
-                    present.isEmpty() && extras.isEmpty() -> Text(
+                    // Two clean sentences, because there are two clean readings of the temp directory:
+                    // an empty one, and one that could not be listed and holds none of the known names.
+                    // The second is only reached when the other two directories are empty as well, so a
+                    // clean claim here is about everything on the screen - which is why the cached offset
+                    // is part of the test: a device whose only entry is a cached p0 offset is not a device
+                    // with nothing to show, and the sentence here is the one that would hide it.
+                    present.isEmpty() && extras.isEmpty() && reading.p0Cache == null &&
+                        reading.sections.none { it.anything } -> Text(
                         stringResource(
-                            if (reading.directoryListed) {
+                            if (reading.temp.directoryListed) {
                                 R.string.residue_clean_listed_body
                             } else {
                                 R.string.residue_clean_by_name_body
                             },
-                            reading.findings.size,
+                            reading.temp.findings.size,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -5128,30 +5898,65 @@ private fun StagedResidueDialog(
                             .heightIn(max = RESIDUE_LIST_MAX),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        if (present.isNotEmpty()) {
+                        item(key = "temp") {
+                            ResidueFolderHeading(
+                                folder = ResidueScope.TempDirectory,
+                                summary = reading.temp.folderSummary(),
+                                open = tempOpen,
+                                // Nothing to open when it holds nothing: an arrow over an empty folder
+                                // is an invitation to a list that is not there.
+                                expandable = present.isNotEmpty() || extras.isNotEmpty(),
+                                onToggle = { toggleFolder(ResidueScope.TempDirectory.path) },
+                                // The one delete on this screen that takes names this app cannot account
+                                // for, so it is offered only when there is something to take.
+                                delete = if (present.isNotEmpty() || extras.isNotEmpty()) {
+                                    {
+                                        pendingFolderClear = PendingFolderClear(
+                                            folder = ResidueScope.TempDirectory,
+                                            byGlob = ResidueScope.TempDirectory.emptiedByGlob,
+                                            paths = emptyList(),
+                                            body = ResidueFolderSummary(
+                                                R.string.residue_folder_clear_glob,
+                                                listOf(ResidueScope.TempDirectory.path, extras.size),
+                                            ),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                                deleteEnabled = !clearing,
+                            )
+                        }
+                        if (tempOpen && present.isNotEmpty()) {
                             item(key = "staged") {
                                 ResidueSectionLabel(stringResource(R.string.residue_section_staged))
                             }
                             items(present, key = { it.staged.path }) { finding ->
+                                // A name both installs write is the one case in this directory where the file
+                                // may not be this app's at all: with the other install present, deleting it
+                                // could be taking the payload another app's run is about to load. Everything
+                                // else here is removed on one tap - the app holds its own copy of what it
+                                // staged and a finished run does not need it back, so asking first charged
+                                // every cleanup a confirmation to protect against nothing.
+                                val pending = PendingDelete(
+                                    label = finding.staged.name,
+                                    path = finding.staged.path,
+                                    warning = R.string.residue_delete_shared,
+                                )
+                                val ambiguous = reading.siblingPresent &&
+                                    finding.staged.name in StagedResidue.sharedWithTheOtherInstall
+                                // A file a run reads is not offered for deletion at all - not even confirmed
+                                // first: the answer to "may I remove this" is no, and a confirmation would
+                                // make it a question about this device's state. [ResidueRow] draws no button
+                                // for one, and says why in the row instead.
                                 ResidueRow(
                                     finding = finding,
                                     deleteEnabled = !clearing,
-                                    // This app's own staging, removed on one tap: nothing else is lost, because
-                                    // the app holds its own copy of every file it staged, and the run that
-                                    // would need them has finished. Asking first charged every cleanup a
-                                    // confirmation to protect against a mistake with no consequence.
-                                    onDelete = {
-                                        deleteNow(
-                                            PendingDelete(
-                                                label = finding.staged.name,
-                                                path = finding.staged.path,
-                                            ),
-                                        )
-                                    },
+                                    onDelete = { if (ambiguous) pendingDelete = pending else deleteNow(pending) },
                                 )
                             }
                         }
-                        if (extras.isNotEmpty()) {
+                        if (tempOpen && extras.isNotEmpty()) {
                             item(key = "others") {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     ResidueSectionLabel(
@@ -5169,9 +5974,134 @@ private fun StagedResidueDialog(
                                     entry = entry,
                                     deleteEnabled = !clearing,
                                     onDelete = {
-                                        pendingDelete = PendingDelete(entry.name, entry.path)
+                                        pendingDelete = PendingDelete(
+                                            label = entry.name,
+                                            path = entry.path,
+                                            warning = R.string.residue_delete_other,
+                                        )
                                     },
                                 )
+                            }
+                        }
+                        // The other two directories, each with its own heading and its own rule about
+                        // deleting. Every heading is rendered whether or not its folder holds anything -
+                        // a section that appears only when it has something is a section nobody knows to
+                        // look for, and "nothing here" is the answer that makes the three worth reading -
+                        // but the body under it only exists when there is something to see.
+                        reading.sections.forEach { section ->
+                            val sectionOpen = section.scope.path in openFolders
+                            item(key = "scope:${section.scope.path}") {
+                                ResidueFolderHeading(
+                                    folder = section.scope,
+                                    summary = section.folderSummary(),
+                                    open = sectionOpen,
+                                    expandable = section.anything,
+                                    onToggle = { toggleFolder(section.scope.path) },
+                                    // No delete on the root implementation's own directory, which is the
+                                    // rule this scope carries: everything in it belongs to the root.
+                                    delete = if (section.anything && section.scope.deletable) {
+                                        {
+                                            pendingFolderClear = PendingFolderClear(
+                                                folder = section.scope,
+                                                byGlob = section.scope.emptiedByGlob,
+                                                paths = section.deletablePaths,
+                                                body = ResidueFolderSummary(
+                                                    R.string.residue_folder_clear_named,
+                                                    listOf(
+                                                        section.deletablePaths.size,
+                                                        section.scope.path,
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
+                                    deleteEnabled = !clearing,
+                                )
+                            }
+                            // Inside the folder rather than in its heading, because it is a warning about
+                            // the list under it: a directory that could not be listed may be holding
+                            // names that were never looked at.
+                            if (sectionOpen && section.anything && !section.listed) {
+                                item(key = "unlisted:${section.scope.path}") {
+                                    Text(
+                                        stringResource(R.string.residue_scope_unlisted, section.scope.path),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            items(
+                                if (sectionOpen) section.visibleNamed else emptyList(),
+                                key = { it.staged.path },
+                            ) { finding ->
+                                ResidueRow(
+                                    finding = finding,
+                                    deletable = section.scope.deletable,
+                                    deleteEnabled = !clearing,
+                                    // Confirmed, unlike the temp directory's own rows: what is in here is a
+                                    // copy of packages.xml the phone boots from, or another install's
+                                    // daemon, and neither is a file this app holds a spare of.
+                                    onDelete = {
+                                        pendingDelete = PendingDelete(
+                                            label = finding.staged.name,
+                                            path = finding.staged.path,
+                                            warning = R.string.residue_delete_system,
+                                        )
+                                    },
+                                )
+                            }
+                            items(
+                                if (sectionOpen) section.visibleEntries else emptyList(),
+                                key = { "entry:${section.scope.path}:${it.name}" },
+                            ) { entry ->
+                                TempEntryRow(
+                                    entry = entry,
+                                    deletable = section.scope.deletable,
+                                    // Named as whose it is: a name in the temp directory is a file this app
+                                    // cannot account for, and one inside KernelSU's own directory is a file
+                                    // whose owner is known - the two want different sentences.
+                                    roleRes = section.scope.roleRes,
+                                    deleteEnabled = !clearing,
+                                    onDelete = {
+                                        pendingDelete = PendingDelete(
+                                            label = entry.name,
+                                            path = entry.path,
+                                            warning = R.string.residue_delete_other,
+                                        )
+                                    },
+                                )
+                            }
+                        }
+                        // The fourth entry, and the odd one out: not a directory, not on the device, and
+                        // not deleted through a shell. It is last because it is the one nothing outside
+                        // this app can see, and it is in this list at all because what it holds changes
+                        // what the next run does - see [P0Cache].
+                        item(key = "p0cache") {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                P0CacheHeading(
+                                    entry = reading.p0Cache,
+                                    deleteEnabled = !clearing,
+                                    onDelete = clearP0Cache,
+                                )
+                                // Said where the button was, which for this row is the only place it can
+                                // be: the block at the bottom of the screen reports the deletes that went
+                                // through a shell, and a device with nothing but a cached offset has no
+                                // such delete to report.
+                                cacheCleared?.let { cleared ->
+                                    Text(
+                                        text = stringResource(
+                                            if (cleared) {
+                                                R.string.residue_p0_cleared
+                                            } else {
+                                                R.string.residue_p0_clear_skipped
+                                            },
+                                        ),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                     }
@@ -5179,19 +6109,24 @@ private fun StagedResidueDialog(
                 // What the check looked at, said out loud, because the count of what it found means
                 // nothing without the count of what it asked about - and because a path that could not
                 // be read is not a path that is not there.
-                if (reading != null && !reading.blind) {
+                if (reading != null && !reading.temp.blind) {
                     Text(
                         text = stringResource(
                             R.string.residue_dialog_checked,
-                            reading.findings.size,
-                            reading.findings.count { it.reading is ResidueReading.Unreadable },
+                            // Every path the screen asked about, across all three directories: a count of
+                            // what was looked for is the only thing that gives the count of what was found
+                            // its meaning.
+                            reading.temp.findings.size +
+                                reading.sections.sumOf { it.named.size + it.entries.size },
+                            reading.temp.findings.count { it.reading is ResidueReading.Unreadable } +
+                                reading.sections.sumOf { it.unreadableNamed.size + it.unreadableEntries.size },
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // Said where the names are, not in the help text at the top: what it changes is how
                     // much this particular list is worth.
-                    if (!reading.directoryListed) {
+                    if (!reading.temp.directoryListed) {
                         Text(
                             text = stringResource(R.string.residue_unlisted_body),
                             style = MaterialTheme.typography.labelSmall,
@@ -5202,26 +6137,25 @@ private fun StagedResidueDialog(
                 // The one action that changes the device rather than describing it, and the only one
                 // here that can take something that is not this app's - so it is offered last, in the
                 // error colour, and only when there is something to remove.
-                if (reading != null && !reading.blind && (present.isNotEmpty() || extras.isNotEmpty())) {
+                if (reading != null && !reading.temp.blind && reading.anything) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilledTonalButton(
-                            enabled = !clearing,
-                            onClick = {
+                        // The app's own answer button rather than a tonal one of this screen's: it is the
+                        // one press here that can take something that is not this app's, so it wears the
+                        // error colours whatever else the screen is recommending. The spinner it used to
+                        // draw *instead of* its label is now [AppAction.progress], beside the label - which
+                        // is also what keeps the button the same size at the moment it is pressed.
+                        AppActionButton(
+                            AppAction(
+                                label = R.string.residue_clear,
+                                role = AppActionRole.Destructive,
+                                enabled = !clearing,
+                                progress = clearing,
+                            ) {
                                 clickHaptic(view)
                                 confirmingClear = true
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                            ),
-                        ) {
-                            if (clearing) {
-                                LoadingIndicator(modifier = Modifier.size(18.dp))
-                            } else {
-                                Text(stringResource(R.string.residue_clear))
-                            }
-                        }
+                        )
                         clearOutcome?.let { outcome ->
                             Text(
                                 text = clearOutcomeLine(context, outcome),
@@ -5240,65 +6174,102 @@ private fun StagedResidueDialog(
                 }
             }
         },
+        // Two answers, in the order they are useful: Copy while the list is in front of you, Close once
+        // it is not. Close is the filled one because it is the answer that ends the screen - Copy is an
+        // affordance on the reading, which is why it is the quiet one here even though it is the first.
         confirmButton = {
-            TextButton(
-                enabled = reading != null && (present.isNotEmpty() || extras.isNotEmpty()),
-                onClick = {
-                    clickHaptic(view)
-                    val lines = present.map { finding ->
-                        val at = finding.reading as ResidueReading.Present
-                        "${finding.staged.name}\t${StagedResidue.sizeLabel(at.sizeBytes)}\t" +
-                            StagedResidue.ageLabelOf(at.modifiedAtMillis)
-                    } + extras.map { entry -> tempEntryLine(context, entry) }
-                    copyLogToClipboard(context, lines.joinToString("\n"))
-                },
-            ) {
-                Text(stringResource(R.string.residue_copy))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(
+                        label = R.string.residue_copy,
+                        enabled = reading != null && (present.isNotEmpty() || extras.isNotEmpty()),
+                    ) {
+                        clickHaptic(view)
+                        val lines = present.map { finding ->
+                            val at = finding.reading as ResidueReading.Present
+                            "${finding.staged.name}\t${StagedResidue.sizeLabel(at.sizeBytes)}\t" +
+                                StagedResidue.ageLabelOf(at.modifiedAtMillis)
+                        } + extras.map { entry -> tempEntryLine(context, entry) }
+                        copyLogToClipboard(context, lines.joinToString("\n"))
+                    },
+                    AppAction(R.string.action_close, AppActionRole.Priority) { onDismiss() },
+                ),
+            )
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_close))
-            }
-        },
+        dismissButton = null,
     )
 
     if (confirmingClear) {
         AlertDialog(
             onDismissRequest = { confirmingClear = false },
             title = { Text(stringResource(R.string.residue_clear_title)) },
-            text = { Text(stringResource(R.string.residue_clear_body, extras.size)) },
+            // The confirmation names both halves, and the count of what it cannot account for: emptying
+            // the temp directory takes other apps' files too, which is the one claim on this screen that
+            // is wider than this app's own residue - so it is said in the sentence that is agreed to.
+            text = { Text(stringResource(R.string.residue_clear_body, extras.size, reading?.deletablePaths?.size ?: 0)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmingClear = false
-                    clearing = true
-                    deleteOutcome = null
-                    scope.launch {
-                        val outcome = withContext(Dispatchers.IO) {
-                            StagingSweep.clearWhenQuiet(context)
-                        }
-                        // The list is the receipt, not the outcome: what the read finds afterwards is the
-                        // only thing that says whether the delete actually happened.
-                        val fresh = withContext(Dispatchers.IO) { StagedResidue.read() }
-                        report = fresh
-                        onRead(fresh)
-                        AppLog.info(AppLogTags.STAGING, outcome.clearLogLine(context))
-                        clearOutcome = outcome
-                        clearing = false
-                    }
-                }) {
-                    Text(stringResource(R.string.residue_clear_confirm))
-                }
+                // The widest deletion this app performs - it takes files it cannot account for, which
+                // may belong to another install - so it is the error colour and not the recommendation,
+                // however deliberately it was arrived at.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            confirmingClear = false
+                            deleteOutcome = null
+                            deleteAll()
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            confirmingClear = false
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    confirmingClear = false
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+            dismissButton = null,
+        )
+    }
+
+    pendingFolderClear?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingFolderClear = null },
+            // Two titles, because the two routes are not the same promise: the temp directory is emptied
+            // whole, while a named list is only the paths this app wrote. One title for both read as
+            // "delete everything in /data/system", which is the one thing this button must never be
+            // taken to mean.
+            title = {
+                Text(
+                    stringResource(
+                        if (pending.byGlob) {
+                            R.string.residue_folder_clear
+                        } else {
+                            R.string.residue_folder_clear_named_title
+                        },
+                        pending.folder.path,
+                    ),
+                )
             },
+            // What it removes and what it does not. This button sits in a heading beside two other
+            // headings, and the one thing to know before pressing it is that the other two directories
+            // are not part of it - the two routes say it in their own words, because one of them takes
+            // names this app cannot account for and the other names paths it can.
+            text = { Text(stringResource(pending.body.res, *pending.body.args.toTypedArray())) },
+            confirmButton = {
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            pendingFolderClear = null
+                            clearFolder(pending)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            pendingFolderClear = null
+                        },
+                    ),
+                )
+            },
+            dismissButton = null,
         )
     }
 
@@ -5306,24 +6277,30 @@ private fun StagedResidueDialog(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text(stringResource(R.string.residue_delete_title, pending.label)) },
-            text = { Text(stringResource(R.string.residue_delete_other)) },
+            // Which of the two warnings this is depends on the path, not on the row: what the dialog has
+            // to say is whether the file is one this app wrote, and `/data/system` and the shared
+            // directory both hold files from elsewhere.
+            text = { Text(stringResource(pending.warning)) },
             confirmButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingDelete = null
-                    deleteNow(pending)
-                }) {
-                    Text(stringResource(R.string.residue_clear_confirm))
-                }
+                // Destructive rather than dominant: this is the confirmation that exists because the
+                // file may not be this app's - either a copy of the packages.xml the phone boots from,
+                // or another install's daemon - and a deletion that needs a confirmation is not one a
+                // screen should recommend.
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.residue_clear_confirm, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            pendingDelete = null
+                            deleteNow(pending)
+                        },
+                        AppAction(R.string.action_cancel) {
+                            clickHaptic(view)
+                            pendingDelete = null
+                        },
+                    ),
+                )
             },
-            dismissButton = {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    pendingDelete = null
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
+            dismissButton = null,
         )
     }
 }
@@ -5331,12 +6308,39 @@ private fun StagedResidueDialog(
 /**
  * A row's delete, held between the button that asked and the confirmation that agrees to it.
  *
- * Only rows this app did not stage ever get here: one of its own files goes on a single tap, because the app
- * holds its own copy of everything it staged and a finished run does not need it back. A name in that
- * directory that the app did not write is a different thing to remove, and that is what the confirmation is
- * for.
+ * Only rows where a mistake would be hard to undo ever get here: one of this app's own files goes on a
+ * single tap, because the app holds its own copy of everything it staged and a finished run does not need
+ * it back - while a file in `/data/system`, or a name in the shared directory that the app did not write,
+ * is something to read twice before removing.
  */
-private data class PendingDelete(val label: String, val path: String)
+private data class PendingDelete(
+    val label: String,
+    val path: String,
+    /** What the confirmation warns about, which is a fact about where the file is. */
+    @StringRes val warning: Int,
+)
+
+/**
+ * A folder's delete, held between the button that asked and the confirmation that agrees to it.
+ *
+ * A whole folder always asks first, where a row in the temp directory does not: a row names one file whose
+ * name and age the user has just read, and this names everything in a directory - in the temp case
+ * including entries this app cannot account for, and in `/data/system` a copy of `packages.xml` that a
+ * phone boots from.
+ */
+private data class PendingFolderClear(
+    val folder: ResidueScope,
+    /**
+     * Whether the folder is emptied by glob rather than by naming paths.
+     *
+     * The temp directory goes by glob because it is the one place holding names this app did not write, and
+     * `/data/system` goes by name because every other file in it belongs to the platform or to another
+     * app. [paths] is therefore empty for the glob route, and [body] is what tells the two apart on screen.
+     */
+    val byGlob: Boolean,
+    val paths: List<String>,
+    val body: ResidueFolderSummary,
+)
 
 /** What one row's delete came to, said under the list rather than beside a row that may be gone. */
 private fun deleteOutcomeLine(context: Context, label: String, outcome: SweepOutcome): String =
@@ -5358,20 +6362,35 @@ private fun clearOutcomeLine(context: Context, outcome: SweepOutcome): String = 
     is SweepOutcome.Done -> when {
         outcome.complaint.isNotEmpty() ->
             context.getString(R.string.residue_clear_refused, outcome.complaint)
+        // A refusal and a leftover come before the kept files, because both are news about the device and
+        // the kept files are not: keeping them is the answer this app chose, on every clear.
         outcome.left.isNotEmpty() ->
             context.getString(R.string.residue_clear_left, outcome.left.size)
+        outcome.kept.isNotEmpty() ->
+            context.getString(R.string.residue_clear_done_kept, outcome.removed, outcome.kept.size)
         else -> context.getString(R.string.residue_clear_done, outcome.removed)
     }
 }
 
-/** One staged file: the name a detector matches on, then what it is and how long it has been there. */
+/**
+ * One staged file: the name a detector matches on, then what it is and how long it has been there.
+ *
+ * [deletable] is the scope's answer, not the row's: `/data/adb` is listed and never deleted from - the
+ * daemon and the modules in it are the root this app just obtained - so those rows carry no button at all
+ * rather than a disabled one, which would read as "not right now". The run's own two files are hidden the
+ * same way and for the same reason, and they are the one case where the absence of a button needs a
+ * sentence: a person who has just been told their phone has a detector's favourite names in it will look
+ * for the delete, and what they need to know is that this app will not remove these at all.
+ */
 @Composable
 private fun ResidueRow(
     finding: ResidueFinding,
+    deletable: Boolean = true,
     deleteEnabled: Boolean,
     onDelete: () -> Unit,
 ) {
     val reading = finding.reading as? ResidueReading.Present ?: return
+    val keptForTheRun = finding.staged.heldForTheRun
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(
             modifier = Modifier.weight(1f),
@@ -5392,8 +6411,28 @@ private fun ResidueRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (keptForTheRun) {
+                Text(
+                    text = stringResource(R.string.residue_row_kept),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.residue_row_kept_detail),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        ResidueDeleteButton(name = finding.staged.name, enabled = deleteEnabled, onDelete = onDelete)
+        // The run's files are not given a button whatever the caller passed: the guard is in the sweep as
+        // well, and this is the same rule said where the row is drawn.
+        if (deletable && !keptForTheRun) {
+            ResidueDeleteButton(
+                description = stringResource(R.string.residue_delete_row, finding.staged.name),
+                enabled = deleteEnabled,
+                onDelete = onDelete,
+            )
+        }
     }
 }
 
@@ -5405,7 +6444,7 @@ private fun ResidueRow(
  * to explain before anything could be deleted at all.
  */
 @Composable
-private fun ResidueDeleteButton(name: String, enabled: Boolean, onDelete: () -> Unit) {
+private fun ResidueDeleteButton(description: String, enabled: Boolean, onDelete: () -> Unit) {
     val view = LocalView.current
     IconButton(
         enabled = enabled,
@@ -5416,7 +6455,10 @@ private fun ResidueDeleteButton(name: String, enabled: Boolean, onDelete: () -> 
     ) {
         Icon(
             imageVector = Icons.Rounded.Delete,
-            contentDescription = stringResource(R.string.residue_delete_row, name),
+            // The caller's sentence, because this button is on two kinds of thing: a row, where the name
+            // is what identifies it, and a folder's heading, where what is being removed is everything
+            // inside a directory.
+            contentDescription = description,
             modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.error,
         )
@@ -5435,6 +6477,164 @@ private fun ResidueSectionLabel(text: String) {
 }
 
 /**
+ * One of the three directories, closed until it is asked for.
+ *
+ * The heading carries what the folder holds, and that is what makes closed the right default: three
+ * folders that each answer "what is in here" in one line let the one a detector found something in stand
+ * out, where a list drawn in full buries it under the two that are clean.
+ *
+ * The body sentence - why this directory matters at all - is drawn only while the folder is open, so it
+ * sits with the list it explains instead of three times over in a list nobody has read down to yet.
+ *
+ * [delete] is null when there is nothing to remove, and for `/data/adb` it is null always: everything in
+ * that directory belongs to the root implementation, so an app offering to delete from it would be
+ * offering to break the root it just obtained.
+ */
+@Composable
+private fun ResidueFolderHeading(
+    folder: ResidueScope,
+    summary: ResidueFolderSummary,
+    open: Boolean,
+    expandable: Boolean,
+    onToggle: () -> Unit,
+    delete: (() -> Unit)?,
+    deleteEnabled: Boolean,
+) {
+    val view = LocalView.current
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(enabled = expandable) {
+                        clickHaptic(view)
+                        onToggle()
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                // The arrow is absent rather than disabled over a folder with nothing in it: an
+                // invitation to a list that is not there is worse than no arrow at all.
+                if (expandable) {
+                    Icon(
+                        imageVector = if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    text = stringResource(folder.titleRes),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+            delete?.let { onDelete ->
+                ResidueDeleteButton(
+                    description = stringResource(
+                        if (folder.emptiedByGlob) {
+                            R.string.residue_folder_clear_desc
+                        } else {
+                            R.string.residue_folder_clear_named_desc
+                        },
+                        folder.path,
+                    ),
+                    enabled = deleteEnabled,
+                    onDelete = onDelete,
+                )
+            }
+        }
+        // What the folder holds, in the folder's own words for it: "empty", "none of the paths this app
+        // writes is there", and "could not be listed" are three different claims about one directory, and
+        // a heading that reduced them to one word would be the reading this screen exists to avoid.
+        Text(
+            text = stringResource(summary.res, *summary.args.toTypedArray()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (open) {
+            Text(
+                text = stringResource(folder.bodyRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * The cached p0 offset, which is the one heading on this screen that is not a folder.
+ *
+ * Shaped like the folders around it and deliberately not one of them. There is no directory to open and
+ * nothing to list: one number, what it means, and the button that takes it away. What it keeps from the
+ * folders is the part that matters to a reader - the heading always renders, and it always says what it
+ * holds, so "nothing cached" is an answer somebody can find rather than a section that was not there.
+ *
+ * [entry] is the whole of the state, and the body is drawn open rather than behind an arrow: it is two
+ * sentences about the only entry in the list that a person cannot find on the device themselves, and an
+ * explanation of an invisible thing behind a tap is an explanation nobody reads.
+ */
+@Composable
+private fun P0CacheHeading(
+    entry: P0CacheEntry?,
+    deleteEnabled: Boolean,
+    onDelete: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = stringResource(R.string.residue_scope_p0),
+                style = MaterialTheme.typography.titleSmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.weight(1f),
+            )
+            // Like a folder's heading, and unlike a row: the button is there only when there is
+            // something to take. A delete over an empty cache is a press that would do nothing and
+            // report that it had.
+            if (entry != null) {
+                ResidueDeleteButton(
+                    description = stringResource(R.string.residue_p0_delete),
+                    enabled = deleteEnabled,
+                    onDelete = onDelete,
+                )
+            }
+        }
+        val summary = entry?.summary() ?: ResidueFolderSummary(R.string.residue_p0_summary_none)
+        Text(
+            text = stringResource(summary.res, *summary.args.toTypedArray()),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.residue_scope_p0_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * What a delete-all came to, from its two halves.
+ *
+ * The temp directory is emptied by glob and everything else by name, and the screen has one line for one
+ * button - so the two are added up. A second command that never ran, or that no shell answered, is the
+ * stronger answer and replaces the first: reporting "deleted 6 entries" over a half that was refused
+ * would be the one lie this screen cannot afford.
+ */
+private fun combine(first: SweepOutcome, second: SweepOutcome?): SweepOutcome = when {
+    second == null -> first
+    second !is SweepOutcome.Done -> second
+    first !is SweepOutcome.Done -> first
+    else -> SweepOutcome.Done(
+        found = first.found + second.found,
+        left = first.left + second.left,
+        complaint = listOf(first.complaint, second.complaint)
+            .filter { it.isNotEmpty() }
+            .joinToString(", "),
+    )
+}
+
+/**
  * One entry that this app did not stage: its name, then everything that can honestly be said about it.
  *
  * Which is less than a staged row says, and deliberately so: the role is unknown by definition, and a
@@ -5444,6 +6644,8 @@ private fun ResidueSectionLabel(text: String) {
 @Composable
 private fun TempEntryRow(
     entry: TempEntry,
+    deletable: Boolean = true,
+    @StringRes roleRes: Int = R.string.residue_role_other,
     deleteEnabled: Boolean,
     onDelete: () -> Unit,
 ) {
@@ -5462,7 +6664,7 @@ private fun TempEntryRow(
             Text(
                 text = stringResource(
                     R.string.residue_row_detail,
-                    stringResource(R.string.residue_role_other),
+                    stringResource(roleRes),
                     tempEntrySizeLabel(context, entry),
                     StagedResidue.ageLabelOf(at?.modifiedAtMillis),
                 ),
@@ -5470,7 +6672,13 @@ private fun TempEntryRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        ResidueDeleteButton(name = entry.name, enabled = deleteEnabled, onDelete = onDelete)
+        if (deletable) {
+            ResidueDeleteButton(
+                description = stringResource(R.string.residue_delete_row, entry.name),
+                enabled = deleteEnabled,
+                onDelete = onDelete,
+            )
+        }
     }
 }
 
@@ -5504,14 +6712,20 @@ private fun TargetSelectionSheet(
     // the wrong target gets picked.
     var showOnlyMyDevice by remember { mutableStateOf(AppPreferences.targetFitsDeviceOnly(context)) }
     var query by rememberSaveable { mutableStateOf("") }
+    // Not remembered across visits and not stored: it is a way to find a payload of a kind, not a
+    // setting, and a sheet that reopened filtered would hide the entries somebody came back for. Which
+    // KernelSU this app will use is decided by the payload that gets picked, below - see
+    // [rememberResolvedPayload].
+    var flavorFilter by remember { mutableStateOf<KernelSuFlavor?>(null) }
     var selectedSelectionId by remember { mutableStateOf<String?>(null) }
     val view = LocalView.current
-    val visibleProfiles = remember(catalog.profiles, showOnlyMyDevice, device, query) {
+    val visibleProfiles = remember(catalog.profiles, showOnlyMyDevice, device, query, flavorFilter) {
         visibleTargets(
             profiles = catalog.profiles,
             device = device,
             fitsDeviceOnly = showOnlyMyDevice,
             query = query,
+            flavor = flavorFilter,
         )
     }
     val selectedProfile = catalog.profiles.firstOrNull { it.selectionId == selectedSelectionId }
@@ -5572,6 +6786,40 @@ private fun TargetSelectionSheet(
                 Text(stringResource(R.string.show_my_device_only), style = MaterialTheme.typography.titleMedium)
             }
 
+            // The flavour, beside the other two ways of narrowing: what a candidate stages decides which
+            // manager is built against it and which module root on boot puts back, so "show me the
+            // KernelSU-Next payloads" is the question somebody arrives with. Any is the default so the
+            // sheet opens on everything the sources carry.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                FlavorFilterChip(
+                    label = stringResource(R.string.target_flavor_any),
+                    selected = flavorFilter == null,
+                    onClick = { flavorFilter = null },
+                )
+                KernelSuFlavor.entries.forEach { flavor ->
+                    FlavorFilterChip(
+                        label = flavor.label,
+                        selected = flavorFilter == flavor,
+                        onClick = { flavorFilter = flavor },
+                    )
+                }
+            }
+            // What the name means, for whichever one is selected. The three are forks of one project
+            // with the same three-letter abbreviation in all of them, and a chip row alone asks the
+            // reader to already know which is which - which is how somebody installs the manager of a
+            // kernel they are not running. Shown only under a selection, because "Any" is not a flavour
+            // and has nothing to describe.
+            flavorFilter?.let { flavor ->
+                Text(
+                    text = stringResource(flavor.summaryRes),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             // Beside the toggle rather than over the list: with a dozen sources configured the sheet
             // can hold every device its catalogs know, and the row being looked for is found by name
             // long before it is found by scrolling.
@@ -5626,9 +6874,13 @@ private fun TargetSelectionSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(catalog.error, color = MaterialTheme.colorScheme.error)
-                    FilledTonalButton(onClick = onRetry) {
-                        Text(stringResource(R.string.action_retry))
-                    }
+                    // The sheet failed to read the catalog and this is the whole of what it offers.
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.action_retry,
+                            role = AppActionRole.Priority,
+                        ) { onRetry() },
+                    )
                 }
                 // Which of the two controls emptied the list, said rather than left to be worked out -
                 // and with the way out of it under the sentence, since a search that matches nothing
@@ -5638,27 +6890,42 @@ private fun TargetSelectionSheet(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // The most specific cause, named: a flavour with no payload for this phone is a
+                    // different answer from a search that matches nothing, and the two want different
+                    // next steps from the person reading.
                     Text(
-                        text = if (query.isBlank()) {
-                            stringResource(R.string.no_matching_devices)
-                        } else {
-                            stringResource(R.string.no_matching_devices_query, query.trim())
+                        text = when {
+                            query.isNotBlank() ->
+                                stringResource(R.string.no_matching_devices_query, query.trim())
+                            flavorFilter != null ->
+                                stringResource(R.string.no_matching_devices_flavor, flavorFilter!!.label)
+                            else -> stringResource(R.string.no_matching_devices)
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    FilledTonalButton(onClick = {
-                        clickHaptic(view)
-                        query = ""
-                        showOnlyMyDevice = false
-                        AppPreferences.setTargetFitsDeviceOnly(context, false)
-                    }) {
-                        Text(stringResource(R.string.target_show_everything))
-                    }
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.target_show_everything,
+                            role = AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            query = ""
+                            flavorFilter = null
+                            showOnlyMyDevice = false
+                            AppPreferences.setTargetFitsDeviceOnly(context, false)
+                        },
+                    )
                 }
                 else -> LazyColumn(
+                    // The remaining height, not a fixed 480 dp: the controls above this list and the
+                    // actions below it can want more than the sheet has, and when they do it is the
+                    // list that has to give - it is the one part of the sheet that scrolls, and the
+                    // row that must stay reachable is the one at the bottom. `fill = false` keeps a
+                    // short list short, so a tab with two entries still opens to a sheet that ends
+                    // where its content does rather than to one full of empty space.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 480.dp)
+                        .weight(1f, fill = false)
                         .selectableGroup(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -5763,27 +7030,22 @@ private fun TargetSelectionSheet(
             }
 
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onDismiss()
-                }, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-                Button(
-                    onClick = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_cancel) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    AppAction(
+                        label = R.string.action_next,
+                        role = AppActionRole.Priority,
+                        enabled = selectedProfile != null,
+                    ) {
                         clickHaptic(view)
                         selectedProfile?.let(onNext)
                     },
-                    enabled = selectedProfile != null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_next))
-                }
-            }
+                ),
+            )
         }
     }
 }
@@ -5860,26 +7122,28 @@ private fun CachedPayloadDialog(
                 }
             }
         },
+        // Close is filled because it is the way out of a dialog that exists to be read; Forget is the
+        // one answer here that discards something the app is holding, so it wears the error colours and
+        // is offered only when there is something to discard.
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOfNotNull(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    if (cached != null) {
+                        AppAction(R.string.cached_payload_forget, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            onForget()
+                        }
+                    } else {
+                        null
+                    },
+                ),
+            )
         },
-        dismissButton = if (cached == null) {
-            null
-        } else {
-            {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onForget()
-                }) {
-                    Text(stringResource(R.string.cached_payload_forget))
-                }
-            }
-        },
+        dismissButton = null,
     )
 }
 
@@ -5970,7 +7234,7 @@ private fun RunPlanDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // The three a user can move, as rows carrying the side that chose them - the half of the
+                // The values a user can move, as rows carrying the side that chose them - the half of the
                 // answer the raw variables below cannot give. Their values still come from the
                 // environment the run is handed, so a row cannot show a number the payload never gets.
                 val policy = display.plan.routePolicy
@@ -5991,6 +7255,17 @@ private fun RunPlanDialog(
                     display.plan.environment["SLIDE_SOURCE"]
                         ?: stringResource(R.string.run_plan_value_payload_default),
                     note = originNote(policy.slideRouteOrigin),
+                )
+                // Read out of the environment rather than out of the policy like the attempts row is,
+                // because "the payload's own" has no number to print: the row's two states are a base in
+                // milliseconds and the absence of a base, and the environment is where that absence is.
+                val windowUsec = display.plan.environment[ExploitRoutePolicy.P0_WINDOW_DELAY_ENV]
+                    ?.toIntOrNull()
+                RunPlanRow(
+                    stringResource(R.string.run_plan_p0_window),
+                    windowUsec?.let { stringResource(R.string.run_plan_p0_window_value, it / 1000) }
+                        ?: stringResource(R.string.run_plan_value_payload_default),
+                    note = originNote(policy.p0WindowOrigin),
                 )
                 val otherVariables = display.plan.environment
                     .filterKeys { it !in ExploitRoutePolicy.OVERRIDABLE_ENV_NAMES }
@@ -6043,13 +7318,16 @@ private fun RunPlanDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 
@@ -6120,24 +7398,25 @@ private fun RunLimitsDialog(
                 )
             }
         },
+        // Close leads and Reset follows it. Reset is the "other" action - not the way out of the
+        // dialog, and the one thing here that changes more than the value just tapped - but it is not
+        // destructive: it puts the three ceilings back to their defaults, and every one of them is a tap
+        // away from being moved again.
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    AppAction(R.string.run_limits_reset) {
+                        clickHaptic(view)
+                        onReset()
+                    },
+                ),
+            )
         },
-        // In the dismiss slot, which is where the "other" action belongs: it is not the way out of the
-        // dialog, and it is the one thing here that changes more than the value just tapped.
-        dismissButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onReset()
-            }) {
-                Text(stringResource(R.string.run_limits_reset))
-            }
-        },
+        dismissButton = null,
     )
 }
 
@@ -6240,6 +7519,13 @@ private fun ExploitOverrideGroup(
             label = { stringResource(routeLabelRes(it)) },
             onSelected = { onChanged(override.copy(slideRoute = it)) },
         )
+        OverrideChoiceGroup(
+            title = stringResource(R.string.run_limits_override_window),
+            options = ExploitOverride.p0WindowDelayChoices,
+            selected = override.p0WindowDelayUsec,
+            label = { p0WindowDelayLabel(it) },
+            onSelected = { onChanged(override.copy(p0WindowDelayUsec = it)) },
+        )
     }
 }
 
@@ -6282,6 +7568,20 @@ private fun originNote(origin: PolicyOrigin): String = stringResource(
         PolicyOrigin.FreshSession -> R.string.run_plan_from_fresh_session
     },
 )
+
+/**
+ * The settings label for a p0 window base: the payload's own, or the base in milliseconds.
+ *
+ * Milliseconds rather than the microseconds the payload takes, because 50000 is a number nobody reads
+ * and 50 ms is the pacing everyone already talks about. The value handed over is still the microsecond
+ * one - this is the label, and the plan prints the number the run actually gets.
+ */
+@Composable
+private fun p0WindowDelayLabel(usec: Int?): String = if (usec == null) {
+    stringResource(R.string.run_limits_window_default)
+} else {
+    stringResource(R.string.run_limits_window_value, usec / 1000)
+}
 
 /** The settings label for a route: the two raw tokens stay as the payload spells them. */
 private fun routeLabelRes(route: SlideRoute): Int = when (route) {
@@ -6418,44 +7718,48 @@ private fun LocalPayloadDialog(
                 }
             }
         },
+        // Choosing is the recommended answer even though it does not close the dialog - the picker is
+        // launched and the result comes back here - because the question this dialog asks is which file
+        // to use, and picking one is the answer to it. Remove is the one answer that discards something
+        // this app holds, so it wears the error colours and is offered only when there is a file to
+        // remove.
         confirmButton = {
-            FilledTonalButton(onClick = {
-                clickHaptic(view)
-                // Some providers report .so files as octet-stream and others as nothing usable, so
-                // the picker is left unfiltered and the import validates what comes back.
-                picker.launch(
-                    arrayOf("application/octet-stream", "application/x-sharedlib", "*/*"),
-                )
-            }) {
-                Text(
-                    stringResource(
-                        if (current == null) R.string.local_payload_choose
-                        else R.string.local_payload_replace,
-                    ),
-                )
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (current != null) {
-                    TextButton(onClick = {
+            AppDialogActions(
+                listOfNotNull(
+                    AppAction(
+                        label = if (current == null) {
+                            R.string.local_payload_choose
+                        } else {
+                            R.string.local_payload_replace
+                        },
+                        role = AppActionRole.Priority,
+                    ) {
                         clickHaptic(view)
-                        LocalPayload.clear(context)
-                        name = null
-                        error = null
-                        onNameChanged(null)
-                    }) {
-                        Text(stringResource(R.string.local_payload_remove))
-                    }
-                }
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    onDismiss()
-                }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            }
+                        // Some providers report .so files as octet-stream and others as nothing usable, so
+                        // the picker is left unfiltered and the import validates what comes back.
+                        picker.launch(
+                            arrayOf("application/octet-stream", "application/x-sharedlib", "*/*"),
+                        )
+                    },
+                    AppAction(R.string.action_cancel) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    if (current != null) {
+                        AppAction(R.string.local_payload_remove, AppActionRole.Destructive) {
+                            clickHaptic(view)
+                            LocalPayload.clear(context)
+                            name = null
+                            error = null
+                            onNameChanged(null)
+                        }
+                    } else {
+                        null
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 
@@ -6533,6 +7837,11 @@ private fun PayloadSourcesEditor(
     BackHandler {
         if (revisionPickerOpen) revisionTarget = null else onDismiss()
     }
+    // The bar goes with it, because this is a step and not a page: it takes the window, and the pill sat on
+    // the footer - Cancel and Save were both behind it, on a screen whose list is short enough to have
+    // nothing to scroll the bar away with. Claimed for as long as this is composed, so however the screen is
+    // left - saved, cancelled, or back - the bar that comes back is the one the page underneath wants.
+    FullScreenStep()
     Surface(
         modifier = Modifier.fillMaxSize().padding(padding),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -6663,42 +7972,39 @@ private fun PayloadSourcesEditor(
                     )
                 }
                 val candidateChecking = candidate != null && checking == candidate.id
-                Button(
-                    onClick = {
-                        clickHaptic(view)
-                        val source = candidate ?: return@Button
-                        if (sources.any { it.id == source.id }) {
-                            duplicate = true
+                // The shared answer button, because this press has a slow half: the check runs before
+                // anything is added, and the screen used to answer "is it working" by replacing this
+                // button's icon with a spinner - which is [AppAction.progress], and is now drawn beside
+                // the label rather than in place of the icon. The label carries the other half of it,
+                // since checking and adding are the same press.
+                AppActionButton(
+                    AppAction(
+                        label = if (candidateChecking) {
+                            R.string.payload_source_checking
                         } else {
-                            // Added only once the source has been read, so the list never holds a
-                            // repository nobody has confirmed serves a catalog.
-                            checkSource(source) {
-                                sources = sources.withSourceAdded(source)
-                                repository = ""
-                                branch = PayloadSource.DEFAULT_BRANCH
-                                duplicate = false
+                            R.string.payload_source_add_action
+                        },
+                        role = AppActionRole.Priority,
+                        enabled = candidate != null && !candidateChecking,
+                        progress = candidateChecking,
+                    ) {
+                        clickHaptic(view)
+                        candidate?.let { source ->
+                            if (sources.any { it.id == source.id }) {
+                                duplicate = true
+                            } else {
+                                // Added only once the source has been read, so the list never holds a
+                                // repository nobody has confirmed serves a catalog.
+                                checkSource(source) {
+                                    sources = sources.withSourceAdded(source)
+                                    repository = ""
+                                    branch = PayloadSource.DEFAULT_BRANCH
+                                    duplicate = false
+                                }
                             }
                         }
                     },
-                    enabled = candidate != null && !candidateChecking,
-                ) {
-                    if (candidateChecking) {
-                        LoadingIndicator(modifier = Modifier.size(18.dp))
-                    } else {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(
-                            if (candidateChecking) R.string.payload_source_checking
-                            else R.string.payload_source_add_action,
-                        ),
-                    )
-                }
+                )
             }
 
             HorizontalDivider()
@@ -6755,40 +8061,41 @@ private fun PayloadSourcesEditor(
                 )
             }
 
-            if (sources.none { it.id == PayloadSource.DEFAULT.id }) {
-                TextButton(onClick = {
-                    clickHaptic(view)
-                    sources = sources.withSourceAdded(PayloadSource.DEFAULT)
-                }) {
-                    Text(stringResource(R.string.payload_source_default))
-                }
+            val missingDefaults = PayloadSource.DEFAULTS.filter { default ->
+                sources.none { it.id == default.id }
+            }
+            if (missingDefaults.isNotEmpty()) {
+                // A link, and a quiet one: it puts back the sources every build ships with, which is a
+                // convenience inside this list rather than one of the screen's answers. Offered while any
+                // of them is missing, and it adds the ones that are - a list that kept this fork's feed and
+                // dropped the official catalog is the state this is for as much as an emptied list is.
+                AppTextAction(
+                    AppAction(R.string.payload_source_default) {
+                        clickHaptic(view)
+                        sources = sources.withSourcesAdded(missingDefaults)
+                    },
+                )
             }
 
             HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TextButton(
-                    onClick = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_cancel) {
                         clickHaptic(view)
                         onDismiss()
                     },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-                Button(
-                    onClick = {
+                    AppAction(
+                        label = R.string.action_save,
+                        role = AppActionRole.Priority,
+                        // Nothing to save until something is enabled: a list with every source off is a
+                        // list the app could not read a payload from.
+                        enabled = enabledCount > 0,
+                    ) {
                         clickHaptic(view)
                         onSave(sources)
                     },
-                    enabled = enabledCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.action_save))
-                }
-            }
+                ),
+            )
         }
     }
 }
@@ -6943,35 +8250,35 @@ private fun RevisionPicker(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        OutlinedButton(
-            onClick = {
+        // Resolving a ref is a network read, so this press is the slow one on the screen - and it is the
+        // shared answer button that answers "is it working", rather than a spinner of this screen's own
+        // standing where the search icon used to be. The guard the press had is a condition on the work
+        // instead of a return out of the button, because the body it returns from is not a builder here.
+        AppActionButton(
+            AppAction(
+                label = R.string.payload_pin_resolve,
+                enabled = manual.isNotBlank() && !applying,
+                progress = applying,
+            ) {
                 clickHaptic(view)
                 val ref = manual.trim()
-                if (ref.isEmpty() || applying) return@OutlinedButton
-                scope.launch {
-                    applying = true
-                    applyFailure = null
-                    runCatchingCancellable {
-                        withContext(Dispatchers.IO) {
-                            PayloadRepository(context).resolveNamedRevision(source.repository, ref)
-                        }
-                    }.onSuccess { commit -> choice = RevisionChoice.Commit(commit) }
-                        .onFailure { failure ->
-                            applyFailure = failure.message ?: failure.javaClass.simpleName
-                        }
-                    applying = false
+                if (ref.isNotEmpty() && !applying) {
+                    scope.launch {
+                        applying = true
+                        applyFailure = null
+                        runCatchingCancellable {
+                            withContext(Dispatchers.IO) {
+                                PayloadRepository(context).resolveNamedRevision(source.repository, ref)
+                            }
+                        }.onSuccess { commit -> choice = RevisionChoice.Commit(commit) }
+                            .onFailure { failure ->
+                                applyFailure = failure.message ?: failure.javaClass.simpleName
+                            }
+                        applying = false
+                    }
                 }
             },
-            enabled = manual.isNotBlank() && !applying,
-        ) {
-            if (applying) {
-                LoadingIndicator(modifier = Modifier.size(18.dp))
-            } else {
-                Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.payload_pin_resolve))
-        }
+        )
 
         // What the chosen revision serves, stated before it is what the source is pinned to. The
         // lists are the whole catalog's, because a pin is a decision about the catalog and not only
@@ -7008,30 +8315,26 @@ private fun RevisionPicker(
             }
         }
 
-        Button(
-            onClick = {
+        AppActionButton(
+            AppAction(
+                label = if (choice is RevisionChoice.Commit) {
+                    R.string.payload_pin_apply
+                } else {
+                    R.string.payload_pin_follow_action
+                },
+                role = AppActionRole.Priority,
+                // The one pair of actions in the app that are each other's opposite, and the icon is what
+                // tells them apart before the label is read.
+                icon = if (choice is RevisionChoice.Commit) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                // Deliberately not gated on the read having succeeded: a pin is a decision about a
+                // revision, and a network refusal while summarising it is not a reason to leave the user
+                // unable to pin or to stop following a branch at all.
+                enabled = choice != null && !reading && !applying,
+            ) {
                 clickHaptic(view)
                 onPick((choice as? RevisionChoice.Commit)?.commit)
             },
-            // Deliberately not gated on the read having succeeded: a pin is a decision about a
-            // revision, and a network refusal while summarising it is not a reason to leave the user
-            // unable to pin or to stop following a branch at all.
-            enabled = choice != null && !reading && !applying,
-        ) {
-            Icon(
-                if (choice is RevisionChoice.Commit) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (choice is RevisionChoice.Commit) {
-                    stringResource(R.string.payload_pin_apply)
-                } else {
-                    stringResource(R.string.payload_pin_follow_action)
-                },
-            )
-        }
+        )
 
         // The revision list sits below the decision, not above it. It is the longest thing on this
         // screen and the only one that is a browse rather than a choice, so putting it first pushed
@@ -7587,8 +8890,6 @@ private const val SHIZUKU_START_LOG_LINES = 14
 private val SHIZUKU_START_LOG_MAX_HEIGHT = 220.dp
 
 /** An action offered beside a card's notice: what it says it does, and what it does. */
-internal data class NoticeAction(val label: String, val onClick: () -> Unit)
-
 /**
  * The flag for a payload's KernelSU standing beside the boot's, or null when they agree or nothing is
  * known.
@@ -7649,8 +8950,11 @@ internal fun SettingsCard(
      * the one action that resolves the state directly under the line naming it, and it is deliberately
      * a *separate* control from the row: the row's own tap does what the row is for, and a warning that
      * hijacked it would make the card do something different depending on a state nobody can see.
+     *
+     * An [AppAction] like every other action in the app, drawn as the link shape - see [AppTextAction] -
+     * because a filled answer inside a card would be the card's own colour.
      */
-    noticeAction: NoticeAction? = null,
+    noticeAction: AppAction? = null,
     position: SettingsCardPosition = SettingsCardPosition.Single,
     busy: Boolean = false,
     /**
@@ -7661,23 +8965,22 @@ internal fun SettingsCard(
      * not work, where a dimmed row reads as a state.
      */
     enabled: Boolean = true,
-    onClick: () -> Unit,
+    /**
+     * What a tap on the row does, or null for a row that is a readout.
+     *
+     * A readout is a value this screen does not decide - the KernelSU flavour, which comes from the payload
+     * - and it takes no tap rather than a tap that does nothing: an empty handler is the same card with a
+     * ripple, a press and a touch target, which reads as a control that is broken.
+     */
+    onClick: (() -> Unit)? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
     val view = LocalView.current
-    Card(
-        enabled = enabled && !busy,
-        onClick = {
-            clickHaptic(view)
-            onClick()
-        },
-        modifier = modifier.fillMaxWidth(),
-        shape = expressiveClickableCardShape(interactionSource, position),
-        interactionSource = interactionSource,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-    ) {
+    val colors = CardDefaults.cardColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+    )
+    // The card's contents, written once and hung off whichever card this row turns out to be: the two
+    // differ in nothing but the tap, so a second copy of the body is a second place to keep them alike.
+    val content: @Composable () -> Unit = {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 15.dp),
         ) {
@@ -7734,15 +9037,10 @@ internal fun SettingsCard(
                 // Under the notice and centred with it, because it answers that line rather than the
                 // row: it takes its own tap without the card's, so the two do not both fire.
                 noticeAction?.let { action ->
-                    TextButton(
-                        onClick = {
-                            clickHaptic(view)
-                            action.onClick()
-                        },
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) {
-                        Text(action.label)
-                    }
+                    // The link shape rather than a filled answer: it is drawn inside the card, where a
+                    // filled button would be the card's own colour, and the card's own tap is what the row
+                    // is for - this is only the fix for the line just above it.
+                    AppTextAction(action, Modifier.align(Alignment.CenterHorizontally))
                 }
             }
             if (busy) {
@@ -7755,6 +9053,27 @@ internal fun SettingsCard(
                 )
             }
         }
+    }
+    if (onClick == null) {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            // The shape every clickable row rests at, without the animation that only a press needs.
+            shape = settingsCardRestingShape(position),
+            colors = colors,
+        ) { content() }
+    } else {
+        val interactionSource = remember { MutableInteractionSource() }
+        Card(
+            enabled = enabled && !busy,
+            onClick = {
+                clickHaptic(view)
+                onClick()
+            },
+            modifier = modifier.fillMaxWidth(),
+            shape = expressiveClickableCardShape(interactionSource, position),
+            interactionSource = interactionSource,
+            colors = colors,
+        ) { content() }
     }
 }
 
@@ -7967,9 +9286,9 @@ private fun SettingsReadingsCard(
      *
      * Unlike a [SettingsCard]'s, it does not wait for a notice: the readings above *are* the notice here,
      * and a card that restated them in a sentence before offering the button would be the same facts
-     * twice in one card.
+     * twice in one card. An [AppAction], and drawn as the link shape, for the same reason.
      */
-    action: NoticeAction? = null,
+    action: AppAction? = null,
 ) {
     val view = LocalView.current
     Card(
@@ -8037,15 +9356,7 @@ private fun SettingsReadingsCard(
             }
             action?.let { offered ->
                 Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = {
-                        clickHaptic(view)
-                        offered.onClick()
-                    },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) {
-                    Text(offered.label)
-                }
+                AppTextAction(offered, Modifier.align(Alignment.CenterHorizontally))
             }
         }
     }
@@ -8093,6 +9404,172 @@ private fun ThemeModeSelector(
             }
         }
     }
+}
+
+/** One question and its answer, in the order they are read. */
+private data class FaqEntry(@StringRes val question: Int, @StringRes val answer: Int)
+
+/**
+ * The questions this app is asked, and the answers, in the order a reader meets them.
+ *
+ * Pairs rather than a page of prose, because somebody opens this holding one of them and the answer to
+ * that one is the whole of what they need - and because a FAQ written as paragraphs is one nobody reads
+ * to the end of.
+ */
+private val faqEntries = listOf(
+    FaqEntry(R.string.faq_keep_q, R.string.faq_keep_a),
+    FaqEntry(R.string.faq_again_q, R.string.faq_again_a),
+    FaqEntry(R.string.faq_fails_q, R.string.faq_fails_a),
+    FaqEntry(R.string.faq_screen_q, R.string.faq_screen_a),
+    FaqEntry(R.string.faq_helper_q, R.string.faq_helper_a),
+    FaqEntry(R.string.faq_after_q, R.string.faq_after_a),
+    FaqEntry(R.string.faq_undo_q, R.string.faq_undo_a),
+    FaqEntry(R.string.faq_which_q, R.string.faq_which_a),
+    FaqEntry(R.string.faq_shell_q, R.string.faq_shell_a),
+)
+
+/**
+ * The questions, in the shade, over whatever screen asked for them.
+ *
+ * Scrolled rather than shortened: the list is short on purpose and the answers are sentences, but a
+ * dialog whose content can outgrow it would push its own Close button off the screen - and the answers
+ * are worth more than the button is.
+ */
+@Composable
+private fun FaqDialog(onDismiss: () -> Unit) {
+    val view = LocalView.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            DialogDimAmount(0.34f)
+            Text(stringResource(R.string.faq_title))
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                faqEntries.forEach { entry ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(stringResource(entry.question), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            stringResource(entry.answer),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
+        },
+    )
+}
+
+/**
+ * The guide, and the one thing it asks for after saying what the app does.
+ *
+ * Two steps in one dialog rather than a flow of its own: what it is for is a first launch that cannot
+ * follow the app's steps until it has been read, and a page of a flow would need the flow - a position, a
+ * back behaviour, a way back into it - for text that is read once. The second step is the notification,
+ * and it is second because the first is what says why the notification matters: a run turns the screen
+ * off, so how it went arrives there rather than on a screen nobody is looking at.
+ *
+ * Not dismissable from outside or by Back on a first launch, where [alreadyAccepted] is false: the flow
+ * behind it is a sequence with two restarts in it, and somebody who skipped the one thing that says so
+ * would be following it blind. Opened again from Home it is a page of prose, and closes like one.
+ */
+@Composable
+private fun GuideDialog(onFinish: () -> Unit, alreadyAccepted: Boolean) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val needsNotification = Build.VERSION.SDK_INT >= 33 &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
+    var step by remember { mutableStateOf(0) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { onFinish() }
+    AlertDialog(
+        onDismissRequest = { if (alreadyAccepted) onFinish() },
+        properties = DialogProperties(
+            dismissOnBackPress = alreadyAccepted,
+            dismissOnClickOutside = alreadyAccepted,
+        ),
+        title = {
+            DialogDimAmount(0.34f)
+            Text(
+                stringResource(
+                    if (step == 0) R.string.guide_title else R.string.guide_notifications_title,
+                ),
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (step == 0) {
+                    listOf(
+                        R.string.guide_what,
+                        R.string.guide_helper,
+                        R.string.guide_permanent,
+                        R.string.guide_boot,
+                        R.string.guide_screen,
+                        R.string.guide_manager,
+                    ).forEach { line -> Text(stringResource(line)) }
+                } else {
+                    Text(stringResource(R.string.guide_notifications_body))
+                }
+            }
+        },
+        confirmButton = {
+            if (step == 0) {
+                AppDialogActions(
+                    listOf(
+                        AppAction(
+                            if (alreadyAccepted) R.string.action_close else R.string.guide_accept,
+                            AppActionRole.Priority,
+                        ) {
+                            clickHaptic(view)
+                            when {
+                                // A re-read is not a first launch: it closes, and does not push the
+                                // notification step at somebody who has already answered for it.
+                                alreadyAccepted -> onFinish()
+                                needsNotification -> step = 1
+                                else -> onFinish()
+                            }
+                        },
+                    ),
+                )
+            } else {
+                AppDialogActions(
+                    listOf(
+                        AppAction(R.string.guide_notifications_allow, AppActionRole.Priority) {
+                            clickHaptic(view)
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        },
+                        AppAction(R.string.guide_notifications_later, AppActionRole.Standard) {
+                            clickHaptic(view)
+                            onFinish()
+                        },
+                    ),
+                )
+            }
+        },
+    )
 }
 
 @Composable
@@ -8172,13 +9649,16 @@ private fun AboutDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                clickHaptic(view)
-                onDismiss()
-            }) {
-                Text(stringResource(R.string.action_close))
-            }
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.action_close, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
         },
+        dismissButton = null,
     )
 }
 

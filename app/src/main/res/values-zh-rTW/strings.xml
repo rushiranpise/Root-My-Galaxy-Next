@@ -126,8 +126,6 @@
     <string name="action_next">下一步</string>
 
     <string name="advanced">進階</string>
-    <string name="advanced_mode">進階模式</string>
-    <string name="advanced_mode_description">安裝時手動選擇裝置相容的 payload</string>
     <string name="shizuku_mode">使用 Shizuku</string>
     <string name="shizuku_mode_description">使用 Shizuku 執行 payload，可能提高可靠性。</string>
     <string name="shizuku_not_running_title">Shizuku 未在執行</string>

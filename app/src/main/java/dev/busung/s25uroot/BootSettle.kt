@@ -3,6 +3,7 @@ package dev.busung.s25uroot
 import android.os.SystemClock
 import java.util.Locale
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 
 /**
  * How long after a boot a run waits before the exploit starts.
@@ -13,74 +14,64 @@ import kotlin.math.abs
  * freshly booted device, and a race attempted while the system is still settling fails for reasons the
  * payload cannot fix.
  *
- * The default is not zero. The exploit this app runs has a racy stage that a cold device makes worse,
- * and the wait costs two minutes once per boot against a failed attempt that costs the whole run. It
- * is a floor rather than a hard block: [InstallViewModel.skipBootSettle] ends the wait on the user's
- * word, because someone who knows their device just booted cleanly is better informed than a constant.
- *
- * The payload keeps a window of its own over the same boot, and it is told this run's value rather
- * than a constant of its own: see [payloadQuietWindowSeconds]. Two gates are fine when one of them is
- * derived from the other, and were not fine while both were settings nobody had compared.
+ * Off by default, and the reason the setting exists is not: the exploit this app runs has a racy stage
+ * that a cold device makes worse, so a device that wants the floor asks for it rather than having it
+ * chosen for it. It is a floor rather than a hard block: [InstallViewModel.skipBootSettle] ends the
+ * wait on the user's word, because someone who knows their device just booted cleanly is better
+ * informed than a constant.
  */
 internal object BootSettle {
-    /** What a manual run waits for unless it is told otherwise. */
-    const val DEFAULT_SECONDS = 120
+    /**
+     * What a manual run waits for unless it is told otherwise, which is the setting's own `Off`.
+     *
+     * A run starts when it is asked for, and a phone that has just booted is not held back by a
+     * constant this app chose. [allowedSeconds] is what the setting offers to a device that does want
+     * the wait.
+     */
+    const val DEFAULT_SECONDS = 0
 
     /**
-     * What an automatic run waits for, and deliberately not [DEFAULT_SECONDS].
+     * What both unattended gates wait for, and deliberately not [DEFAULT_SECONDS].
      *
-     * The two floors have different owners. The manual one is a person's setting, and its whole point
-     * is that the person watching can lower or raise it; the automatic one is this app's own claim
-     * about how settled a device has to be before it may act unattended, and it is shorter because an
-     * automatic run has already waited out the part of the boot that precedes `BOOT_COMPLETED`. If the
-     * automatic path read the manual setting, then turning automation on and finding it too slow would
-     * change what a manual run does next time - one decision quietly rewriting another.
-     */
-    const val AUTO_ROOT_DEFAULT_SECONDS = 60
-
-    /** The name the payload reads the window below under. */
-    const val PAYLOAD_QUIET_WINDOW_ENV = "P0_MIN_BOOT_UPTIME_SEC"
-
-    /**
-     * The payload's own compiled window for this, and the most an environment may ask for.
+     * One value for two gates - Root on boot and Reroot at boot - because they are the same decision
+     * about the same kind of boot: a boot that is acting with nobody at the screen. Two settings here
+     * would be two claims about how settled a device has to be before either may act, and a phone that
+     * came back unrooted because one of them was left at a value the other was not is not a thing
+     * anyone could tell apart from the exploit failing.
      *
-     * The payload waits this out before it touches the kernel, for the same reason the app waits: a
-     * cold device makes its racy stage worse. It is the ceiling rather than a setting because the
-     * only thing the app has to say about it is that this boot is further along than the payload
-     * assumes - and an override that could *raise* it would be a way to make a run hang for minutes
-     * on a device whose owner cannot see the number.
+     * Its own constant rather than [DEFAULT_SECONDS] even though the two happen to agree at zero, and
+     * the reason is the one thing the two gates do not share with a manual run: an unattended gate is
+     * woken by `BOOT_COMPLETED`, so the part of the boot that precedes it has already been waited out,
+     * and it is this boot's own elapsed time - not a pause per attempt - that both read. If an
+     * unattended gate read the manual setting, then tuning automation would silently rewrite what a
+     * manual run does next time.
      */
-    const val PAYLOAD_QUIET_WINDOW_MAX_SECONDS = 120
-
-    /**
-     * What the payload still waits when the settle gate was overridden.
-     *
-     * Not zero. The window protects the same racy stage whoever counts it, and someone overriding a
-     * two minute pause is asking for seconds rather than for none; thirty is short enough that
-     * nothing appears stuck and long enough that the allocator has stopped moving.
-     */
-    const val PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS = 30
-
-    /**
-     * The window to hand the payload, from this run's own settle decision.
-     *
-     * Derived rather than configured, because the app's gate and the payload's are one decision
-     * about one boot. A settle of `Off` means the payload does not wait either, and a settle longer
-     * than the ceiling is already satisfied by the app's own wait before the payload starts - which
-     * is what makes the two agree instead of stacking.
-     */
-    fun payloadQuietWindowSeconds(requiredSeconds: Int, overridden: Boolean): Int =
-        if (overridden) {
-            PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS
-        } else {
-            minOf(normalize(requiredSeconds), PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
-        }
+    const val GATE_DEFAULT_SECONDS = 0
 
     /**
      * What the setting offers. Rounded to these rather than free-form: a value nobody tested is not a
      * better one, and a round number is what makes the choice reviewable.
      */
     val allowedSeconds = listOf(0, 30, 60, 90, 120, 180, 300, 600)
+
+    /**
+     * The longest floor the setting can ask for, which is what a gate's own budget has to allow for.
+     *
+     * Derived from [allowedSeconds] rather than written out, because the two are one fact: a gate that
+     * budgeted for less than the setting offers would be cut off by its own timeout part-way through a
+     * wait the user had asked for, and it would report that as the gate giving up rather than as the
+     * wait it was told to do.
+     */
+    val GATE_CEILING_MILLIS: Long = allowedSeconds.max() * 1_000L
+
+    /**
+     * The tick both gates' waits report on.
+     *
+     * Never read from the clock to count the wait down: each pass reads the device's own uptime again
+     * through [remainingMillis], which is what makes a deep sleep during the wait cost nothing rather
+     * than leaving a countdown to resume where it stopped.
+     */
+    const val TICK_MILLIS = 1_000L
 
     /** The offered value nearest to [seconds], so a stored number is always one of them. */
     fun normalize(seconds: Int): Int =
@@ -114,6 +105,45 @@ internal object BootSettle {
         return String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
     }
 
+    /**
+     * Waits out the floor, reporting the countdown, and says how it ended.
+     *
+     * The same shape as [NetworkReach.awaitConnected], and split out of the two services for the same
+     * reason: both gates want one loop with one tick and one decision about a withdrawn setting, and
+     * two copies of "is this boot settled enough to act unattended" is exactly how the two of them
+     * come to disagree about it.
+     *
+     * [stillWanted] is asked on every pass and is not decoration: this is the whole of a boot gate's
+     * first minute, and the setting it exists for can be turned off from the app while it runs. The
+     * caller cannot end the wait from outside, because the wait does not return until it is over.
+     *
+     * The two endings are checked in a fixed order, and the order is the answer: a boot that is already
+     * past the floor is reported as settled even if the caller has since changed its mind, because the
+     * uptime is a fact about the device while the wait is a decision about this caller - and there is
+     * nothing left for the decision to do.
+     *
+     * [tickMillis] and [uptimeMillis] are the seams the same loop is pinned through in a local JVM
+     * test, where the passages of the loop are the subject rather than the second between them - and
+     * where the clock has to be a fake one, because the device's real uptime is a `SystemClock` call no
+     * such test can make. Both default to this object's own answer, which is the one every caller in the
+     * app takes.
+     */
+    suspend fun awaitFloor(
+        requiredSeconds: Int,
+        onWaiting: (remainingMillis: Long) -> Unit = {},
+        stillWanted: () -> Boolean = { true },
+        tickMillis: Long = TICK_MILLIS,
+        uptimeMillis: () -> Long = { elapsedMillis() },
+    ): BootSettleWait {
+        while (true) {
+            val left = remainingMillis(requiredSeconds, uptimeMillis())
+            if (left <= 0L) return BootSettleWait.Settled
+            if (!stillWanted()) return BootSettleWait.Abandoned
+            onWaiting(left)
+            delay(tickMillis)
+        }
+    }
+
     /** The setting's own label for a value, as the chooser and the run plan show it. */
     fun label(seconds: Int): String {
         val normalized = normalize(seconds)
@@ -126,4 +156,20 @@ internal object BootSettle {
             else -> "$minutes min $rest s"
         }
     }
+}
+
+/**
+ * How a gate's wait for the boot-settle floor ended.
+ *
+ * Two answers rather than a boolean, for the reason [NetworkWait] has three: "the device was settled"
+ * and "nobody wants this anymore" are different outcomes with different consequences - one lets the
+ * gate act, the other means the boot's work was withdrawn mid-wait and the gate must stop quietly
+ * rather than report a failure it did not have.
+ */
+internal enum class BootSettleWait {
+    /** The device had been up for the floor, so a gate may act. */
+    Settled,
+
+    /** The setting behind the gate was turned off during the wait, so nothing may be done. */
+    Abandoned,
 }

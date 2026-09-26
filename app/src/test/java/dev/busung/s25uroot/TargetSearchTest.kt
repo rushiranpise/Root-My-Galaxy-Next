@@ -35,6 +35,11 @@ class TargetSearchTest {
     private fun found(query: String): List<String> =
         visibleTargets(catalog, device, fitsDeviceOnly = false, query = query).map { it.profileId }
 
+    /** The same, with the flavour lens applied and nothing typed. */
+    private fun staging(flavor: KernelSuFlavor?): List<String> =
+        visibleTargets(catalog, device, fitsDeviceOnly = false, query = "", flavor = flavor)
+            .map { it.profileId }
+
     @Test
     fun `the toggle keeps only what this phone could run`() {
         assertEquals(
@@ -98,6 +103,47 @@ class TargetSearchTest {
         // the answer is nothing - which is the state the sheet names, with the way out of it.
         assertTrue(visibleTargets(catalog, device, fitsDeviceOnly = true, query = "S9210").isEmpty())
         assertEquals(listOf(otherDevice.profileId), found("S9210"))
+    }
+
+    @Test
+    fun `the flavour lens keeps only what stages it`() {
+        // The two entries that take the default flavour are one answer and the Next entry is the other,
+        // which is what makes the control useful: it is a lens on the field, not on the entry's name.
+        assertEquals(listOf(mine.profileId, otherDevice.profileId), staging(KernelSuFlavor.KernelSu))
+        assertEquals(listOf(otherKernel.profileId), staging(KernelSuFlavor.KernelSuNext))
+    }
+
+    @Test
+    fun `no flavour lens is every target rather than none`() {
+        // What the sheet opens with. A remembered or defaulted lens would hide the entries somebody
+        // reopened the sheet for, and the sheet's own state is not stored for exactly that reason.
+        assertEquals(3, staging(null).size)
+        assertEquals(staging(null), visibleTargets(catalog, device, false, "").map { it.profileId })
+    }
+
+    @Test
+    fun `the flavour narrows together with the other two controls`() {
+        // The question the two are asked together: "the Next payloads for this phone" is one answer, and
+        // "the Next payloads for some other device" is nothing - which is a state the sheet names.
+        assertTrue(
+            visibleTargets(catalog, device, fitsDeviceOnly = true, query = "", flavor = KernelSuFlavor.KernelSuNext)
+                .isEmpty(),
+        )
+        assertEquals(listOf(otherKernel.profileId), staging(KernelSuFlavor.KernelSuNext))
+        assertEquals(
+            listOf(otherKernel.profileId),
+            visibleTargets(catalog, device, false, "3.4.0", KernelSuFlavor.KernelSuNext).map { it.profileId },
+        )
+        assertTrue(visibleTargets(catalog, device, false, "S9210", KernelSuFlavor.KernelSuNext).isEmpty())
+    }
+
+    @Test
+    fun `a flavour lens is not a choice of flavour`() {
+        // The lens narrows a list and returns what it was given when it is lifted; it must not be the
+        // thing that decides which manager this app offers. That decision follows the payload that gets
+        // picked, and [PayloadDecidesFlavorTest] holds the one place that writes it.
+        assertEquals(3, staging(null).size)
+        assertEquals(staging(null), staging(KernelSuFlavor.KernelSu) + listOf(otherKernel.profileId))
     }
 
     @Test

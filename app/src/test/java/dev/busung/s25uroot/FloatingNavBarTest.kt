@@ -27,9 +27,11 @@ class FloatingNavBarTest {
             "the bar is back in the scaffold's bottom slot, which reserves a strip at the bottom of every page",
             main.contains("bottomBar ="),
         )
+        // At the shell's own depth, which is what says it is the scaffold's sibling rather than something a
+        // page draws: one indent deeper than the box, and no page is ever out at that level.
         assertTrue(
             "nothing draws the bar over the pages, so it is either missing or inside a page",
-            main.contains("\n        AppNavBar(\n"),
+            main.contains("\n            AppNavBar(\n"),
         )
     }
 
@@ -76,6 +78,45 @@ class FloatingNavBarTest {
             "the fade stops at the top of the gesture area rather than at the bottom of the screen, leaving " +
                 "the page under the bar's own inset uncovered",
             bar.indexOf(".background(") < bar.indexOf(".navigationBarsPadding()"),
+        )
+    }
+
+    @Test
+    fun `a step that takes the window takes the bar away with it`() {
+        val main = source("MainActivity.kt")
+
+        // A scroll is the only thing that moves the bar today, and a step has none: the shell would keep the
+        // pill over the step's own footer with nothing left that could bring it back.
+        assertTrue(
+            "the bar moves for a scroll and for nothing else, so a step keeps the pill over its own footer",
+            main.contains("val navBarHidden = stepOwnsWindow || navBarScrolledAway"),
+        )
+        assertTrue(
+            "nothing offers a step a way to say it has the window, and the offer is silent when it is missing",
+            main.contains("LocalFullScreenStep provides claimWindow"),
+        )
+        val editor = functionBody(main, "private fun PayloadSourcesEditor(")
+        assertTrue(
+            "the payload sources editor no longer claims the window, so the pill is back over Cancel and Save",
+            editor.contains("FullScreenStep()"),
+        )
+    }
+
+    @Test
+    fun `the way a step says it owns the window is one local, given back when the step leaves`() {
+        val owners = sourceFiles()
+            .filter { it.readText().contains("val LocalFullScreenStep") }
+            .map(File::getName)
+
+        assertEquals(
+            "the claim is defined somewhere other than beside the bar's other rule",
+            listOf("NavBarScroll.kt"),
+            owners,
+        )
+        val scroll = source("NavBarScroll.kt")
+        assertTrue(
+            "the claim is never released, so the bar would be away for the rest of the session",
+            scroll.contains("onDispose { claim(false) }"),
         )
     }
 

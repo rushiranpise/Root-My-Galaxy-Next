@@ -22,6 +22,7 @@ import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.rememberDynamicColorScheme
 import dev.busung.s25uroot.AccentColor
 import dev.busung.s25uroot.AppThemeMode
+import dev.busung.s25uroot.HelperTint
 import dev.busung.s25uroot.VerdictTint
 
 private val AppTypography = Typography(
@@ -86,6 +87,9 @@ fun RootMyGalaxyTheme(
         // The notification is drawn by the system and cannot read any of this, so the verdict colours are
         // handed over here - the one place in the app that has them as plain values.
         VerdictTint.update(colors)
+        // The same for the helper's screen, which is a different APK drawn in the platform's theme: it
+        // gets the window it is being asked to look like, not a palette of its own to keep in step.
+        HelperTint.update(colors, darkTheme)
     }
 
     MaterialExpressiveTheme(

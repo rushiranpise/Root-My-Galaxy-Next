@@ -2,9 +2,11 @@ package dev.busung.s25uroot
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.busung.s25uroot.dfr.DfrInstall
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -250,6 +252,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     private var activeRunTransport: RunTransport? = null
 
     /**
+     * Whether this run put the screen out, so that exactly one wake is asked for at its end.
+     *
+     * Volatile because the press happens on the transport's own thread while the wake is read here, where
+     * the run ends: the two are one fact, and a stale read would either leave the screen dark or press a
+     * key nobody asked for.
+     */
+    @Volatile
+    private var screenWasPutOut = false
+
+    /**
      * The ceilings this run is being held to, resolved when it started.
      *
      * Frozen like the transport and the KernelSU decision, for the same reason: a limit changed in the
@@ -261,12 +273,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     /** Set by the run screen's override while a boot-settle wait is in progress. */
     @Volatile
     private var bootSettleOverridden = false
-
-    /**
-     * The settle this run was held to, so the payload's own window can be derived from the decision
-     * the run actually made. A second setting would be a second thing to keep in step.
-     */
-    private var bootSettleRequiredSeconds = BootSettle.DEFAULT_SECONDS
 
     /**
      * Set when the user stops the run, so its cancellation is not read as a failure.
@@ -755,7 +761,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // Whether this run has already swept its staging. A run that is about to ask for a userspace
             // restart does it early, because that request ends this process - so the sweep in the finally
             // below must not then do it a second time.
-            var stagingSwept = false
             try {
                 activeStage = RunStage.Target
                 setPhase(InstallPhase.Checking, app.getString(R.string.status_checking_github))
@@ -914,6 +919,13 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     app.getString(R.string.error_pipe_budget_spent)
                 }
 
+                // The manager, and on this side of the settle below rather than after it. An install is
+                // network, `installd` and dexopt work, and the settle exists to let this boot go quiet
+                // before the exploit runs - so the churn belongs in front of the wait, not in the exploit's
+                // window. This is also why it is not left to the run-plan sheet alone: a run asked for from
+                // a notification, the boot gate or an armed retry never passes that sheet.
+                ensureManager(profile.flavor, unattended)
+
                 // Before the download, so the wait is the first thing the screen reports rather than
                 // something that appears after the payload is already staged.
                 awaitBootSettle(AppPreferences.bootSettleSeconds(app))
@@ -1057,15 +1069,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 finishHistory(
                     if (loadKernelSu) InstallRunResult.Succeeded else InstallRunResult.RootOnly,
                 )
-                // Swept here rather than left to the finally below, and the order is the whole point of
-                // this line: requesting the userspace restart ends everything this process is in the
-                // middle of, so a sweep left to the finally on a successful run never got to run a shell
-                // at all - the process was gone first. That is how a loaded root came to leave its
-                // staged helper and payload in /data/local/tmp for a detector to find, on exactly the
-                // runs that worked. Nothing staged is needed by a run that has finished: the module
-                // lives in /data/adb, and the daemon the restart reaches is the installed one.
-                stagingSwept = true
-                sweepStaging(app)
                 // Last, and only for a run that loaded KernelSU: modules take effect when the userspace
                 // is built again, and KernelSU's own soft reboot is the way that walks their lifecycle
                 // in the normal order. After the result is written, because the restart ends everything
@@ -1169,12 +1172,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             } finally {
                 activeRunShizuku = null
                 activeRunTransport = null
-                // The run is over, so its files are no longer anything but evidence: swept here rather
-                // than at the next launch because this is the one moment that knows the run has
-                // finished, including the runs that failed or were stopped. A successful run that is
-                // about to restart the userspace has already swept for the same reason, and it says so.
+                // The run is over, so its claim on this device goes with it. Nothing is deleted here:
+                // what the run staged is listed in Settings, where a person can see it and decide. The
+                // release still has to happen in this block, because the record is what makes every
+                // delete stand down while a run is in flight - and this one is not any more, whether it
+                // succeeded, failed or was stopped.
                 RunInFlight.end(app)
-                if (!stagingSwept) sweepStaging(app)
                 // The run is over. A success clears the notification, because Home's card is the account of
                 // it and a shade line saying "done" about the thing you just did is noise - but anything else
                 // stays, wearing its verdict: a run that failed while the phone was in a pocket is exactly
@@ -1194,27 +1197,19 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
                 }
+                // The other half of telling someone a run failed. The two are gated on the same endings -
+                // a stop was asked for, and a boot gate ran with nobody at the screen - so what is left is
+                // the run nobody was watching, which is the one a notification in the shade does not reach.
+                runFailureBuzz(
+                    context = app,
+                    verdict = runVerdict(mutableState.value.phase, busy = false),
+                    unattended = runIsUnattended,
+                )
+                // Last, and in its own time: the record is written and the result is in the shade by the
+                // time this starts, so the screen coming back is not part of any of it.
+                wakeTheScreenAgain()
             }
         }
-    }
-
-    /**
-     * Sweeps what the run staged, and files what came of it.
-     *
-     * The order inside is the same one the runner's own `finally` used to do inline, and it matters:
-     * `RunInFlight.end` comes first, because the record of this run exists so that no sweep takes the
-     * payload out from under it - and the run is over by the time this is called. Anything still holding
-     * a record belongs to another process's run, and the sweep stands down for that one.
-     *
-     * Called from two places now - the one that is about to end this process, and the one that catches
-     * everything else - so it is a function rather than a pair of identical paragraphs. Blocking, and on
-     * the run's own IO dispatcher, like every other shell this app runs.
-     */
-    private fun sweepStaging(context: Context): SweepOutcome {
-        RunInFlight.end(context)
-        val outcome = StagingSweep.sweepWhenQuiet(context)
-        outcome.logLine(context)?.let { line -> AppLog.info(AppLogTags.STAGING, line) }
-        return outcome
     }
 
     /**
@@ -1334,6 +1329,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
+        // Before the payload starts, which is before the race it is entering: the display waking up again is
+        // the largest thing on this phone that can reach a worklist while the exploit holds a kernel page it
+        // has already freed. See [RunScreenOff].
+        putTheScreenOut(
+            press = if (shizuku) {
+                {
+                    ShizukuController.shell(
+                        RunScreenOff.POWER_KEY_COMMAND,
+                        RunScreenOff.POWER_KEY_TIMEOUT_MILLIS,
+                    )?.exitCode
+                }
+            } else {
+                null
+            },
+        )
         val process = if (shizuku) {
             val stagedPayload = shizukuStage(payload, SHIZUKU_PAYLOAD_PATH, "755")
             ShizukuController.exec(
@@ -1355,12 +1365,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 logFile.absolutePath,
             ).redirectErrorStream(true)
             processBuilder.environment().putAll(
-                exploitEnvironment(
-                    requiresFreshP0Session,
-                    cachedP0Offset,
-                    routePolicy,
-                    payloadQuietWindowSeconds(),
-                ),
+                exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy),
             )
             processBuilder.start()
         }
@@ -1460,11 +1465,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         requiresFreshP0Session: Boolean,
         routePolicy: ExploitRoutePolicy,
     ) {
-        val bootToken = currentBootToken()
-        val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
         val logPrefix = mutableState.value.log
         val helper = nativeHelperFile()
         require(helper.isFile) { app.getString(R.string.error_helper_unavailable) }
+        val bootToken = currentBootToken()
+        val cachedP0Offset = if (requiresFreshP0Session) null else cachedP0Offset(bootToken)
 
         val totalMillis = activeCeilings.totalMillis
         // A socket handshake and a pushed upload are blocking work, and the run itself is driven from
@@ -1479,6 +1484,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     throw IllegalStateException(app.getString(R.string.error_local_adb_shell, reason))
                 }
                 appendLog(app.getString(R.string.log_local_adb_shell_ready))
+                // Through the session this run is already holding rather than a second one: the key is one
+                // command, and the window in which wireless debugging is on is the expensive part.
+                putTheScreenOut(press = { session.shell(RunScreenOff.POWER_KEY_COMMAND).exitCode })
                 session.push(helper, ADB_HELPER_PATH, executable = true)
                 session.push(payload, ADB_PAYLOAD_PATH)
                 // Ahead of the payload for the same reason as the Shizuku route: the load happens
@@ -1625,6 +1633,47 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         refreshed.forEach { packageName ->
             appendLog(app.getString(R.string.log_manager_refreshed, packageName))
         }
+        // The last thing the run does, and the one that makes the *next* boot work: the late-load above
+        // renamed the daemon out of the stage file, so nothing is left there for the next run - or for the
+        // system-uid helper after a reboot, which is the case that reads as the exploit having failed on a
+        // phone whose only problem is a file nobody rewrote.
+        //
+        // Through [runMaintenance] rather than the app's own root shell, because this is the moment the two
+        // transports differ: a run with Shizuku has its elevated shell, and a run without it has the
+        // bootstrap helper - while the app's own `su` grant is exactly what a first install has not been
+        // given, so asking for one here is a prompt nobody asked for, or a minute of waiting for it.
+        //
+        // The payload this run just loaded is named here rather than left to the staging's own sources:
+        // the only daemon that may be staged is the one this device's payload ships, and this run is
+        // holding it. The running daemon's version goes with it as the reporting line and not as the
+        // choice - a version matched two different builds on this device once already.
+        val restaged = runCatching {
+            runMaintenance(
+                DfrInstall.stageDaemonCommand(
+                    payloadDaemon = payloads.kernelSu.absolutePath,
+                    expectedVersion = KernelSuVersionProbe.read(app).daemon,
+                ),
+            )
+        }.getOrNull()
+        if (restaged != null && restaged.code == 0) {
+            appendLog(
+                listOf(app.getString(R.string.log_ksu_stage_for_next_boot), restaged.output)
+                    .filter(String::isNotBlank)
+                    .joinToString("\n"),
+            )
+        } else {
+            appendLog(
+                listOf(
+                    app.getString(R.string.log_ksu_stage_for_next_boot_failed),
+                    restaged?.output.orEmpty(),
+                ).filter(String::isNotBlank).joinToString("\n"),
+            )
+            AppLog.warn(
+                AppLogTags.KERNEL_SU,
+                "The KernelSU daemon was not written back for the next boot: a reboot without root would " +
+                    "have nothing to late-load",
+            )
+        }
     }
 
     private fun detectInstalled(): Boolean {
@@ -1652,27 +1701,32 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     /** The slide offset cached for this boot, if an earlier run found one. */
     internal fun cachedOffsetForThisBoot(): String? = cachedP0Offset(currentBootToken())
 
-    private fun cachedP0Offset(bootToken: String?): String? {
-        if (bootToken == null) return null
-        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
-        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) return null
-        return stored.getString(P0_CACHE_OFFSET, null)
-    }
+    /**
+     * The offset this boot has already won, if any.
+     *
+     * A delegate: where the number is kept, and what "this boot" is measured against, are [P0Cache]'s.
+     * All this side knows is the token, which is the same one the receipt above is written against.
+     */
+    private fun cachedP0Offset(bootToken: String?): String? = P0Cache.offsetFor(app, bootToken)
 
+    /**
+     * Records the offset a run's own output reported, for every later run in the same boot.
+     *
+     * The payload prints it on the `slide-kaslr-ok` line once it has won the leak, and it is the one
+     * number a run can pass to the next one: the p0 stage is a lottery that can take many attempts, and
+     * winning it once is enough for every later run on this boot. Reading the payload's own line back
+     * is the only way the app can know the number - it cannot compute one and has nothing else to trust.
+     *
+     * The reading happens here and the storing happens in [P0Cache], which is the split worth keeping:
+     * what the payload's line looks like is this class's business, and what a cached number is belongs
+     * to the object that now also has to hand it to a settings screen.
+     */
     private fun cacheP0Offset(bootToken: String?, log: String) {
         if (bootToken == null) return
         val match = P0_OFFSET_PATTERN.findAll(log).lastOrNull() ?: return
         val offset = match.groupValues[1].toLongOrNull(16) ?: return
         if (offset !in 0..P0_OFFSET_MAX || offset and P0_OFFSET_MASK != 0L) return
-        val value = "0x${offset.toString(16)}"
-        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
-        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) == bootToken &&
-            stored.getString(P0_CACHE_OFFSET, null) == value
-        ) return
-        stored.edit()
-            .putString(P0_CACHE_BOOT_TOKEN, bootToken)
-            .putString(P0_CACHE_OFFSET, value)
-            .apply()
+        P0Cache.store(app, bootToken, "0x${offset.toString(16)}")
     }
 
     private fun localAdbExploitCommand(
@@ -1682,12 +1736,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
-        exploitEnvironment(
-            requiresFreshP0Session,
-            cachedP0Offset,
-            routePolicy,
-            payloadQuietWindowSeconds(),
-        ).forEach { (name, value) ->
+        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
             append(name).append('=').append(shellQuote(value)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
@@ -1734,12 +1783,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
     ): Array<String> = buildList {
-        exploitEnvironment(
-            requiresFreshP0Session,
-            cachedP0Offset,
-            routePolicy,
-            payloadQuietWindowSeconds(),
-        ).forEach { (name, value) ->
+        exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy).forEach { (name, value) ->
             add("$name=$value")
         }
         add("CVE43499_ROOT_HELPER=$helperPath")
@@ -1796,6 +1840,82 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         // boot is a different process from this run, and without this it could only guess whether the
         // wall it just hit was this app's.
         AppPreferences.setReadOnlyProtectedDevices(app, kernelBootToken(), count)
+    }
+
+    /**
+     * Puts the screen out for the exploit, when the settings ask for it and this run can press the key.
+     *
+     * [press] is the way this run can press it - Shizuku's shell, or the ADB session the local run already
+     * has open - and it is the caller's because the two run paths have nothing in common but the key they
+     * send. Null is a run going the app's own way, which has no shell at all: sending an input event is the
+     * system's to allow, so a run in the app's own domain keeps its screen and the log says so rather than
+     * the setting quietly doing nothing.
+     *
+     * Never for an unattended run: nobody asked for the phone to be dark, and the boot this gate runs in
+     * may well have left the screen out already.
+     */
+    private suspend fun putTheScreenOut(press: (() -> Int?)?) {
+        if (runIsUnattended || !AppPreferences.screenOffDuringRun(app)) return
+        when (RunScreenOff.decision(interactive = screenIsInteractive(), canPress = press != null)) {
+            RunScreenOff.Decision.NoShell -> appendLog(app.getString(R.string.log_screen_off_no_shell))
+            RunScreenOff.Decision.AlreadyOut ->
+                appendLog(app.getString(R.string.log_screen_off_already_out))
+
+            RunScreenOff.Decision.Press -> {
+                // Off the run's own dispatcher, because the transport behind this is a socket or a binder
+                // and the run itself is driven from the main one.
+                val exitCode = runCatching { withContext(Dispatchers.IO) { press?.invoke() } }.getOrNull()
+                if (exitCode == 0) {
+                    screenWasPutOut = true
+                    appendLog(app.getString(R.string.log_screen_off_for_the_run))
+                } else {
+                    appendLog(app.getString(R.string.log_screen_off_failed))
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether the screen is on, which is what makes each press of the power key mean one thing.
+     *
+     * True when it cannot be read, because that is the answer that presses the key the run asked for: a
+     * screen state this could not read is one it cannot decide for, and the setting was a decision already
+     * made.
+     */
+    private fun screenIsInteractive(): Boolean =
+        runCatching { app.getSystemService(PowerManager::class.java)?.isInteractive == true }
+            .getOrDefault(true)
+
+    /**
+     * Brings the screen back after a run that put it out, in a coroutine of its own.
+     *
+     * Its own coroutine because none of this belongs to the run's completion: the record is written and the
+     * notification posted before this starts, and a transport that has to be opened again must not hold up
+     * the screen that says the run is over - nor throw where the run's own ending is unwinding. KernelSU
+     * first and Shizuku second, because a run that has just loaded KernelSU has the cheaper of the two.
+     */
+    private fun wakeTheScreenAgain() {
+        if (!screenWasPutOut) return
+        screenWasPutOut = false
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!RunScreenOff.shouldWake(interactive = screenIsInteractive())) {
+                // Somebody looked at the phone while the run finished, so there is nothing to wake - and a
+                // press now would put it out again.
+                return@launch
+            }
+            val woke = runCatching {
+                if (KernelSuRuntime.rootShell(RunScreenOff.POWER_KEY_COMMAND)?.exitCode == 0) {
+                    return@runCatching true
+                }
+                ShizukuController.shell(
+                    RunScreenOff.POWER_KEY_COMMAND,
+                    RunScreenOff.POWER_KEY_TIMEOUT_MILLIS,
+                )?.exitCode == 0
+            }.getOrDefault(false)
+            appendLog(
+                app.getString(if (woke) R.string.log_screen_on_again else R.string.log_screen_still_off),
+            )
+        }
     }
 
     private suspend fun runMaintenance(command: String): CommandResult {
@@ -1884,14 +2004,89 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
     )
 
     /**
-     * The payload's own post-boot window, from this run's settle decision.
+     * Puts the payload's own manager on the phone when there is none, before the payload runs.
      *
-     * Read where the environment is built rather than where the run starts, so a mid-run override is
-     * part of the value: the user tapping "run anyway" while the countdown is on screen is exactly the
-     * case that used to skip this app's wait and then sit out the payload's.
+     * The kernel does not need it - the manager is a plain app that talks to the loaded module over
+     * KernelSU's socket, and any version of it drives any daemon - but everything *after* a run does: a phone
+     * rooted with no manager anywhere is a phone whose root nothing on it can use, and the state this exists
+     * for is a fresh install with nothing of this flavour on it. That is why it runs here and not only on the
+     * sheet that starts a run: a run asked for from a notification, the boot gate or an armed retry never
+     * passes that sheet, and it is asking exactly the same question.
+     *
+     * **Nothing in here can fail the run.** The two outcomes that are not an install are both reported and
+     * then stepped over - a manager can be installed any time afterwards from Settings, and refusing to root
+     * a phone because an app beside it would not download would be refusing the thing the user asked for.
+     * The one state that leaves a mark is a run that finishes with no manager, which is why it is a warning
+     * rather than a note in the log nobody reads: the exploit will have worked and the phone will not be
+     * usable as rooted until that app is on it.
+     *
+     * [unattended] is the run nobody is watching. It does not open the phone's installer - a dialog on a
+     * phone with its screen off, waiting for a tap that is not coming - and it does not wait for one either.
+     * What it does do is install silently whenever a shell answers, which on the boot gate is the usual case:
+     * the gate waited for Shizuku before the run began.
      */
-    private fun payloadQuietWindowSeconds(): Int =
-        BootSettle.payloadQuietWindowSeconds(bootSettleRequiredSeconds, bootSettleOverridden)
+    private suspend fun ensureManager(flavor: KernelSuFlavor, unattended: Boolean) {
+        setPhase(InstallPhase.Checking, app.getString(R.string.status_manager_check, flavor.label))
+        val outcome = runCatching {
+            ManagerInstall.install(
+                context = app,
+                flavor = flavor,
+                // Deliberately false: this step sits immediately before a payload whose timing is delicate,
+                // and bringing wireless debugging up - a device setting, and a second adbd - is not something
+                // to do beside it. The two shell routes are tried, and the phone's installer is the fallback.
+                allowWirelessAdb = false,
+                handToInstaller = !unattended,
+                waitForInstall = !unattended,
+                onLog = { line -> appendLog("[*] $line") },
+            )
+        }.getOrElse { error ->
+            ManagerInstallOutcome(
+                flavor = flavor,
+                verdict = ManagerInstallVerdict.Failed,
+                detail = error.message ?: error.javaClass.simpleName,
+            )
+        }
+        val line = when (outcome.verdict) {
+            ManagerInstallVerdict.AlreadyInstalled -> app.getString(
+                R.string.log_manager_present,
+                app.getString(
+                    R.string.manager_present,
+                    flavor.label,
+                    outcome.version ?: app.getString(R.string.manager_version_unread),
+                ),
+            )
+            ManagerInstallVerdict.Installed -> app.getString(
+                R.string.log_manager_installed,
+                flavor.label,
+                outcome.version.orEmpty(),
+                app.getString(outcome.route?.prose ?: R.string.manager_route_root),
+            )
+            // The phone's installer was opened and no package has appeared yet. Two shapes of that, and
+            // [ManagerInstallOutcome.detail] is what tells them apart: null is an installer this run did not
+            // stay to watch, and a sentence is a wait that ran out - which is a manager this run went on
+            // without, so it is reported as one.
+            ManagerInstallVerdict.Requested -> outcome.detail?.let { reason ->
+                app.getString(R.string.log_manager_failed, flavor.label, reason)
+            } ?: app.getString(R.string.manager_handing_over, flavor.label)
+            ManagerInstallVerdict.Failed -> app.getString(
+                R.string.log_manager_failed,
+                flavor.label,
+                outcome.detail.orEmpty(),
+            )
+        }
+        appendLog(line)
+        val summary = "Manager step: ${outcome.verdict} via ${outcome.route?.name ?: "none"} " +
+            "(${flavor.label}${outcome.version?.let { " $it" }.orEmpty()})"
+        // A run that finished with no manager is the one outcome here worth a warning: everything else is
+        // either nothing to do or a manager now on the phone.
+        if (outcome.verdict == ManagerInstallVerdict.Failed ||
+            (outcome.verdict == ManagerInstallVerdict.Requested && outcome.detail != null)
+        ) {
+            AppLog.warn(RUN_LOG_TAG, "$summary - ${outcome.detail}")
+        } else {
+            AppLog.info(RUN_LOG_TAG, summary)
+        }
+    }
 
     /**
      * Holds the run until the device has been up long enough, reporting the remaining time as it goes.
@@ -1903,7 +2098,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      */
     private suspend fun awaitBootSettle(requiredSeconds: Int) {
         val required = BootSettle.normalize(requiredSeconds)
-        bootSettleRequiredSeconds = required
         if (required <= 0) return
         val remaining = BootSettle.remainingMillis(required, BootSettle.elapsedMillis())
         if (remaining <= 0L) {
@@ -1917,14 +2111,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             if (bootSettleOverridden) {
                 appendLog(app.getString(R.string.log_boot_settle_skipped))
                 AppLog.warn(RUN_LOG_TAG, "Boot settle skipped on the user's word")
-                // Says what the skip does not skip: the payload keeps a moment of its own over the same
-                // boot, and without this the pause that follows reads as a run that hung. Its own log
-                // line names the gate it used either way, so the two together account for the wait.
-                AppLog.info(
-                    RUN_LOG_TAG,
-                    "Payload still waits ${BootSettle.label(payloadQuietWindowSeconds())} " +
-                        "for the boot's allocator",
-                )
                 return
             }
             // Minutes of waiting, and the one other place a stop reaches: the settle is the longest part
@@ -1975,6 +2161,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             RunNotification.post(
                 context = app,
                 message = message,
+                phase = phase,
                 progress = installProgress(phase, failureStage = null),
                 runId = activeRunId,
             )
@@ -2101,8 +2288,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
          *
          * The `rmgnext-` prefix is the fork's own generation of names. Both installs share one
          * `/data/local/tmp`, and the names this app is free to choose are chosen apart from the ones the
-         * app it came from writes - [StagedResidue] is the whole picture, and [StagingSweep] is what
-         * reads it.
+         * app it came from writes - [StagedResidue] is the whole picture, and the residue screen reads
+         * it.
          */
         private const val ADB_HELPER_PATH = "/data/local/tmp/rmgnext-ksud-helper"
         private const val ADB_PAYLOAD_PATH = "/data/local/tmp/rmgnext-payload"
@@ -2119,8 +2306,15 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
          */
         private const val KSUD_PATH = "/data/local/tmp/ksud-s25u-kdp"
 
-        /** The copy the payload's late-load reads, and the second of the two names it owns. */
-        private const val KSUD_STAGE_PATH = "/data/local/tmp/.ksud-stage"
+        /**
+         * The copy the payload's late-load reads, and the second of the two names it owns.
+         *
+         * Read from the DFR side rather than spelled out again, because the second caller of this name made
+         * the difference visible: what is staged here is *consumed* by the late-load below, and what puts it
+         * back for the next boot is that side's own staging. Two spellings would be two files, each of which
+         * looks correct on its own.
+         */
+        private const val KSUD_STAGE_PATH = DfrInstall.DAEMON_STAGE_PATH
         private const val ADB_KSUD_PATH = KSUD_PATH
 
         private val MODULES_ASIDE_SCRIPT = """
@@ -2149,9 +2343,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val INSTALL_RECEIPT = "install_receipt"
         private const val RECEIPT_BOOT_TOKEN = "kernel_boot_id"
         private const val RECEIPT_VERIFIED = "verified"
-        private const val P0_CACHE = "p0_cache"
-        private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
-        private const val P0_CACHE_OFFSET = "offset"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
@@ -2200,15 +2391,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             // will not apply - and so a value chosen in the settings shows up in both.
             bootSettleSeconds = BootSettle.normalize(bootSettleSeconds),
             routePolicy = routePolicy,
-            // `overridden = false` because a plan is read before a run exists: the override is offered
-            // while the countdown is on screen, so the value here is the setting's own - and the run's
-            // log records what it actually handed over.
-            environment = exploitEnvironment(
-                requiresFreshP0Session,
-                cachedP0Offset,
-                routePolicy.policy,
-                BootSettle.payloadQuietWindowSeconds(bootSettleSeconds, overridden = false),
-            ),
+            environment = exploitEnvironment(requiresFreshP0Session, cachedP0Offset, routePolicy.policy),
             shizukuArguments = if (shizuku) {
                 mapOf(
                     "CVE43499_ROOT_HELPER" to SHIZUKU_HELPER_PATH,
@@ -2226,13 +2409,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             requiresFreshP0Session: Boolean,
             cachedP0Offset: String?,
             routePolicy: ExploitRoutePolicy = ExploitRoutePolicy.LEGACY,
-            // Required, with no default: a default here would have to guess the run's settle decision,
-            // and guessing it is how the app's gate and the payload's came to disagree about one boot.
-            payloadQuietWindowSec: Int,
         ): Map<String, String> = buildMap {
-            // First, because it is the wait rather than a knob: by the time the payload reads this the
-            // app has finished its own settle, and this is what the payload waits on top of it.
-            put(BootSettle.PAYLOAD_QUIET_WINDOW_ENV, payloadQuietWindowSec.toString())
             // A fresh-session profile hands its pacing to the payload, so the policy's attempt and
             // timeout budget does not apply to it. The route still does: which way the payload finds
             // the slide is a different question from how many tries it gets.
@@ -2248,6 +2425,30 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 }
             }
             routePolicy.slideRoute.env?.let { put(ExploitRoutePolicy.SLIDE_SOURCE_ENV, it) }
+            // The p0 window's base, when the policy names one - which today means a user moved it in Run
+            // limits, since the feed carries no such field. This one is unlike the three above in a way
+            // worth stating: leaving it out is not "the payload decides", it is the payload forking every
+            // attempt with the supervisor's own base (20000 us), which is what every shipped target has
+            // ever run with and no profile can change.
+            routePolicy.p0WindowDelayUsec?.let {
+                put(ExploitRoutePolicy.P0_WINDOW_DELAY_ENV, it.toString())
+            }
+            // The offset this boot already won, when the feed's policy allows the hand-over. The
+            // payload treats a supplied offset as final and returns before it prepares the p0 pipe
+            // oracle, which is the entire p0 lottery skipped - the stage that has to be won attempt
+            // after attempt otherwise, and the reason the original app roots in minutes on a device
+            // this app cannot get past that stage on. It is bounded to this boot twice over: the cache
+            // is keyed by the boot token, and a fresh-session profile never reaches this line.
+            //
+            // The hand-over was removed on 2026-09-23 after nine runs handed 0x0f0000/0x180000 died at
+            // `phys step cache gate failed`, which was read as the supplied offset breaking the stage
+            // after it. The offset is not what that gate turns on. On 2026-09-25 the artifact the
+            // original app runs died there on its own scan attempt, with no offset handed to it, and
+            // then rooted on the attempt after that - handed the offset its own scan had just won,
+            // which is this hand-over. What the gate reads is a page, and a missed write window leaves
+            // that read coming back as `dead000000000100`; no cache choice fixes it, since this device
+            // has no `kmalloc-cg-*` cache at all and the artifact that reads the shared row matches the
+            // pipe page's own cache. Winning one lottery per boot is what this app does not want.
         }
 
         private fun stripAnsi(value: String): String = ANSI_ESCAPE.replace(value, "").replace("\r", "")

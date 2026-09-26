@@ -47,6 +47,15 @@ internal object AppLogTags {
 
     /** What this app leaves on the device, read back the way another app would see it. */
     const val STAGING = "Staging"
+
+    /**
+     * The kernel check: whether this phone's kernel still carries the bug a run needs.
+     *
+     * Its own tag rather than part of [RUN], because it answers a different question - a run is about a
+     * payload this app already has, and this is about a phone it does not cover yet.
+     */
+    const val KERNEL_CHECK = "Kernel-Check"
+
     const val APP = "App"
 }
 

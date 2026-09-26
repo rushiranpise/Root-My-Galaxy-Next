@@ -124,6 +124,51 @@ class SettingsCardGroupTest {
         assertFalse("the sheet has a Surface of its own again", sheet.contains("Surface("))
     }
 
+    @Test
+    fun `the only rows that take no tap are the ones that say they are readouts`() {
+        // `onClick` has a default now, so a row that forgot it is a dead card instead of a compile error:
+        // it draws exactly like the rows around it and nothing happens when it is tapped, which is the
+        // failure this test exists for. The rows meant to be like that are the ones whose value comes from
+        // somewhere else - the KernelSU flavour, which comes from the payload, and the daemon stage file,
+        // which comes from the device - and each one's own description is what says so.
+        val readouts = sourceRoot()
+            .walkTopDown()
+            .filter { file -> file.isFile && file.extension == "kt" }
+            .flatMap { file -> cardCalls(file.readText()) }
+            .filterNot { call -> call.contains("onClick") }
+            .map { call ->
+                READOUTS.entries.firstOrNull { (_, marker) -> call.contains(marker) }?.key
+                    ?: "a row that does nothing: ${call.lineSequence().first().trim()}"
+            }
+            .sorted()
+            .toList()
+
+        assertEquals(
+            "a settings row takes no tap, and the rows that are supposed to be like that are the ones " +
+                "whose value something else decides",
+            READOUTS.keys.sorted(),
+            readouts,
+        )
+    }
+
+    /**
+     * Every `SettingsCard(` call, as the text of its own arguments.
+     *
+     * A call ends at the first line that is a lone closing bracket, which is how each of them is written -
+     * and the declaration is skipped, because a row that takes no tap is a call site and not a signature.
+     */
+    private fun cardCalls(text: String): List<String> {
+        val lines = text.lines()
+        return lines.indices
+            .filter { index ->
+                CARD_CALL.containsMatchIn(lines[index]) && !lines[index].contains("fun SettingsCard(")
+            }
+            .map { start ->
+                val end = (start + 1..lines.lastIndex).first { index -> lines[index].trim() == ")" }
+                lines.subList(start, end + 1).joinToString("\n")
+            }
+    }
+
     /**
      * The positions in the order each file declares them.
      *
@@ -155,7 +200,25 @@ class SettingsCardGroupTest {
     }
 
     private companion object {
+        /**
+         * The rows that are readouts rather than settings, each found by the title that says so.
+         *
+         * Recognised by their own title because that is what tells a reader - and this test - that the
+         * value was decided somewhere else. Adding a readout means adding it here, which is the point: the
+         * failure being caught is a row nobody meant to be dead, not a row somebody meant to add.
+         */
+        val READOUTS = linkedMapOf(
+            "the flavour readout" to "R.string.settings_ksu_flavor",
+            "the stage-file readout" to "R.string.settings_dfr_stage",
+        )
+
         /** The assignment, so a comparison in the shape helper is not read as a card. */
         val CARD_POSITION = Regex("""position = SettingsCardPosition\.(\w+)""")
+
+        /**
+         * A call rather than a name that ends in one: `openSettingsCard(` is a function about cards, and
+         * reading it as a row would put its body in the list of rows that take no tap.
+         */
+        val CARD_CALL = Regex("""(?<![\w.])SettingsCard\(""")
     }
 }

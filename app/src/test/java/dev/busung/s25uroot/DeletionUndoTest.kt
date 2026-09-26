@@ -63,29 +63,36 @@ class DeletionUndoTest {
     fun `the app's own staging is removed on one tap`() {
         val stagedRow = mainActivity().substringAfter("private fun StagedResidueDialog")
 
+        // The row decides, and only this one case decides otherwise: the temp directory's own file goes
+        // on the tap itself, because the app holds a copy of everything it staged there.
         assertTrue(
             "the row for a file this app staged does not delete on the tap itself",
-            stagedRow.contains("deleteNow(\n                                            PendingDelete("),
+            stagedRow.contains("else deleteNow(pending)"),
         )
     }
 
     @Test
-    fun `a name the app did not write is still asked about`() {
+    fun `every row that is not this app's own is asked about first`() {
         val source = mainActivity()
 
+        // Three kinds of row reach the confirmation and each says something different about why: a name
+        // the app did not write, a name both installs write, and a file inside /data/system. The warning
+        // is carried on the pending delete rather than decided per row inside the dialog, so the row that
+        // knows where the file is is the row that says what removing it means.
         assertTrue(
             "a leftover this app did not stage is no longer confirmed",
-            source.contains("pendingDelete = PendingDelete(entry.name, entry.path)"),
+            source.contains("pendingDelete = PendingDelete("),
         )
-        assertTrue(
-            "the confirmation does not say the entry is not this app's",
-            source.contains("R.string.residue_delete_other"),
-        )
-        // Two kinds of row cannot reach the same confirmation: that is the distinction being tested, and a
-        // single `mine` flag deciding it inside the dialog is how it was expressed before this.
+        listOf(
+            "R.string.residue_delete_other",
+            "R.string.residue_delete_shared",
+            "R.string.residue_delete_system",
+        ).forEach { warning ->
+            assertTrue("no row warns with $warning", source.contains(warning))
+        }
         assertFalse(
-            "the confirmation still decides what to say per row",
-            source.contains("if (pending.mine)"),
+            "the confirmation still decides what to say per path inside the dialog",
+            source.contains("if (pending.path.startsWith"),
         )
     }
 

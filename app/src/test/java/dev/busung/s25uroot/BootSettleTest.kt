@@ -1,6 +1,7 @@
 package dev.busung.s25uroot
 
 import java.util.Locale
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,53 +9,35 @@ import org.junit.Test
 class BootSettleTest {
 
     @Test
-    fun `the default is a wait, not zero`() {
-        // The gate exists because a cold device makes the racy stage worse, so shipping it off would
-        // ship it not at all.
-        assertTrue(BootSettle.DEFAULT_SECONDS > 0)
+    fun `the default is no wait at all`() {
+        // Off by default: a run starts when it is asked for. The floor exists because a cold device makes
+        // the racy stage worse, and it stays a setting rather than a constant because that is a device
+        // condition the person holding the phone is the one who knows about.
+        assertEquals(0, BootSettle.DEFAULT_SECONDS)
         assertTrue(BootSettle.allowedSeconds.contains(BootSettle.DEFAULT_SECONDS))
     }
 
     @Test
-    fun `the automatic floor is its own value, shorter than the manual one`() {
-        // Two settings, two owners: a person tuning automation is not deciding how long a manual run
-        // pauses, so the automatic floor must be able to move without the manual one following.
-        assertTrue(BootSettle.allowedSeconds.contains(BootSettle.AUTO_ROOT_DEFAULT_SECONDS))
-        assertTrue(BootSettle.AUTO_ROOT_DEFAULT_SECONDS > 0)
-        assertTrue(BootSettle.AUTO_ROOT_DEFAULT_SECONDS < BootSettle.DEFAULT_SECONDS)
+    fun `one floor serves both unattended gates, and it is not the manual one`() {
+        // Root on boot and Reroot at boot are the same decision about the same kind of boot - one that
+        // is acting with nobody at the screen - so they read one value. Two settings here would be two
+        // claims about how settled a device has to be, and a phone that stayed unrooted because they
+        // disagreed is not a thing anyone could tell apart from the exploit failing.
+        //
+        // Still its own constant rather than the manual one: both gates are woken by `BOOT_COMPLETED`,
+        // which has already waited out part of the boot, and a person tuning automation must not be
+        // changing how long a manual run pauses.
+        assertTrue(BootSettle.allowedSeconds.contains(BootSettle.GATE_DEFAULT_SECONDS))
+        assertEquals(0, BootSettle.GATE_DEFAULT_SECONDS)
     }
 
     @Test
-    fun `the payload's window is derived from the settle, not set beside it`() {
-        // Two gates over one boot are fine when one is derived from the other. The payload's ceiling
-        // is a floor the app may lower: a shorter settle has to reach it, or the payload finishes the
-        // wait the app was told to skip, and a longer one is already satisfied by the app's own wait.
-        assertEquals(60, BootSettle.payloadQuietWindowSeconds(60, overridden = false))
-        assertEquals(120, BootSettle.payloadQuietWindowSeconds(120, overridden = false))
-        assertEquals(120, BootSettle.payloadQuietWindowSeconds(600, overridden = false))
-        assertEquals(0, BootSettle.payloadQuietWindowSeconds(0, overridden = false))
-    }
-
-    @Test
-    fun `an override shortens the payload's wait as well, and not to nothing`() {
-        // The case that was broken: overriding the app's gate left the payload sleeping out its own
-        // window with nothing counting on screen and nothing in the log saying why. It still wants a
-        // moment, because the window protects the same racy stage whoever counts it.
-        val overridden =
-            BootSettle.payloadQuietWindowSeconds(BootSettle.DEFAULT_SECONDS, overridden = true)
-        assertEquals(BootSettle.PAYLOAD_QUIET_WINDOW_OVERRIDE_SECONDS, overridden)
-        assertTrue(overridden > 0)
-        assertTrue(overridden < BootSettle.DEFAULT_SECONDS)
-        assertTrue(overridden <= BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
-    }
-
-    @Test
-    fun `the payload's ceiling is a value the setting can ask for`() {
-        // The ceiling is the payload's own compiled window, and the payload refuses anything larger
-        // (`P0_MIN_BOOT_UPTIME_SEC`, bounded by that default). Something above the ceiling would be a
-        // plan row that named a number the run never handed over.
-        assertEquals(120, BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS)
-        assertTrue(BootSettle.allowedSeconds.contains(BootSettle.PAYLOAD_QUIET_WINDOW_MAX_SECONDS))
+    fun `a gate's ceiling covers the longest wait the setting offers`() {
+        // What a gate budgets its own wake lock and timeout with. A budget that followed the value in
+        // force at one boot would expire part-way through a wait the user had asked for and report it
+        // as the gate giving up, so the ceiling is the setting's own maximum, derived from it.
+        assertEquals(BootSettle.allowedSeconds.max().toLong() * 1_000L, BootSettle.GATE_CEILING_MILLIS)
+        assertTrue(BootSettle.GATE_CEILING_MILLIS >= BootSettle.GATE_DEFAULT_SECONDS * 1_000L)
     }
 
     @Test
@@ -81,6 +64,70 @@ class BootSettleTest {
     @Test
     fun `the gate is off when it is set to zero`() {
         assertEquals(0L, BootSettle.remainingMillis(0, 0L))
+    }
+
+    @Test
+    fun `the wait ends by itself once the device's own uptime reaches the floor`() = runBlocking {
+        // The clock is the device's uptime, read again on every pass rather than counted down: a phone
+        // that slept through the floor is settled the moment it wakes, where a counter of ticks would
+        // have it wait out a sleep it never spent.
+        var uptime = 90_000L
+        val reported = mutableListOf<Long>()
+        val outcome = BootSettle.awaitFloor(
+            requiredSeconds = 120,
+            onWaiting = { reported += it },
+            tickMillis = 1,
+            uptimeMillis = { uptime.also { uptime += 20_000L } },
+        )
+        assertEquals(BootSettleWait.Settled, outcome)
+        assertEquals(listOf(30_000L, 10_000L), reported)
+    }
+
+    @Test
+    fun `a device already past the floor is settled without a countdown`() = runBlocking {
+        // The common case at a `BOOT_COMPLETED` that arrives late, and the one where a message would be
+        // a notification flashing a wait nothing was going to be spent on.
+        var reported = 0
+        val outcome = BootSettle.awaitFloor(
+            requiredSeconds = 0,
+            onWaiting = { reported++ },
+            tickMillis = 1,
+            uptimeMillis = { 0L },
+        )
+        assertEquals(BootSettleWait.Settled, outcome)
+        assertEquals(0, reported)
+    }
+
+    @Test
+    fun `a caller that changes its mind ends the wait, and early`() = runBlocking {
+        // Both gates' settings can be turned off from the app during this wait, and the caller cannot
+        // end it from outside - the wait does not return until it is over.
+        var passes = 0
+        var lastReported = -1L
+        val outcome = BootSettle.awaitFloor(
+            requiredSeconds = 600,
+            onWaiting = { lastReported = it },
+            stillWanted = { passes++ < 2 },
+            tickMillis = 1,
+            uptimeMillis = { 0L },
+        )
+        assertEquals(BootSettleWait.Abandoned, outcome)
+        assertEquals("the countdown is the time left, not the floor", 600_000L, lastReported)
+        assertEquals("two passes were waited, and the third is what gave up", 3, passes)
+    }
+
+    @Test
+    fun `a device already past the floor is settled even by a caller that has given up`() = runBlocking {
+        // The two endings are checked in one order, and that order is the answer: the uptime is a fact
+        // about the device, the wait is a decision about this caller, and there is nothing left for the
+        // decision to do. The same order [NetworkReach.awaitConnected] reports a network in.
+        val outcome = BootSettle.awaitFloor(
+            requiredSeconds = 60,
+            stillWanted = { false },
+            tickMillis = 1,
+            uptimeMillis = { 120_000L },
+        )
+        assertEquals(BootSettleWait.Settled, outcome)
     }
 
     @Test

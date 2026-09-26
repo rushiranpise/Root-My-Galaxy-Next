@@ -136,8 +136,6 @@
     <string name="action_continue">Trotzdem fortfahren</string>
     <string name="action_next">Weiter</string>
     <string name="advanced">Erweitert</string>
-    <string name="advanced_mode">Erweiterter Modus</string>
-    <string name="advanced_mode_description">Während der Installation manuell eine gerätekompatible Payload auswählen</string>
     <string name="shizuku_mode">Shizuku benutzen</string>
     <string name="shizuku_mode_description">Shizuku zum Ausführen der Payload verwenden. Dies kann die Zuverlässigkeit verbessern</string>
     <string name="shizuku_not_running_title">Shizuku ist nicht aktiv</string>

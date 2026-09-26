@@ -1,5 +1,6 @@
 package dev.busung.s25uroot
 
+import dev.busung.s25uroot.dfr.DfrInstall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -8,49 +9,59 @@ import org.junit.Test
 import java.io.File
 
 /**
- * What a sweep deletes, what it refuses to, and what it is able to say about it.
+ * What a delete does, what it refuses to, and what it is able to say about it.
  *
- * The two rules worth pinning are the ones whose failure is silent. A sweep set that includes the
- * daemon breaks this boot's own repair actions, and a sweep that cannot see a run in flight deletes the
- * payload that run is executing - neither shows up as a failed assertion unless it is written as one.
+ * Nothing here runs on its own any more: the sweep that followed every run and every launch is gone, and
+ * what is left is the machinery the residue screen drives - remove these paths, empty that directory,
+ * and report what `rm` said. So the rules worth pinning are the ones that still hold: a delete stands
+ * down while a run is in flight, a name belonging to another install is one a person is asked about,
+ * and the answer is measured rather than asserted.
  */
 class StagingSweepTest {
 
     @Test
-    fun `every catalogued path is swept when this app is the only install`() {
-        // Nothing staged in /data/local/tmp outlives the run that staged it, and the daemon is the
-        // exemption worth pinning as absent: it is the largest artefact this app leaves behind and the
-        // first name a detector prints.
+    fun `every delete the app can ask for stands down for a run`() {
+        // The screen's two actions are the only deletes left, and a run is executed *out of* the temp
+        // directory: a path that reached `remove` or `clear` directly would take the payload out from
+        // under the process running it, and nothing about that failure would look like a bug.
+        val direct = sourceFiles()
+            .flatMap { file -> file.readLines().map { file.name to it } }
+            .filter { (_, line) ->
+                line.contains("StagingSweep.remove(") || line.contains("StagingSweep.clear(")
+            }
+            .map { (file, line) -> "$file: ${line.trim()}" }
+
         assertEquals(
-            StagedResidue.catalog.map { it.path }.toSet(),
-            StagingSweep.removable(otherInstallPresent = false).map { it.path }.toSet(),
+            "a delete bypasses the run-in-flight guard, so it can remove the payload of a running exploit",
+            emptyList<String>(),
+            direct,
         )
-        val names = StagingSweep.removable(false).map { it.name }
-        assertTrue(names.contains("ksud-s25u-kdp"))
-        assertTrue(names.contains(".ksud-stage"))
     }
 
     @Test
-    fun `the names both installs write are left alone while the other install is here`() {
+    fun `the names both installs write are the ones a person is asked about`() {
         // Those names are the payload's rather than either app's, so both apps write them and neither
-        // can tell whose file it is looking at. Deleting one while the other app is mid-run is deleting
-        // the payload that run is about to load, which is the one way this sweep can break something
-        // outside itself.
-        val swept = StagingSweep.removable(otherInstallPresent = true).map { it.name }.toSet()
+        // can tell whose file it is looking at. With the other install present, deleting one can break
+        // that app's run - so it is the one case in the temp directory that reaches a confirmation
+        // instead of going on a single tap.
+        val source = sourceFiles().first { it.name == "MainActivity.kt" }.readText()
 
-        StagedResidue.sharedWithTheOtherInstall.forEach { shared ->
-            assertFalse("$shared is swept even though the other install writes it", swept.contains(shared))
-        }
-        // And everything else still goes: the exemption must not become a sweep that stops sweeping.
-        val ours = StagedResidue.catalog
-            .map { it.name }
-            .filterNot { it in StagedResidue.sharedWithTheOtherInstall }
-        assertTrue("the exemption covers the whole catalogue", ours.isNotEmpty())
-        assertEquals(ours.toSet(), swept)
+        assertTrue(
+            "the temp directory's own rows no longer consult the shared names, so a file the other " +
+                "install is about to execute can be deleted on one tap",
+            source.contains("in StagedResidue.sharedWithTheOtherInstall"),
+        )
+        assertTrue(
+            "the shared rows no longer confirm first",
+            source.contains("if (ambiguous) pendingDelete = pending else deleteNow(pending)"),
+        )
+        // And the marking is a subset of the catalogue: a name that is not read cannot be reasoned about.
+        val catalogued = StagedResidue.catalog.mapTo(HashSet()) { it.name }
+        assertTrue(StagedResidue.sharedWithTheOtherInstall.all { it in catalogued })
     }
 
     @Test
-    fun `no name this app chooses is ever exempt from the sweep`() {
+    fun `no name this app chooses is ever treated as another install's`() {
         // The list is "what we may not rename", not "what we decided not to clean": a name this fork
         // picks that ended up on it would quietly shrink the sweep on every device that also has the
         // other app installed, which is the failure nobody would report.
@@ -86,8 +97,15 @@ class StagingSweepTest {
         requireNotNull(source) { "RootRecovery.kt was not found; the scan is looking at the wrong directory" }
         val text = source.readText()
 
-        // Every action in that file reaches the daemon at its installed path...
-        assertTrue(text.contains("private const val KSUD_PATH = \"/data/adb/ksud\""))
+        // Every action in that file reaches the daemon at its installed path... The declaration is no
+        // longer `private`: the clean-up's removal runs the daemon itself, beside the command that takes
+        // the certificate out of packages.xml, and it asks this object for the path rather than keeping a
+        // second copy of it - which is the same rule this test is about, one layer up.
+        assertTrue(
+            "RootRecovery no longer names the installed daemon, so what the sweep may delete is no longer " +
+                "decided by a path the actions share",
+            text.contains("const val KSUD_PATH = \"/data/adb/ksud\""),
+        )
         // ...and the reload, the only action that wants a stage file, writes it from that copy itself,
         // which is what makes the staged daemon this sweep removes unread by anything.
         assertTrue(text.contains("KSUD=\$KSUD_PATH"))
@@ -119,8 +137,8 @@ class StagingSweepTest {
 
 
     @Test
-    fun `everything a detector names as temp-root residue is swept, the daemon aside`() {
-        val swept = StagingSweep.removable(otherInstallPresent = false).map { it.name }
+    fun `everything a detector names as temp-root residue is in the list`() {
+        val swept = StagedResidue.catalog.map { it.name }
 
         assertTrue(swept.contains("rmgnext-helper"))
         assertTrue(swept.contains("rmgnext-shizuku-payload"))
@@ -218,25 +236,20 @@ class StagingSweepTest {
     }
 
     @Test
-    fun `a successful run sweeps before it asks for the restart that would end it`() {
-        // The failure this prevents is silent, and it was real: the sweep lived only in the runner's own
-        // `finally`, while a successful run asks for the userspace restart from inside the `try` - so the
-        // process was gone before the shell could answer, and a loaded root left its staged helper and
-        // payload in /data/local/tmp for a detector to find, on exactly the runs that worked. The order
-        // is the fix, so the order is what this asserts, against the source that holds it.
-        val source = sourceFiles().firstOrNull { it.name == "InstallViewModel.kt" }
-        requireNotNull(source) { "InstallViewModel.kt was not found; the scan is looking at the wrong directory" }
-        val text = source.readText()
+    fun `no run deletes anything, on any of its paths`() {
+        // This used to be the opposite test - the run had to sweep before it asked for the userspace
+        // restart, or a loaded root left its staged helper and payload in /data/local/tmp on exactly the
+        // runs that worked. The sweep is gone: deleting is a person's decision now, and what a run does at
+        // the end is release its claim on the device. So this pins the removal, because "the run cleans up
+        // after itself" is exactly the kind of behaviour somebody adds back on a quiet afternoon.
+        val runner = sourceFiles().firstOrNull { it.name == "InstallViewModel.kt" }
+        requireNotNull(runner) { "InstallViewModel.kt was not found; the scan is looking at the wrong directory" }
+        val text = runner.readText()
 
-        // The first mention of each: the success path's sweep, and the restart it has to precede.
-        val sweep = text.indexOf("sweepStaging(app)")
-        val restart = text.indexOf("RecoveryTool.SoftReboot")
-        assertTrue("the run never sweeps its staging", sweep >= 0)
-        assertTrue("the run never asks for the restart", restart >= 0)
-        assertTrue(
-            "the restart is asked for before the sweep, and the restart ends the process that sweeps",
-            sweep < restart,
-        )
+        assertFalse("a run deletes files again", text.contains("StagingSweep"))
+        // And the claim is still released, whatever else changes: every delete in the app stands down for
+        // a run in flight, so a record that outlived its run would make the screen refuse for ever.
+        assertTrue("the run no longer ends its in-flight claim", text.contains("RunInFlight.end(app)"))
     }
 
     @Test
@@ -266,11 +279,16 @@ class StagingSweepTest {
         // The difference from a sweep is the whole point of this command: a sweep names this app's own
         // paths, and a clear takes whatever is in the directory, so what it deletes cannot be written as
         // a list. Checked as the exact text, because the order is the report and only the text is true.
+        //
+        // One entry at a time rather than one `rm -rf` over the globs, and that is what the run's own two
+        // files force: both are inside that expansion and neither may go, and `rm` has no way to be told
+        // to skip a name - so the loop, the guard and the entry-per-delete are one decision.
+        val held = StagedResidue.heldForTheRun.joinToString("|")
         val expected = """
-            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; printf 'had %s\n' "${'$'}e"; done
-            rm_out=${'$'}(rm -rf -- /data/local/tmp/* /data/local/tmp/.[!.]* 2>&1)
+            rm_out=''
+            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; case "${'$'}{e##*/}" in $held) printf 'kept %s\n' "${'$'}e"; continue;; esac; printf 'had %s\n' "${'$'}e"; out=${'$'}(rm -rf -- "${'$'}e" 2>&1); [ -n "${'$'}out" ] && rm_out="${'$'}rm_out${'$'}{rm_out:+, }${'$'}out"; done
             [ -n "${'$'}rm_out" ] && printf 'said %s\n' "${'$'}rm_out"
-            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; printf 'left %s\n' "${'$'}e"; done
+            for e in /data/local/tmp/* /data/local/tmp/.[!.]*; do [ -e "${'$'}e" ] || continue; case "${'$'}{e##*/}" in $held) continue;; esac; printf 'left %s\n' "${'$'}e"; done
             exit 0
         """.trimIndent()
         assertEquals(expected, StagingSweep.clearCommand())
@@ -281,14 +299,127 @@ class StagingSweepTest {
         val command = StagingSweep.clearCommand()
         val delete = command.lineSequence().first { it.contains("rm -rf") }
 
-        // Every target is a glob inside the directory...
-        assertTrue(delete.contains("/data/local/tmp/*"))
-        assertTrue(delete.contains("/data/local/tmp/.[!.]*"))
-        // ...and the directory itself is not one of them: it belongs to the shell uid, with a mode an
-        // app has no business rewriting, and a run stages into it again afterwards.
-        assertFalse("the directory itself is a delete target", delete.contains("/data/local/tmp "))
+        // Every target is an entry the globs inside the directory produced...
+        assertTrue(command.contains("for e in /data/local/tmp/* /data/local/tmp/.[!.]*;"))
+        // ...and it is the loop's own entry that is handed to `rm`, never the directory: the directory
+        // belongs to the shell uid, with a mode an app has no business rewriting, and a run stages into it
+        // again afterwards.
+        assertEquals("\"${'$'}e\"", delete.substringAfter("rm -rf -- ").substringBefore(" 2>&1"))
         // Dot-names are staging markers here, so a clear that skipped them would leave the markers.
         assertTrue(command.trimEnd().endsWith("exit 0"))
+    }
+
+    @Test
+    fun `the files a run reads are the two this app never deletes`() {
+        // Both are read out of /data/local/tmp by code that is not this app's: the daemon's own
+        // `late-load` renames the stage copy onto /data/adb/ksud as its first act, and the staging copies
+        // the daemon from the payload's own staged copy - so a clear that took either one would cost the
+        // boot that the run it was staged for cannot be started again in. Named from `DfrInstall`'s own
+        // constants, which is the code that writes them, so a rename moves both.
+        assertEquals(
+            setOf(
+                DfrInstall.PAYLOAD_STAGED_DAEMON.substringAfterLast('/'),
+                DfrInstall.DAEMON_STAGE_PATH.substringAfterLast('/'),
+            ),
+            StagedResidue.heldForTheRun,
+        )
+        // Held and still listed: a detector's favourite names have to be reported, and both are in the
+        // directory on every device that has staged a run. Being in the catalogue is a reading, and this
+        // is the difference between it and a permission to delete.
+        val catalogued = StagedResidue.catalog.mapTo(HashSet()) { it.name }
+        StagedResidue.heldForTheRun.forEach { name ->
+            assertTrue("$name is held but not in the catalogue, so nothing reports it", name in catalogued)
+        }
+        assertEquals(
+            StagedResidue.heldForTheRun,
+            StagedResidue.catalog.filter { it.heldForTheRun }.mapTo(HashSet()) { it.name },
+        )
+    }
+
+    @Test
+    fun `a delete of a run's own file deletes nothing and says what it kept`() {
+        // The guard is inside `remove` rather than at the two screens that call it, because every delete
+        // this app performs goes through this one function - and the answer has to be a delete that did
+        // nothing rather than a refusal, since there is no state of the device on which these would go.
+        val held = listOf(DfrInstall.PAYLOAD_STAGED_DAEMON, DfrInstall.DAEMON_STAGE_PATH)
+        val outcome = StagingSweep.remove(held) as SweepOutcome.Done
+
+        assertEquals(emptyList<String>(), outcome.found)
+        assertEquals(emptyList<String>(), outcome.left)
+        assertEquals(held, outcome.kept)
+        assertEquals(0, outcome.removed)
+        // And nothing about it reads as a failure: `rm` never ran, so there is no complaint to carry.
+        assertEquals("", outcome.complaint)
+    }
+
+    @Test
+    fun `a clear leaves the files a run reads, and names them among what it left`() {
+        val command = StagingSweep.clearCommand()
+
+        // The guard is a `case` on the entry's base name, and every held name is in it...
+        assertTrue(command.contains("case \"${'$'}{e##*/}\" in"))
+        StagedResidue.heldForTheRun.forEach { name ->
+            assertTrue("$name is not in the clear's guard, so a clear would take it", command.contains(name))
+        }
+        // ...while `rm` is never handed one, which is the property the guard exists for: what it is handed
+        // is the loop's entry, and a command that named a held path on a delete line is one edit away from
+        // taking it.
+        assertEquals(
+            listOf("\"${'$'}e\""),
+            command.lineSequence()
+                .filter { it.contains("rm -rf") }
+                .map { line -> line.substringAfter("rm -rf -- ").substringBefore(" 2>&1") }
+                .toList(),
+        )
+        assertFalse(
+            "a clear went back to one `rm -rf` over the whole directory, which cannot skip a name",
+            command.contains("rm -rf -- /data/local/tmp"),
+        )
+        // What it kept is reported rather than passed over: the outcome the screen reads is built from
+        // these lines, and a directory somebody emptied that is still not empty has to say why.
+        assertEquals(
+            listOf(DfrInstall.DAEMON_STAGE_PATH),
+            StagingSweep.pathsIn(
+                "kept ${DfrInstall.DAEMON_STAGE_PATH}\nhad /data/local/tmp/rmgnext-payload\n",
+                StagingSweep.KEPT_PREFIX,
+            ),
+        )
+    }
+
+    @Test
+    fun `the kept files are not called leftovers, because one of those is a fact about the device`() {
+        // A clear that kept both files and could not remove nothing is the ordinary state of a device
+        // that has staged a run, so it has to read as the clear working - a "2 could not be deleted" line
+        // on every cleanup would teach a person to ignore the line that means it.
+        val outcome = SweepOutcome.Done(
+            found = listOf("/data/local/tmp/rmgnext-payload"),
+            left = emptyList(),
+            complaint = "",
+            kept = listOf(DfrInstall.DAEMON_STAGE_PATH, DfrInstall.PAYLOAD_STAGED_DAEMON),
+        )
+        assertEquals(SweepVerdict.Removed, outcome.verdict)
+        assertEquals(1, outcome.removed)
+    }
+
+    @Test
+    fun `the row in the temp directory offers no delete for a file a run reads`() {
+        // The screen is the other half of the guard in `remove`: a row whose button works would still be
+        // refused, and a person pressing it would be told their cleanup did nothing for no stated reason.
+        // So the button is absent and the row carries the sentence that says why.
+        val source = sourceFiles().first { it.name == "MainActivity.kt" }.readText()
+
+        assertTrue(
+            "a held file is offered for deletion again",
+            source.contains("val keptForTheRun = finding.staged.heldForTheRun"),
+        )
+        assertTrue(
+            "the row draws its delete button for a held file",
+            source.contains("if (deletable && !keptForTheRun)"),
+        )
+        assertTrue(
+            "the row no longer says why it has no button",
+            source.contains("R.string.residue_row_kept"),
+        )
     }
 
     @Test

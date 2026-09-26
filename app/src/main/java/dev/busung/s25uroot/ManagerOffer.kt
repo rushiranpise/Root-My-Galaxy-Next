@@ -89,7 +89,20 @@ internal fun offeredManager(context: Context, flavor: KernelSuFlavor): ManagerOf
  * Nothing is written when the entry declares no version, and the previous record is cleared rather than
  * kept: a payload that says nothing about its KernelSU must not leave an older payload's version behind
  * it, which would offer a manager for a daemon that is no longer the one being staged.
+ *
+ * **It also sets the flavour, and that is the point of the function now.** The flavour is not a second
+ * decision standing beside the payload; it is a summary of one. Everything that reads it - which manager
+ * package is offered and looked for, which releases the version picker lists, which module root on boot
+ * puts back - is a fact about the KernelSU this payload stages, and a setting that could disagree with the
+ * payload is a way to install the manager of a kernel this phone is not running. A phone set to
+ * KernelSU while a KernelSU-Next payload resolved for it would offer official KernelSU's manager and
+ * list tiann's releases, for a kernel only KernelSU-Next's manager can talk to. Deriving it removes that
+ * state rather than warning about it.
+ *
+ * The override is still reachable, and deliberately in one place: the payload sheet, where picking a
+ * payload of another flavour is what changes this. There is no separate switch to forget.
  */
 internal fun rememberResolvedPayload(context: Context, profile: TargetProfile) {
     AppPreferences.setPayloadKernelSuVersion(context, profile.flavor, profile.kernelSuVersion)
+    AppPreferences.setKernelsuFlavor(context, profile.flavor)
 }

@@ -53,7 +53,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,7 +63,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -378,29 +376,39 @@ private fun InstallScreen(
                         // for a followed run: that flag is in the process running it, and a button that
                         // cannot reach it is worse than no button.
                         if (installState.phase == InstallPhase.Settling && !followed) {
-                            FilledTonalButton(
-                                onClick = {
+                            AppActionButton(
+                                AppAction(
+                                    label = R.string.action_run_now,
+                                    // The recommendation of the pair while the wait runs: cutting it short
+                                    // is what someone who came back to this screen wants, and the one
+                                    // answer beside it is the way out.
+                                    role = AppActionRole.Priority,
+                                ) {
                                     clickHaptic(view)
                                     onSkipBootSettle()
                                 },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.action_run_now))
-                            }
+                                Modifier.weight(1f),
+                            )
                         }
                         // Offered for the whole run rather than only while it is busy elsewhere: it is the one
                         // way out of a run that has hung, since back is disabled for the length of one and
                         // nothing else on the screen can be pressed.
                         if (installState.busy) {
-                            FilledTonalButton(
-                                onClick = {
+                            AppActionButton(
+                                AppAction(
+                                    label = R.string.action_stop_run,
+                                    // The error colours, because stopping takes the run away - which is the
+                                    // one thing a role here says about what an answer does rather than how
+                                    // much the screen wants it. For most of a run this is the only control
+                                    // in the bar, so there is nothing for it to be the loud one against:
+                                    // filled primary would read as "carry on", which is the opposite of it.
+                                    role = AppActionRole.Destructive,
+                                ) {
                                     clickHaptic(view)
                                     onStop()
                                 },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.action_stop_run))
-                            }
+                                Modifier.weight(1f),
+                            )
                         }
                         if (!installState.busy) {
                             val waiting = waitRemaining
@@ -414,40 +422,42 @@ private fun InstallScreen(
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    TextButton(onClick = {
-                                        clickHaptic(view)
-                                        waitRemaining = null
-                                    }) {
-                                        Text(stringResource(R.string.retry_waiting_cancel))
-                                    }
-                                    Button(onClick = {
-                                        clickHaptic(view)
-                                        waitRemaining = null
-                                        onRetry()
-                                    }) {
-                                        Text(stringResource(R.string.retry_waiting_start))
-                                    }
+                                    AppActionButton(
+                                        AppAction(R.string.retry_waiting_cancel) {
+                                            clickHaptic(view)
+                                            waitRemaining = null
+                                        },
+                                    )
+                                    AppActionButton(
+                                        AppAction(
+                                            label = R.string.retry_waiting_start,
+                                            role = AppActionRole.Priority,
+                                        ) {
+                                            clickHaptic(view)
+                                            waitRemaining = null
+                                            onRetry()
+                                        },
+                                    )
                                 }
                                 installState.phase == InstallPhase.Failed ||
                                     installState.phase == InstallPhase.Stopped -> {
-                                    FilledTonalButton(
-                                        onClick = {
+                                    AppActionButton(
+                                        AppAction(R.string.action_close) {
                                             clickHaptic(view)
                                             onClose()
                                         },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text(stringResource(R.string.action_close))
-                                    }
-                                    Button(
-                                        onClick = {
+                                        Modifier.weight(1f),
+                                    )
+                                    AppActionButton(
+                                        AppAction(
+                                            label = R.string.action_retry,
+                                            role = AppActionRole.Priority,
+                                        ) {
                                             clickHaptic(view)
                                             showRetryChoice = true
                                         },
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Text(stringResource(R.string.action_retry))
-                                    }
+                                        Modifier.weight(1f),
+                                    )
                                 }
                                 else -> {
                                     // The step after a successful load, and the reason it is here rather than
@@ -458,19 +468,21 @@ private fun InstallScreen(
                                     if (installState.phase == InstallPhase.Installed) {
                                         RecoveryActionButton(
                                             tool = RecoveryTool.SoftReboot,
-                                            label = stringResource(R.string.install_load_modules),
+                                            // The label, not the sentence: the answer button resolves its
+                                            // own label, so every answer in the app is one resource.
+                                            label = R.string.install_load_modules,
                                             modifier = Modifier.weight(1f),
                                             onOpenSetting = onOpenSetting,
                                         )
                                     }
                                     // Quiet rather than filled: the restart above is the step that finishes a
                                     // load, and this is only the way out of the screen.
-                                    TextButton(onClick = {
-                                        clickHaptic(view)
-                                        onClose()
-                                    }) {
-                                        Text(stringResource(R.string.action_done))
-                                    }
+                                    AppActionButton(
+                                        AppAction(R.string.action_done) {
+                                            clickHaptic(view)
+                                            onClose()
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -628,16 +640,16 @@ private fun InstallScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    TextButton(
-                        enabled = !arming,
-                        onClick = {
+                    AppActionButton(
+                        AppAction(
+                            label = R.string.action_cancel,
+                            enabled = !arming,
+                        ) {
                             clickHaptic(view)
                             showRetryChoice = false
                         },
-                        modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
+                        Modifier.align(Alignment.End),
+                    )
                 }
             }
         }
@@ -654,12 +666,15 @@ private fun InstallScreen(
                 title = { Text(stringResource(R.string.retry_armed_title)) },
                 text = { Text(stringResource(R.string.retry_armed_body)) },
                 confirmButton = {
-                    TextButton(onClick = {
-                        clickHaptic(view)
-                        retryNotice = null
-                    }) {
-                        Text(stringResource(R.string.action_close))
-                    }
+                    // One answer, so it is the filled one: see [AppDialogActions].
+                    AppDialogActions(
+                        listOf(
+                            AppAction(R.string.action_close, AppActionRole.Priority) {
+                                clickHaptic(view)
+                                retryNotice = null
+                            },
+                        ),
+                    )
                 },
             )
         }
@@ -745,20 +760,29 @@ internal fun RetryOption(
         }
     }
     val padding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
+    // The fills come from the shared roles rather than from this file, so an answer that is not the
+    // recommended one looks the same here as it does in every other dialog - see [appActionColors].
+    // What is this screen's own is the size: two lines and a left-aligned label are more than
+    // [AppActionButton] draws, and what the answers are ranked by here is the line each one carries.
     when (emphasis) {
         RetryOptionEmphasis.Primary -> Button(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             enabled = enabled,
             contentPadding = padding,
+            colors = appActionColors(AppActionRole.Priority),
         ) {
             body()
         }
-        RetryOptionEmphasis.Secondary -> FilledTonalButton(
+        // The third tier under this one is this screen's own: [RetryOptionEmphasis.Quiet] is outlined, a
+        // step quieter than the set's floor, because these three answers are the one place in the app
+        // where a third level says something a second one cannot.
+        RetryOptionEmphasis.Secondary -> Button(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             enabled = enabled,
             contentPadding = padding,
+            colors = appActionColors(AppActionRole.Standard),
         ) {
             body()
         }
@@ -1119,40 +1143,44 @@ private fun ShizukuHoldDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = !prompt.starting,
-                onClick = {
-                    clickHaptic(view)
-                    onStartShizuku()
-                },
-            ) {
-                if (prompt.starting) {
-                    LoadingIndicator(modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(
-                    stringResource(
-                        if (prompt.starting) R.string.status_shizuku_starting else R.string.settings_shizuku_start,
-                    ),
-                )
-            }
+            // The same set shape every other screen asks with. This dialog is where the set grew its
+            // progress slot: its first answer starts something that can take a minute, and the spinner
+            // saying so used to be hand-built here - which is why this was the one question in the app
+            // whose buttons did not look like the app's.
+            AppDialogActions(
+                listOf(
+                    AppAction(
+                        label = if (prompt.starting) {
+                            R.string.status_shizuku_starting
+                        } else {
+                            R.string.settings_shizuku_start
+                        },
+                        // The recommended answer, because the run was set up to use Shizuku and this is
+                        // the one that keeps it that way.
+                        role = AppActionRole.Priority,
+                        enabled = !prompt.starting,
+                        progress = prompt.starting,
+                    ) {
+                        clickHaptic(view)
+                        onStartShizuku()
+                    },
+                    AppAction(
+                        label = R.string.action_run_without_shizuku,
+                        // Deliberately live while a start is in flight. An attempt can take a minute on a
+                        // device where it has several routes to try, and disabling the other answer for
+                        // that minute is how this question turns into a screen with nothing to press -
+                        // which is what it looked like when the start was the only thing on offer. The
+                        // view model drops a start that lands after this answer was taken, so changing
+                        // your mind mid-attempt cannot start two runs.
+                        enabled = true,
+                    ) {
+                        clickHaptic(view)
+                        onRunWithoutShizuku()
+                    },
+                ),
+            )
         },
-        dismissButton = {
-            // Deliberately live while a start is in flight. An attempt can take a minute on a device
-            // where it has several routes to try, and disabling the other answer for that minute is how
-            // this question turns into a screen with nothing to press - which is what it looked like
-            // when the start was the only thing on offer. The view model drops a start that lands after
-            // this answer was taken, so changing your mind mid-attempt cannot start two runs.
-            TextButton(
-                enabled = true,
-                onClick = {
-                    clickHaptic(view)
-                    onRunWithoutShizuku()
-                },
-            ) {
-                Text(stringResource(R.string.action_run_without_shizuku))
-            }
-        },
+        dismissButton = null,
     )
 }
 

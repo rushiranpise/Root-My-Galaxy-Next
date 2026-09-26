@@ -5,6 +5,7 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import androidx.annotation.StringRes
+import dev.busung.s25uroot.dfr.DfrInstall
 import java.util.Locale
 
 /**
@@ -54,8 +55,41 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
     /** The KernelSU daemon. */
     Daemon(R.string.residue_role_daemon),
 
+    /** A copy of `packages.xml` an inject wrote, before or during its own edit of the file. */
+    Backup(R.string.residue_role_backup),
+
+    /**
+     * A file with this project's name in it that this project's own code does not write.
+     *
+     * Named as its own role rather than given a role that would read as this app's: the daemon and the
+     * backup from the other install sit in the same directory as this app's, both are residue, and only
+     * one of them is this app clearing up after itself.
+     */
+    OtherInstall(R.string.residue_role_other_install),
+
     /** The root helper the exploit is loaded with. */
     Helper(R.string.residue_role_helper),
+
+    /**
+     * A copy of the helper *app*, left where the `shell` user can install it from.
+     *
+     * Its own role rather than [Helper], which is the binary a run pushes for the payload to load: this one
+     * exists because `pm install` reads the APK as whoever asked for it, and app storage - where this app
+     * keeps its own copy - is not readable by the `shell` user. It is a second copy of an APK the phone
+     * already has, and the list should say so rather than call it a helper binary.
+     */
+    HelperApk(R.string.residue_role_helper_apk),
+
+    /**
+     * A copy of a manager APK, left where the `shell` user can install it from.
+     *
+     * [HelperApk]'s sibling for the same reason and a different app: `pm install` reads the APK as whoever
+     * asked for it, this app's own storage is mode 0700 under its own uid, and the `shell` user therefore
+     * needs a copy in the directory it owns. What it holds is one of the three KernelSU managers rather
+     * than anything of this project's, which is worth saying in the list: the file is a download, and the
+     * one thing a reader should know about it is which app it would install.
+     */
+    ManagerApk(R.string.residue_role_manager_apk),
 
     /** The exploit payload itself. */
     Payload(R.string.residue_role_payload),
@@ -68,6 +102,16 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
 
     /** A zero-byte or timestamp-only file a staged script coordinates through. */
     Marker(R.string.residue_role_marker),
+
+    /**
+     * A staged script's own account of what it did, written for the app to read and left behind if the
+     * app never got to it.
+     *
+     * Its own role rather than a log: a log is a script talking to whoever reads it later, and this is
+     * the one file in this directory the app itself is waiting for - the difference between "the wipe
+     * ran and left these behind" and a wipe nobody can ask about.
+     */
+    Report(R.string.residue_role_report),
 
     /** A socket the staged daemon leaves open. */
     Socket(R.string.residue_role_socket),
@@ -83,6 +127,15 @@ internal enum class ResidueRole(@StringRes val labelRes: Int) {
 internal data class StagedPath(val path: String, val role: ResidueRole) {
     /** The name on the device, which is what a detector's own catalog matches on. */
     val name: String get() = path.substringAfterLast('/')
+
+    /**
+     * Whether a run reads this file, which makes it this app's never to delete.
+     *
+     * Asked of the name rather than carried as a field per entry, so that the one list in
+     * [StagedResidue.heldForTheRun] is the whole answer - a flag on each row would be a second place for
+     * the same fact to live, and the row that forgot it is the row that gets removed.
+     */
+    val heldForTheRun: Boolean get() = name in StagedResidue.heldForTheRun
 }
 
 /** What looking for a [StagedPath] found. */
@@ -121,6 +174,14 @@ internal data class TempEntry(
     val reading: ResidueReading,
     /** A directory rather than a file, which the listing cannot say and the stat can. */
     val isDirectory: Boolean = false,
+    /**
+     * The directory it was listed in, which is the temp directory unless the caller says otherwise.
+     *
+     * A parameter because this type is now used for two listings - the shared temp directory and
+     * KernelSU's own - and a path built from a constant would name the wrong one for the second, which
+     * is a delete aimed at a directory the file is not in.
+     */
+    val directory: String = StagedResidue.DIRECTORY,
 ) {
     /**
      * Where it is, put together the same way the catalogue's own paths are.
@@ -129,7 +190,7 @@ internal data class TempEntry(
      * caller keeps one spelling of the directory in the app, which is the same rule the catalogue
      * follows.
      */
-    val path: String get() = "${StagedResidue.DIRECTORY}/$name"
+    val path: String get() = "$directory/$name"
 }
 
 /** What one stat says: the reading, and the one other thing a stat can say. */
@@ -337,6 +398,13 @@ internal object StagedResidue {
         StagedPath("/data/local/tmp/.ksud-stage", ResidueRole.Daemon),
         StagedPath("/data/local/tmp/temp_su.sock", ResidueRole.Socket),
         StagedPath("/data/local/tmp/rmgnext-helper", ResidueRole.Helper),
+        // The one entry here that is named from the code that writes it rather than typed out beside it:
+        // this path is a shell-readable copy of the helper APK, and the reason it may not drift is that
+        // the install that reads it and the list that reports it would otherwise disagree silently.
+        StagedPath(DfrInstall.SHELL_INSTALL_PATH, ResidueRole.HelperApk),
+        // Named from the code that writes it, like the line above: the install that reads this file and
+        // the list that reports it would otherwise be able to disagree, silently, about one path.
+        StagedPath(ManagerInstall.SHELL_APK_PATH, ResidueRole.ManagerApk),
         StagedPath("/data/local/tmp/rmgnext-shizuku-payload", ResidueRole.Payload),
         StagedPath("/data/local/tmp/rmgnext-shizuku-exploit.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/rmgnext-ksud-helper", ResidueRole.Helper),
@@ -353,6 +421,7 @@ internal object StagedResidue {
         StagedPath("/data/local/tmp/rmgnext-reboot.sh", ResidueRole.Script),
         StagedPath("/data/local/tmp/rmgnext-reboot.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/.rmgnext-reboot-accepted", ResidueRole.Marker),
+        StagedPath("/data/local/tmp/.rmgnext-reboot-wipe", ResidueRole.Report),
         StagedPath("/data/local/tmp/rmgnext-reload-modules.sh", ResidueRole.Script),
         StagedPath("/data/local/tmp/rmgnext-reload-modules.log", ResidueRole.Log),
         StagedPath("/data/local/tmp/rmgnext-reload-modules-ksud.log", ResidueRole.Log),
@@ -416,8 +485,41 @@ internal object StagedResidue {
      * different reason: `temp_su.sock` is the daemon's, created by the staged binary rather than by
      * anything in this source tree. It is still this app's residue - it appears on a device because a
      * run of this app put the daemon there - and it is the one path no scan of this code could discover.
+     *
+     * Being in this catalogue is a reading and not a permission to delete: the two names a run reads are
+     * in here so that the screen reports them, and they are held out of every delete by
+     * [heldForTheRun].
      */
     val catalog: List<StagedPath> = staged + legacy
+
+    /**
+     * The two names in this directory a run reads, which nothing in this app may delete.
+     *
+     * A run reads these out of `/data/local/tmp` *after* this app has decided to start it, and it reads
+     * them the way the daemon's own code names them rather than the way this app does:
+     *
+     * - [DfrInstall.DAEMON_STAGE_PATH] - the copy the daemon's `late-load` renames onto `/data/adb/ksud`
+     *   as its first act. Without it a run ends with "Failed to stage ksud" *after* the module is already
+     *   in the kernel, which is a boot spent on an error the log reads as a mis-typed path.
+     * - [DfrInstall.PAYLOAD_STAGED_DAEMON] - the daemon the run's staging copies from, and the one source
+     *   it trusts: the installed `/data/adb/ksud` may be another KernelSU project's build, and a run that
+     *   hands the exploit one of those panics the kernel. Measured on the phone this was written from as
+     *   four reboots in twenty minutes, every one of them from a run whose own staged copy was gone.
+     *
+     * Neither is precious for its own sake - the next run writes both again - and that is exactly why
+     * losing one costs a boot instead of nothing. A boot that has armed the exploit cannot start a run
+     * again, so the run that follows this app's next stage is the *payload's* retry, which reads what was
+     * left here and can re-stage nothing. Deleting one of these is therefore not cleaning up: it is
+     * choosing which of the phone's boots will be spent on a failure that looks like the exploit's.
+     *
+     * Named from [DfrInstall]'s own constants, which is the code that writes them, so a rename moves both
+     * the writer and this list. On the device nothing else reads these files, which is why the names are
+     * taken as they are written rather than typed out here.
+     */
+    val heldForTheRun: Set<String> = setOf(
+        DfrInstall.PAYLOAD_STAGED_DAEMON.substringAfterLast('/'),
+        DfrInstall.DAEMON_STAGE_PATH.substringAfterLast('/'),
+    )
 
     /**
      * The names both installs write, and can therefore write at the same time.
@@ -568,6 +670,16 @@ internal object StagedDirectory {
     internal const val LISTED_MARK = "listed"
 
     /**
+     * What a shell that may not read the directory says instead.
+     *
+     * Its own word, because the alternative is the mistake this whole check exists to prevent: a shell
+     * that is denied `/data/adb` prints nothing and would otherwise look exactly like a shell that found
+     * nothing. `/data/local/tmp` is readable by the `shell` uid and `/data/adb` is root-only, so the two
+     * directories genuinely differ in who can list them - and the reading has to say which happened.
+     */
+    internal const val DENIED_MARK = "denied"
+
+    /**
      * The listing, as one command.
      *
      * A glob rather than `ls`, and both halves of the glob because a dot-name is exactly the shape a
@@ -575,12 +687,15 @@ internal object StagedDirectory {
      * glob mean nothing rather than a file called `*`. Built from [StagedResidue.DIRECTORY] so the
      * directory is named once in this source tree.
      */
-    internal fun command(): String {
-        val directory = StagedResidue.DIRECTORY
-        return "for e in $directory/* $directory/.[!.]*; do [ -e \"\$e\" ] || continue; " +
+    internal fun command(directory: String = StagedResidue.DIRECTORY): String =
+        // The readability test comes first: a glob under a directory this shell may not enter expands to
+        // itself, `[ -e ]` fails on it, and the loop prints nothing - which would be reported as an empty
+        // directory rather than as a directory this shell cannot see into.
+        "if [ -r $directory ] && [ -x $directory ]; then " +
+            "for e in $directory/* $directory/.[!.]*; do [ -e \"\$e\" ] || continue; " +
             "printf '$NAME_PREFIX%s\\n' \"\${e##*/}\"; done; " +
-            "printf '$LISTED_MARK\\n'; exit 0"
-    }
+            "printf '$LISTED_MARK\\n'; " +
+            "else printf '$DENIED_MARK\\n'; fi; exit 0"
 
     /**
      * The names in a listing's output, or null when the listing never ran.
@@ -590,6 +705,9 @@ internal object StagedDirectory {
      */
     internal fun namesIn(output: String): List<String>? {
         val lines = output.lineSequence().map { it.trim() }.toList()
+        // Refused, and said so: no answer, rather than an empty directory. The caller may still be able to
+        // ask a shell with more privilege than this one.
+        if (lines.any { it == DENIED_MARK }) return null
         if (lines.none { it == LISTED_MARK }) return null
         return lines.filter { it.startsWith(NAME_PREFIX) }
             .map { it.removePrefix(NAME_PREFIX) }
@@ -604,16 +722,25 @@ internal object StagedDirectory {
      * reading that matters: another app's view of this directory is this app's view of it. So a name
      * this app cannot stat is still reported - as [ResidueReading.Unreadable] - rather than dropped.
      */
-    fun list(): List<TempEntry>? {
-        val command = command()
-        val result = runCatching {
-            KernelSuRuntime.unprivilegedShell(command)
-                ?: KernelSuRuntime.rootShell(command, timeoutSeconds = LISTING_TIMEOUT_SECONDS)
+    fun list(directory: String = StagedResidue.DIRECTORY): List<TempEntry>? {
+        val command = command(directory)
+        // The unprivileged shell first, then root - the order the deleting side uses in reverse, and the
+        // privilege is what decides it rather than the caller: `/data/local/tmp` is owned by the `shell`
+        // uid and `/data/adb` is root-only, so a reading that only ever asked one of the two would report
+        // one of those directories as empty on a phone where it is full.
+        val names = runCatching {
+            val unprivileged = KernelSuRuntime.unprivilegedShell(command)?.let { namesIn(it.output) }
+            unprivileged ?: KernelSuRuntime.rootShell(command, timeoutSeconds = LISTING_TIMEOUT_SECONDS)
+                ?.let { namesIn(it.output) }
         }.getOrNull() ?: return null
-        val names = namesIn(result.output) ?: return null
         return names.map { name ->
-            val stat = StagedResidue.statReading("${StagedResidue.DIRECTORY}/$name")
-            TempEntry(name = name, reading = stat.reading, isDirectory = stat.isDirectory)
+            val stat = StagedResidue.statReading("$directory/$name")
+            TempEntry(
+                name = name,
+                reading = stat.reading,
+                isDirectory = stat.isDirectory,
+                directory = directory,
+            )
         }
     }
 

@@ -10,12 +10,29 @@
       cannot drop back into suspend mid-run. Missing this is a hard crash, not a degraded run.
     -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+      Asked for so a run can be promoted to what Android 16 calls a live update: the system puts it in the
+      status bar as a chip and at the top of the shade and the lock screen, which is where the two things
+      worth seeing during a run - how far along it is and the Stop button - are readable without opening
+      the app. It is not a runtime permission, and a phone that does not promote still posts the same
+      notification as an ordinary ongoing one.
+    -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!--
+      The one-shot buzz a failed run gives, which is the only vibration this app asks for itself: the taps
+      in it use the view haptic feedback, which needs no permission at all. Nothing throws without this being
+      declared - the call fails silently - so a missing line here would read as the feature never working.
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Needed to reach the device's own adbd on loopback and to discover its port.-->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!--
+      The type the boot services and the pairing service declare. It is what replaced `dataSync` on the
+      three services below, which Android 15 refuses to start from a boot broadcast.
+    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!--
       Declared but not granted by default: only a rooted device (or `adb install -g`) can grant it,
@@ -75,17 +92,52 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <!--
+          The three services the boot broadcast starts, and the one attribute they share: `specialUse`
+          rather than `dataSync`.
+
+          An app that targets Android 15 may not launch a `dataSync` foreground service from a
+          BOOT_COMPLETED receiver: the system refuses the start, the service never runs, and what the user
+          is left with is a phone that came back unrooted with nothing anywhere saying why. All three of
+          these are started only that way, and none of them is a data sync - one waits out the reboot and
+          runs the saved installation, one brings Shizuku back, and one asks the stage-two helper to load
+          KernelSU again. The remaining types either describe something else or cap the service
+          (`shortService` is a few minutes; these waits are longer), so `specialUse` is the honest one. The
+          subtype beside each is the justification Play asks for, and is read by nothing at runtime.
+        -->
         <service
             android:name=".AutoRootService"
             android:exported="false"
             android:process=":autoroot_gate"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="waits for the device to settle after a reboot, then runs the saved root installation" />
+        </service>
         <service
             android:name=".ShizukuBootService"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="starts Shizuku's server after a reboot, by root, wireless debugging or the start token" />
+        </service>
+        <!--
+          The reroot gate, in the same process as the install gate: both are started by the same boot
+          broadcast, both wait, and a process that outlives the app's own is what a boot path needs.
+        -->
+        <service
+            android:name=".DfrBootService"
+            android:exported="false"
+            android:process=":autoroot_gate"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="starts the stage-two helper after a reboot so KernelSU is loaded into it again" />
+        </service>
         <receiver
             android:name=".AutoRootBootReceiver"
             android:exported="false">
@@ -95,6 +147,9 @@
         </receiver>
         <receiver
             android:name=".AutoRootActionReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".DfrBootActionReceiver"
             android:exported="false" />
         <receiver
             android:name=".RunActionReceiver"
