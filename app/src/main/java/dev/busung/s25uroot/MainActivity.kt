@@ -301,7 +301,7 @@ class MainActivity : ComponentActivity() {
     private var exploitOverride by mutableStateOf(ExploitOverride.defaults())
     private var shizukuToken by mutableStateOf("")
     private var partitionReadOnly by mutableStateOf(false)
-    private var screenOffDuringRun by mutableStateOf(true)
+    private var screenOffDuringRun by mutableStateOf(false)
     private var payloadMode by mutableStateOf(PayloadMode.Online)
     private var notificationPermissionAsked = false
     private var batteryUnrestricted by mutableStateOf(false)

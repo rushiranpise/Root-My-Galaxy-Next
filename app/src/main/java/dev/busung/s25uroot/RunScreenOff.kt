@@ -7,8 +7,9 @@ package dev.busung.s25uroot
  * the kernel while it does. The display is the largest of those things on a phone - pixels coming back,
  * GPU work queued behind them, and the worklist that runs with it - and the project this was ported from
  * put an awake screen at the top of the causes of runs that died there, having driven the same payload
- * family. So a run puts the screen out before the payload starts and brings it back when the run is over,
- * and the notification the run already posts is what tells the result in the meantime.
+ * family. So a run can put the screen out before the payload starts and bring it back when the run is over,
+ * which is off unless [AppPreferences.screenOffDuringRun] asks for it, and the notification the run already
+ * posts is what tells the result in the meantime.
  *
  * The power key rather than the platform's own sleep, and that is the point rather than a shortcut: putting
  * a device to sleep is an act the framework licenses to the system, while a key press is something the

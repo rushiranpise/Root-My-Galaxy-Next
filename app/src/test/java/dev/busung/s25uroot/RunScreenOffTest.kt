@@ -88,6 +88,21 @@ class RunScreenOffTest {
         )
     }
 
+    @Test
+    fun `the setting is off until somebody turns it on`() {
+        // Off by default: the presses change the screen of a phone whose owner asked for a run and not for
+        // that, and a run interrupted before the wake can press again leaves the phone dark. The switch in
+        // Settings is how a person asks for it instead.
+        assertTrue(
+            "the stored default puts the screen out before anyone asked",
+            source("AppPreferences.kt").contains("prefs(context).getBoolean(SCREEN_OFF_DURING_RUN, false)"),
+        )
+        assertTrue(
+            "the switch's first frame disagrees with the stored default",
+            source("MainActivity.kt").contains("screenOffDuringRun by mutableStateOf(false)"),
+        )
+    }
+
     private fun source(name: String): String {
         val file = candidateRoots()
             .flatMap { root -> root.walkTopDown().filter { it.isFile && it.name == name }.toList() }

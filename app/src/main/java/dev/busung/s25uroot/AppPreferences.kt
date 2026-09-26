@@ -685,15 +685,17 @@ object AppPreferences {
     /**
      * Whether a run puts the screen out before the exploit starts.
      *
-     * On by default, which is not the cautious default: the reason it exists is that an awake display is
-     * the largest thing on a phone that can wake a worklist while the exploit is holding a kernel page it
-     * has freed, and a run that dies there costs the whole boot. The project this is ported from drove the
-     * same payload family and put that at the top of its crash causes. [RunScreenOff] is where the two
-     * presses happen, and a run with no shell cannot press at all - which is said in the log rather than
-     * left to look like the setting doing nothing.
+     * Off by default, because the press changes the screen of a phone whose owner asked for a run and not
+     * for that - and a run interrupted before it can press again leaves the phone dark with nobody told
+     * why. The reason it exists stands regardless: an awake display is the largest thing on a phone that
+     * can wake a worklist while the exploit is holding a kernel page it has freed, and a run that dies
+     * there costs the whole boot. The project this is ported from drove the same payload family and put
+     * that at the top of its crash causes. [RunScreenOff] is where the two presses happen, and a run with
+     * no shell cannot press at all - which is said in the log rather than left to look like the setting
+     * doing nothing.
      */
     fun screenOffDuringRun(context: Context): Boolean =
-        prefs(context).getBoolean(SCREEN_OFF_DURING_RUN, true)
+        prefs(context).getBoolean(SCREEN_OFF_DURING_RUN, false)
 
     fun setScreenOffDuringRun(context: Context, enabled: Boolean) {
         prefs(context).edit()
