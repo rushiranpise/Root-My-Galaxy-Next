@@ -164,6 +164,38 @@ class ShizukuStagingTest {
     }
 
     @Test
+    fun anIncompleteSuReadIsARouteThatDidNotRunIt() {
+        // The same refusal the Shizuku route makes, and for the same reason: `su` coming back is not its
+        // output being read. A reader still draining when its grace runs out has not read the whole of what
+        // the command said, and the part that arrived is worse than nothing - a caller greps it for a fact
+        // and reads its absence as the fact being absent, when the route may have said yes. The two routes
+        // have to answer the same way, because a caller picks between them and reads whichever spoke.
+        val body = declaration(suShellSource(), "fun run(")
+
+        assertTrue(
+            "the reader is joined without a grace, so a stalled read is waited on instead of ended: $body",
+            body.contains("reader.join(READER_GRACE_MILLIS)"),
+        )
+        // Anchored on the last join, the one on the answered path: the join inside the no-answer branch is
+        // followed by a return of its own, so a reading taken after that would pass with no refusal here.
+        val afterTheJoin = body.substringAfterLast("reader.join(READER_GRACE_MILLIS)")
+            .substringBefore("exitValue()")
+        assertTrue(
+            "a reader still running after its grace is not asked about, so `su`'s partial read is " +
+                "reported as the command's whole answer: $body",
+            afterTheJoin.contains("reader.isAlive"),
+        )
+        assertTrue(
+            "a reader still running after its grace no longer answers as a route that did not run it: $body",
+            afterTheJoin.contains("return null"),
+        )
+        assertTrue(
+            "the incomplete read is not logged, so a refused route reads as a silent one: $body",
+            afterTheJoin.contains("Log.w("),
+        )
+    }
+
+    @Test
     fun theWindowIsAskedOfTheRemoteRatherThanInheritedFromProcess() {
         // The trap this exists for: `Process.waitFor(long, TimeUnit)` is a loop around `exitValue()`, and it
         // catches only `IllegalThreadStateException` - what a *local* process throws while its child is still
@@ -200,6 +232,9 @@ class ShizukuStagingTest {
 
     private fun transportSource() =
         source("src/main/java/dev/busung/s25uroot/ShizukuController.kt")
+
+    private fun suShellSource() =
+        source("src/main/java/dev/busung/s25uroot/SuShell.kt")
 
     private fun source(relativeToApp: String): String = listOf(
         File(relativeToApp),

@@ -34,6 +34,12 @@ internal object SuShell {
      * and failed", which comes back as a result with its own exit code. The distinction matters
      * because the callers treat a missing shell and a failed command differently: one is a refusal to
      * act, the other is an action that was attempted.
+     *
+     * Null is also the answer for a command that ended while its output was still being read: `su`
+     * coming back is not its output being read, and the part that did arrive is not an account a caller
+     * can act on. [ShizukuController.shell] refuses the same shape of read for the same reason, because
+     * a caller picks between the two routes and reads whichever answered - so the two have to say it the
+     * same way.
      */
     fun run(
         command: String,
@@ -62,6 +68,14 @@ internal object SuShell {
             return null
         }
         reader.join(READER_GRACE_MILLIS)
+        if (reader.isAlive) {
+            // Left to itself rather than stopped, for the reason [ShizukuController.shell] leaves its own:
+            // the process this is reading has already ended, so the pipe closes under it - and it is a
+            // daemon, so refusing to wait for it cannot hold the app open after the run that refused has
+            // given up. The same null the window above gives, said in the same place a caller reads.
+            Log.w(TAG, "su ended before its output was fully read within ${READER_GRACE_MILLIS}ms")
+            return null
+        }
         val exitCode = runCatching { process.exitValue() }.getOrNull() ?: return null
         return ShizukuController.ShellResult(exitCode, synchronized(output) { output.toString().trim() })
     }
