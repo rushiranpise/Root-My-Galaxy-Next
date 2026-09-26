@@ -409,7 +409,7 @@
     <string name="faq_again_q">Do I have to do it again after a restart?</string>
     <string name="faq_again_a">Yes. KernelSU is loaded into the kernel afresh every boot, so run it again to get root back.</string>
     <string name="faq_fails_q">Why does a run fail sometimes?</string>
-    <string name="faq_fails_a">The exploit races the kernel, so it does not always win. Try again, and restart the phone first if several runs in a row fail.</string>
+    <string name="faq_fails_a">The exploit races the kernel, so it does not always win. Try again, and restart the phone first if several runs in a row fail. If it keeps failing, the kernel check on Home says whether this phone can be rooted at all.</string>
     <string name="faq_screen_q">Why did the screen go off?</string>
     <string name="faq_screen_a">A run turns the screen off so nothing else wakes the phone up while the exploit runs. The result comes to the notification.</string>
     <string name="faq_helper_q">Why was a second app installed?</string>
@@ -422,6 +422,71 @@
     <string name="faq_which_a">The ones the payload repository lists for this exact model and kernel. The app refuses anything else.</string>
     <string name="faq_shell_q">Do I need Shizuku?</string>
     <string name="faq_shell_a">Some steps need a shell on the phone, and Shizuku is one way to get one. The app can also pair with the phone\'s own wireless debugging.</string>
+    <!--
+      The kernel check, which is the one question here about the phone rather than about the catalog. It is
+      written for somebody whose model has no payload yet, so what the answer is *for* - do I wait for
+      support, or is this phone never going to work - is in the card and not in a footnote.
+    -->
+    <string name="kernel_check">Kernel check</string>
+    <string name="kernel_check_body">Tests whether this phone\'s kernel still has the bug a run needs.</string>
+    <string name="kernel_check_why">Use it when this phone has no payload yet, to tell a fixed kernel from one we can still add.</string>
+    <string name="kernel_check_start">Test this phone</string>
+    <string name="kernel_check_stop">Stop</string>
+    <string name="kernel_check_again">Test again</string>
+    <string name="kernel_check_warning_title">The test can leave the phone busy</string>
+    <string name="kernel_check_warning_body">On a phone with the bug this can leave a process the phone cannot clear until it restarts.</string>
+    <string name="kernel_check_warning_continue">Run the test</string>
+    <string name="kernel_check_vulnerable">This phone can still be rooted</string>
+    <string name="kernel_check_vulnerable_body">The test would not stop, which is the bug itself.</string>
+    <string name="kernel_check_vulnerable_support">Once a payload covers this model and kernel, a run here should work.</string>
+    <string name="kernel_check_patched">This phone is fixed</string>
+    <string name="kernel_check_patched_body">The kernel carries the fix, so no payload can work here.</string>
+    <string name="kernel_check_undecided">Could not tell</string>
+    <string name="kernel_check_undecided_body">The test did not get far enough to answer. Restart the phone and try again.</string>
+    <string name="kernel_check_restarted">The phone restarted during the test</string>
+    <string name="kernel_check_restarted_body">Only a kernel with the bug can be restarted by this test.</string>
+    <string name="kernel_check_unfinished">The test did not finish</string>
+    <string name="kernel_check_from_version">The fix arrives in %1$s and this phone is on %2$s.</string>
+    <!--
+      The kernel check's own three steps, drawn in the same list the run screen's four are: the same marks,
+      the same count up, and one row per thing the check actually does.
+    -->
+    <string name="kernel_step_version_title">Version check</string>
+    <string name="kernel_step_version_detail">Read the kernel and the version that has the fix</string>
+    <string name="kernel_step_test_title">Kernel test</string>
+    <string name="kernel_step_test_detail">Run the test on this phone</string>
+    <string name="kernel_step_test_active">Attempt %1$d of %2$d</string>
+    <string name="kernel_step_test_not_needed">Not needed: the version already answers it</string>
+    <string name="kernel_step_test_stopped">Stopped every time it was asked</string>
+    <string name="kernel_step_test_stuck">Would not stop when it was asked</string>
+    <string name="kernel_step_test_unclear">Did not reach an answer</string>
+    <string name="kernel_step_test_restarted">The phone restarted while the test was running</string>
+    <string name="kernel_step_answer_title">Answer</string>
+    <string name="kernel_step_answer_detail">Say whether this phone can be rooted at all</string>
+    <string name="kernel_step_answer_rootable">This phone can still be rooted</string>
+    <string name="kernel_step_answer_fixed">This phone is fixed</string>
+    <string name="kernel_step_answer_unknown">Could not tell</string>
+    <!--
+      What the steps mean, and what a restart means at each one. Two lists rather than one because the two
+      screens do different things - a run installs root, the check only asks a question - and the answers to
+      "what happens if I restart now" are different enough that one list would have to say both.
+    -->
+    <string name="step_guide_title">What these steps mean</string>
+    <string name="step_guide_run">When a payload covers this phone</string>
+    <string name="step_guide_restart">After a restart: %1$s</string>
+    <string name="guide_step_support_meaning">The app checks that this phone\'s model and kernel are ones it has a payload for.</string>
+    <string name="guide_step_download_meaning">The app downloads the payload and checks its size and fingerprint against the ones the list states.</string>
+    <string name="guide_step_download_restart">The payload is saved on the phone, so a restart keeps it and the next run does not download it again.</string>
+    <string name="guide_step_exploit_meaning">The exploit uses a bug in the kernel to get root, and it can take several tries.</string>
+    <string name="guide_step_exploit_restart">Root lives only in memory, so a restart clears it. Restarting Android alone may not be enough, and the app asks for a full restart when that is what it needs.</string>
+    <string name="guide_step_ksu_meaning">The app loads KernelSU with the root it just got and checks that KernelSU answers.</string>
+    <string name="guide_step_ksu_restart">KernelSU is loaded fresh every boot, so after a restart you run again - or let root on boot do it for you.</string>
+    <string name="guide_kernel_version_meaning">The app reads this phone\'s kernel version and compares it with the version that has the fix.</string>
+    <string name="guide_kernel_test_meaning">The app runs a test that takes about a minute, and only a kernel with the bug can refuse to stop it or restart the phone.</string>
+    <string name="guide_kernel_test_restart">A test that finds the bug can leave a process the phone cannot clear until it restarts, and can restart the phone by itself.</string>
+    <string name="guide_kernel_answer_meaning">The app says whether any payload could ever work on this phone.</string>
+    <string name="kernel_check_needs_restart">Restart the phone to clear it.</string>
+    <string name="kernel_check_failed">The test could not run on this phone.</string>
     <string name="about_title">About Root My Galaxy Next</string>
     <string name="about_description">Information about Root My Galaxy Next</string>
     <string name="about_body">Root supported Samsung Galaxy phones using a kernel exploit.</string>

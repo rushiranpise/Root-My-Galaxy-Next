@@ -176,6 +176,11 @@ android {
 
     packaging {
         jniLibs.useLegacyPackaging = true
+        // The kernel test is an executable this project did not build and cannot rebuild, and the packager
+        // strips debug symbols from every native library by default - which would mean the bytes on the phone
+        // were not the bytes this project took, and the hash recorded of them in VulnerabilityBinaryTest would
+        // be a statement about a file nothing ships. Keeping its symbols keeps the taken artifact intact.
+        jniLibs.keepDebugSymbols += "**/libpoc64.so"
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 }

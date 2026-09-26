@@ -220,6 +220,7 @@ import dev.busung.s25uroot.dfr.DfrInstall
 import dev.busung.s25uroot.dfr.DfrStageArming
 import dev.busung.s25uroot.dfr.DfrStageReading
 import dev.busung.s25uroot.ui.theme.RootMyGalaxyTheme
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -1797,6 +1798,9 @@ private fun OverviewPage(
         }
         item { ReadinessCard(readiness, kernelsuFlavor, onOpenSettings) }
         item { DeviceCard(device) }
+        // After the phone's own readings, and last of the cards for that reason: everything above says what
+        // this phone is doing, and this is the one thing here for a phone the catalog does not cover yet.
+        item { KernelCheckCard(device) }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
         // there to do". Logs is not repeated here - the bar at the bottom already goes there.
@@ -2539,6 +2543,362 @@ private fun DeviceCard(device: DeviceSnapshot) {
             InfoRow(Icons.Rounded.Security, stringResource(R.string.system_abi), "${device.abi} (${device.pageSize / 1024}K)")
         }
     }
+}
+
+/**
+ * What the last kernel check left behind, if it left anything.
+ *
+ * Called once, as this screen is first composed, because that is the moment a launch begins and the record is
+ * about the launch before it. Two readings are possible and they mean different things: a check that was
+ * running in one boot and is read in another stopped because the phone restarted, which is the bug doing what
+ * only it can do to a kernel it is in; and the same record read in the same boot says the app went away while
+ * the phone did not, which says nothing about the kernel at all.
+ *
+ * The record is closed as it is read, so the answer it produces is shown once rather than reappearing at every
+ * launch - which is also what stops a restart from being reported twice.
+ */
+private fun leftoverCheck(context: Context): KernelCheckState {
+    val pending = KernelCheckRecord.pending(context) ?: return KernelCheckState.Idle
+    KernelCheckRecord.finish(context)
+    val restarted = restartedSince(pending.bootToken, AutoRootSupport.currentBootToken())
+    AppLog.info(
+        AppLogTags.KERNEL_CHECK,
+        "Kernel check was left unfinished by the check started at ${pending.startedAtMillis}: the phone " +
+            (if (restarted) "restarted under it." else "did not restart."),
+    )
+    return KernelCheckState.Interrupted(restarted)
+}
+
+/**
+ * The kernel check, on the screen somebody with an unsupported phone opens.
+ *
+ * This exists for one user in particular: the one whose model and kernel are not in any catalog, who today
+ * is told only that nothing matches and cannot tell whether that is a gap this project will close or a phone
+ * it will never cover. Those two are different answers and the phone can give both: a kernel carrying the
+ * fix is one no payload of ours will ever load into, while a kernel still vulnerable is one a payload could
+ * cover as soon as somebody ports it. So the card asks the phone - see [VulnerabilityProbe] - and says which
+ * of the two this is.
+ *
+ * Three things are deliberately true of it. It is never automatic: the test is offered and run only when
+ * pressed, because on a phone with the bug it can leave a task nothing but a restart clears, and a diagnostic
+ * nobody asked for must not be able to do that. It never reports a table's answer as a measured one - the
+ * verdict carries where it came from and the card says so. And it is not a run: it installs nothing, needs no
+ * payload, takes no privilege, and a phone that has just been tested is exactly as it was.
+ *
+ * When the version alone already answers it - at or above the fixed release on a branch this app knows - the
+ * card says so without starting anything. That is the one case where asking the kernel could add nothing, and
+ * a kernel above the fix is not one to wedge for confirmation.
+ */
+@Composable
+private fun KernelCheckCard(device: DeviceSnapshot) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    val scope = rememberCoroutineScope()
+    // Written by the Stop answer and read between attempts by the probe, which is why it is not a snapshot
+    // state: the reader is a background thread that must not be handed a composition value.
+    val stopped = remember { AtomicBoolean(false) }
+    // Read once, because it is about the last time this screen was open rather than about now: a check that
+    // was running when this app went away is the one case where the answer arrived while nobody was here to
+    // write it down - see [KernelCheckRecord].
+    var state by remember { mutableStateOf(leftoverCheck(context)) }
+    var confirming by remember { mutableStateOf(false) }
+    var explaining by remember { mutableStateOf(false) }
+    // The version's own answer, pure and free, read once per kernel: it decides whether the test runs at
+    // all, and it is shown before the test so that a measured answer either confirms it or departs from it.
+    val table = remember(device.kernelVersion) { KernelVulnerability.read(device.kernelVersion) }
+    val binary = remember(context) {
+        VulnerabilityProbe.binaryUnder(context.applicationInfo.nativeLibraryDir.orEmpty())
+    }
+
+    // Typed, because the branches of the `when` below end in different things - a launch returns a job - and
+    // what the card wants from all of them is that the press was handled.
+    val start: () -> Unit = {
+        confirming = false
+        stopped.set(false)
+        when {
+            table.verdict == KernelVulnerability.Verdict.Patched -> {
+                state = KernelCheckState.Done(
+                    verdict = VulnerabilityProbe.Verdict.Patched,
+                    byVersion = true,
+                    fixedIn = table.fixedIn?.toString(),
+                )
+                AppLog.info(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check answered by version alone: ${device.kernelRelease} is at or above " +
+                        "${table.fixedIn} on its branch.",
+                )
+            }
+
+            !binary.isFile -> {
+                state = KernelCheckState.NotPossible
+                AppLog.warn(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check cannot run: no test at ${binary.absolutePath}.",
+                )
+            }
+
+            else -> {
+                state = KernelCheckState.Running(1)
+                AppLog.info(
+                    AppLogTags.KERNEL_CHECK,
+                    "Kernel check started on ${device.model} kernel ${device.kernelRelease}, which the " +
+                        "version alone reads as ${table.verdict}.",
+                )
+                // Written before the first attempt, because the failure this record exists for takes the app
+                // with it: a note made afterwards would only ever be written for the tests that did not need
+                // one.
+                KernelCheckRecord.begin(
+                    context = context,
+                    bootToken = AutoRootSupport.currentBootToken(),
+                    startedAtMillis = System.currentTimeMillis(),
+                    attempts = VulnerabilityProbe.ATTEMPTS,
+                )
+                scope.launch {
+                    val outcome = withContext(Dispatchers.IO) {
+                        VulnerabilityProbe.run(
+                            binary = binary,
+                            attemptStarted = { number ->
+                                scope.launch { state = KernelCheckState.Running(number) }
+                            },
+                            say = { line -> AppLog.info(AppLogTags.KERNEL_CHECK, line) },
+                            isStopped = { stopped.get() },
+                        )
+                    }
+                    KernelCheckRecord.finish(context)
+                    if (stopped.get()) {
+                        // Not an answer, and must not be drawn as one: a test the user stopped has the same
+                        // verdict as one that never ran.
+                        state = KernelCheckState.Idle
+                        AppLog.info(
+                            AppLogTags.KERNEL_CHECK,
+                            "Kernel check stopped after ${outcome.attempts.size} of " +
+                                "${VulnerabilityProbe.ATTEMPTS} attempts.",
+                        )
+                    } else {
+                        state = KernelCheckState.Done(
+                            verdict = outcome.verdict,
+                            byVersion = false,
+                            fixedIn = table.fixedIn?.toString(),
+                        )
+                        AppLog.info(
+                            AppLogTags.KERNEL_CHECK,
+                            "Kernel check finished: ${outcome.verdict} after ${outcome.attempts.size} of " +
+                                "${VulnerabilityProbe.ATTEMPTS} attempts.",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(stringResource(R.string.kernel_check), style = MaterialTheme.typography.titleMedium)
+
+            when (val current = state) {
+                KernelCheckState.Idle -> {
+                    Text(stringResource(R.string.kernel_check_body), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = stringResource(R.string.kernel_check_why),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // Nothing above the steps while the test runs: the spinner that says which step is working
+                // belongs to the step it is working in, and a second one up here would be two accounts of
+                // the same minute.
+                is KernelCheckState.Running -> Unit
+
+                // Both answers land here: the one the test reached, and the one it found by being restarted
+                // mid-attempt. They are different findings with the same consequence, so what they must not
+                // do is diverge in what the card says about whether this phone can be rooted.
+                is KernelCheckState.Done, is KernelCheckState.Interrupted -> {
+                    val verdict = kernelVerdictOf(current)
+                    val restarted = current is KernelCheckState.Interrupted && current.restarted
+                    val headline = when {
+                        restarted -> R.string.kernel_check_restarted
+                        verdict == VulnerabilityProbe.Verdict.Vulnerable -> R.string.kernel_check_vulnerable
+                        verdict == VulnerabilityProbe.Verdict.Patched -> R.string.kernel_check_patched
+                        // The record that shows a check was running in the same boot says the app went away and
+                        // the phone did not, which is not an answer about the kernel either way.
+                        current is KernelCheckState.Interrupted -> R.string.kernel_check_unfinished
+                        else -> R.string.kernel_check_undecided
+                    }
+                    val lines = buildList {
+                        when {
+                            restarted -> {
+                                add(R.string.kernel_check_restarted_body)
+                                add(R.string.kernel_check_vulnerable_support)
+                            }
+
+                            verdict == VulnerabilityProbe.Verdict.Vulnerable -> {
+                                add(R.string.kernel_check_vulnerable_body)
+                                // Only a measured answer gets the support line and the restart advice: the
+                                // table's answer wedged nothing, and a phone that was not tested needs no
+                                // restart.
+                                if (current is KernelCheckState.Done && !current.byVersion) {
+                                    add(R.string.kernel_check_vulnerable_support)
+                                    add(R.string.kernel_check_needs_restart)
+                                }
+                            }
+
+                            verdict == VulnerabilityProbe.Verdict.Patched ->
+                                add(R.string.kernel_check_patched_body)
+
+                            else -> add(R.string.kernel_check_undecided_body)
+                        }
+                    }
+                    val icon = when {
+                        restarted || verdict == VulnerabilityProbe.Verdict.Vulnerable ->
+                            Icons.Rounded.LockOpen
+                        verdict == VulnerabilityProbe.Verdict.Patched -> Icons.Rounded.CheckCircle
+                        else -> Icons.Rounded.Warning
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        Icon(
+                            icon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp),
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(stringResource(headline), style = MaterialTheme.typography.titleSmall)
+                            lines.forEach { line ->
+                                Text(
+                                    text = stringResource(line),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                KernelCheckState.NotPossible -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(26.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.kernel_check_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // What the version alone says, before and after the test - so a measured answer reads as either
+            // a confirmation of it or a departure from it, and last of the readings because the steps below
+            // are what the press acts on.
+            table.fixedIn?.let { fixed ->
+                Text(
+                    text = stringResource(
+                        R.string.kernel_check_from_version,
+                        fixed.toString(),
+                        device.kernelVersion,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            KernelCheckSteps(
+                state = state,
+                versionRead = table.verdict != KernelVulnerability.Verdict.Undecided,
+                onExplain = { explaining = true },
+            )
+
+            // One press, and which press it is follows from where the steps are: a check that has finished
+            // or has not started offers the test, and one in progress offers the way out of it.
+            if (state is KernelCheckState.Running) {
+                AppActionButton(
+                    action = AppAction(R.string.kernel_check_stop) {
+                        clickHaptic(view)
+                        stopped.set(true)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                AppActionButton(
+                    action = AppAction(
+                        label = if (state is KernelCheckState.Idle) {
+                            R.string.kernel_check_start
+                        } else {
+                            R.string.kernel_check_again
+                        },
+                        role = AppActionRole.Priority,
+                    ) {
+                        clickHaptic(view)
+                        confirming = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+
+    if (confirming) {
+        KernelCheckDialog(onConfirm = start, onDismiss = { confirming = false })
+    }
+    if (explaining) {
+        StepGuideDialog(onDismiss = { explaining = false })
+    }
+}
+
+/**
+ * The one question the check asks before it runs, which the version table cannot answer for it.
+ *
+ * The warning is a real one and belongs before the press rather than after it: on a phone that still has the
+ * bug the test succeeds by making a task impossible to stop, and the only thing that clears it is a restart.
+ * Saying that up front is what makes the press informed, and it is why this is not the kind of confirmation
+ * that is dismissed without reading.
+ */
+@Composable
+private fun KernelCheckDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val view = LocalView.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            DialogDimAmount(0.34f)
+            Text(stringResource(R.string.kernel_check_warning_title))
+        },
+        text = { Text(stringResource(R.string.kernel_check_warning_body)) },
+        confirmButton = {
+            AppDialogActions(
+                listOf(
+                    AppAction(R.string.kernel_check_warning_continue, AppActionRole.Priority) {
+                        clickHaptic(view)
+                        onConfirm()
+                    },
+                    AppAction(R.string.action_cancel, AppActionRole.Standard) {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                ),
+            )
+        },
+    )
 }
 
 @Composable
