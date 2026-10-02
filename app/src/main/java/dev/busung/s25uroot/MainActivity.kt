@@ -651,12 +651,33 @@ class MainActivity : ComponentActivity() {
      */
     private fun maybeRestartAfterTheHelper(intent: Intent?) {
         if (intent?.getBooleanExtra(DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA, false) != true) return
-        if (!launchedByTheHelper()) {
+        // Two facts can show that the helper is the one asking, and both are needed.
+        //
+        // The launch's own identity is the precise one, and it is the one that works when the helper opens a
+        // window that did not exist. It is *not* enough on its own: the helper's ask to a window that is
+        // already up is delivered to that window (the intent arrives at `onNewIntent`, not `onCreate`), and the
+        // identity the platform exposes still describes whatever started the window first - the launcher, or
+        // this app's own earlier start. That is what made a rooted phone's restart look like a stranger's
+        // request, and it is what the two ignored lines in the log were.
+        val byLaunch = launchedByTheHelper()
+        // The second is the exploit's own mutex, `/dev/df`: the shellcode creates it as root with `O_CREAT|O_EXCL`
+        // before any of its work, it is mode 0000, and no app can create or alter it. Present means a chain has
+        // armed itself in this boot - which is the only state in which this request means anything.
+        val armed = UniversalRootRun.alreadyArmed()
+        if (!byLaunch && !armed) {
             AppLog.warn(
                 AppLogTags.RESTART,
-                "The restart-after-root extra arrived from something other than the helper, so it was ignored",
+                "The restart-after-root extra arrived from something other than the helper and " +
+                    "${UniversalRootRun.ARMED_MARKER} is absent (from=${launchFrom()}), so it was ignored",
             )
             return
+        }
+        if (!byLaunch) {
+            AppLog.info(
+                AppLogTags.RESTART,
+                "The helper's restart request arrived at a window that was already open (from=${launchFrom()}), " +
+                    "and ${UniversalRootRun.ARMED_MARKER} says this boot was hooked - taking it",
+            )
         }
         if (!AppPreferences.restartAfterRoot(this)) {
             AppLog.info(
@@ -687,13 +708,18 @@ class MainActivity : ComponentActivity() {
      * Two accessors rather than one because the older one is documented not to be the launching app in every
      * case, and this is a decision about a reboot.
      */
-    private fun launchedByTheHelper(): Boolean {
-        val from = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            launchedFromPackage
-        } else {
-            callingPackage
-        }
-        return from == DfrInstall.STAGE_TWO_PACKAGE
+    private fun launchedByTheHelper(): Boolean = launchFrom() == DfrInstall.STAGE_TWO_PACKAGE
+
+    /**
+     * The package the platform recorded for this window's launch, when it recorded one.
+     *
+     * Null is a real answer - the platform records it only for a launch that came through the activity manager
+     * as a launch, and a window that was reused keeps the identity of whatever started it first.
+     */
+    private fun launchFrom(): String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        launchedFromPackage
+    } else {
+        callingPackage
     }
 
     private fun openInstaller(selectionId: String? = null) {
