@@ -378,6 +378,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The Shizuku grant, asked for once as the app opens - see [ShizukuLaunch] for the rule.
+     *
+     * Called from `onCreate` rather than from a screen, because the grant is not about a screen: it is what
+     * every run and every boot launch needs, and asking here is what keeps it out of the way of a run. The flag
+     * is the once half of the rule: the activity is recreated for a rotation or a theme change, and a dialog
+     * raised again on each of those would be a dialog nobody asked for.
+     */
+    private fun maybeRequestShizukuPermission() {
+        // Once per process, not per activity: see [ShizukuLaunch.takeFirstAsk].
+        if (!ShizukuLaunch.takeFirstAsk()) return
+        val running = ShizukuController.isRunning()
+        if (ShizukuLaunch.shouldAsk(shizukuMode, running, ShizukuController.isGranted())) {
+            // Nothing is logged *here*: [ShizukuController.requestPermission] already writes both the ask and
+            // the answer it gets, and saying the same sentence beside it put two identical lines in the log
+            // for one dialog - which read as two asks. Off the main thread, the same way a run asks: the
+            // dialog is Shizuku's to raise and the answer arrives through its listener, and nothing here
+            // holds the first frame waiting for it.
+            lifecycleScope.launch(Dispatchers.IO) { ShizukuController.requestPermission() }
+        } else {
+            AppLog.info(AppLogTags.SHIZUKU, ShizukuLaunch.nothingToAskLine(shizukuMode, running))
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -407,6 +431,7 @@ class MainActivity : ComponentActivity() {
         openedRunId = intent?.getStringExtra(EXTRA_RUN_ID)
         restartShortcut = restartShortcutOf(intent?.action)
         maybeRestartAfterTheHelper(intent)
+        maybeRequestShizukuPermission()
         batteryUnrestricted = isBatteryUnrestricted()
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
