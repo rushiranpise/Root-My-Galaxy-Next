@@ -142,6 +142,14 @@ class InstallIdentityTest {
         AllowedUse("the check for whether the app it came from is installed") { file, line ->
             file.name == "SiblingInstall.kt" && line.contains("\"${OLD_PACKAGE_PREFIX}s25uroot\"")
         },
+        AllowedUse("a class name the keep rules hold, in the list the release check reads them from") { file, line ->
+            // The same case as the activity class name above, one file further on: a keep rule names a
+            // class, a class lives in this app's Java package, and that package is not the id the app
+            // installs under - which is the distinction this whole scan is about. The names have to be
+            // written here as text, because R8 is told them rather than deriving them, and the check that
+            // proves R8 obeyed them reads the built dex rather than these lines.
+            file.name == "build.gradle.kts" && line.contains("\"${OLD_PACKAGE_PREFIX}s25uroot.")
+        },
     )
 
     /**
