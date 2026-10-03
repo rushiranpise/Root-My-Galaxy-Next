@@ -899,6 +899,7 @@
     <string name="dfr_apk_default">This build has no helper APK, so there is nothing to install.</string>
     <string name="dfr_apk_unwritable">The helper APK could not be copied into the app\'s storage. Free some space and try again.</string>
     <string name="dfr_apk_bundled">Using the helper APK this app ships with.</string>
+    <string name="dfr_setup_needs_payload">The helper loads KernelSU from this phone\u2019s verified payload, and none is set up here. Run the payload method once, then come back.</string>
     <string name="dfr_inject">Install Cert</string>
     <string name="dfr_clean_up">Uninstall</string>
     <string name="dfr_panel">Readings and output</string>
@@ -1235,6 +1236,11 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="updater_available_body_short">%1$s is available</string>
     <string name="updater_button_download">Download &amp; Install</string>
     <string name="updater_downloading">Downloading…</string>
+     <string name="helper_update_title">Update Helper</string>
+     <string name="helper_update_body">The helper on this phone is outdated. Update it using Shizuku/Root to make sure it works correctly.</string>
+     <string name="helper_update_codes">Installed: %1$d · Updated: %2$d</string>
+     <string name="helper_update_action">Update Now</string>
+     <string name="helper_update_installing">Updating helper…</string>
     <string name="updater_run_in_progress_title">A run is in progress</string>
     <string name="updater_run_in_progress">A run is already in progress. The app waits for it before downloading or installing anything.</string>
     <string name="updater_download_failed">Download failed</string>

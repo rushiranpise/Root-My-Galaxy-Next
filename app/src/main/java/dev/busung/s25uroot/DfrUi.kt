@@ -93,6 +93,10 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
     // The clean-up asks first: it is the one action here that writes a file the phone boots from, and it
     // does two unrelated things, so which of them this press will take off is named before it runs.
     var confirmCleanUp by remember { mutableStateOf(false) }
+    // Whether the helper has anything to load on this phone. Answering the empty value first rather than
+    // a hopeful one is deliberate: the presses it guards write where a wrong guess costs a run, and the
+    // read below is a payload verification rather than a flag.
+    var setup by remember { mutableStateOf(HelperSetup.NoPayload) }
 
     /**
      * The sentence for the refusal this build is in.
@@ -118,6 +122,14 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             }
             reading = next
             readFailed = next == null
+            // The *verified* payload and not the descriptor: the helper loads the daemon out of those
+            // bytes, so a cache that was forgotten or tampered with has to answer here exactly as the
+            // staging itself would - and that reading verifies the artifacts rather than trusting a file
+            // that names them. Off the main thread for the same reason the reading above is: it hashes
+            // several megabytes.
+            setup = withContext(Dispatchers.IO) {
+                HelperSetup.of(KnownGoodPayloadStore.hasValid(context))
+            }
             busy = false
         }
     }
@@ -414,6 +426,17 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // And the one thing that can leave this screen with nothing pressable, said where the
+                // helper's own availability is said - because it is the same kind of statement: a fact
+                // about what this phone is missing, not a step somebody got wrong. It is drawn only when
+                // it applies, so it cannot read as a second, quieter description of a phone that is fine.
+                if (!setup.ready) {
+                    Text(
+                        stringResource(R.string.dfr_setup_needs_payload),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 // The panel holds the flow's evidence rather than only the last command's output. The
                 // helper's two build numbers are the ground the step list stands on - the one judgement here
                 // that is about two files rather than about the phone - and they were written down nowhere
@@ -535,6 +558,11 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
             // takes the flow off the phone, and the inject is disabled rather than quiet while the reading
             // says the key is already in the list, where an inject could only print a refusal.
             val enabled = !busy
+            // Apart from [enabled] rather than folded into it, because only some of these answers are
+            // the setup's. The readings, the restart and the clean-up have to keep working on a phone
+            // with no payload - the clean-up above all, since it is the only way to remove an installed
+            // helper, and that is the state this answer refuses.
+            val setupEnabled = setup.ready
             val asked = askedAction(step)
             fun roleFor(action: DfrAction): AppActionRole =
                 if (action == asked) AppActionRole.Priority else AppActionRole.Standard
@@ -553,7 +581,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                     AppAction(
                         R.string.dfr_inject,
                         roleFor(DfrAction.Inject),
-                        enabled && reading?.injected != true,
+                        enabled && reading?.injected != true && setupEnabled,
                     ) { inject() },
                     // This one covers three steps - both restarts and the removal a restart applies -
                     // because they are one answer with one word in this screen: [DfrStep.ApplyRemoval] is
@@ -592,7 +620,7 @@ internal fun DfrInstallDialog(onDismiss: () -> Unit) {
                         DfrStep.InstallStageTwo, DfrStep.StaleStageTwo -> AppAction(
                             R.string.dfr_action_install_stage2,
                             roleFor(DfrAction.StageTwo),
-                            enabled,
+                            enabled && setupEnabled,
                         ) { install() }
                         DfrStep.OpenStageTwo -> AppAction(
                             R.string.dfr_action_open_stage2,

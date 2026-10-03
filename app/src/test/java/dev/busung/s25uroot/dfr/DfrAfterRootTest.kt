@@ -32,7 +32,13 @@ class DfrAfterRootTest {
         assertTrue(
             "the app acts on the helper's restart extra without checking who sent it, so any app on the " +
                 "phone could soft reboot the device by starting this activity",
-            activity.contains("if (!launchedByTheHelper())"),
+            activity.contains("if (!byLaunch && !armed)"),
+        )
+        assertTrue(
+            "the launch identity is the only thing believed, so a restart the helper asked for while this " +
+                "window was already open is refused as a stranger's - which is exactly what happened on the " +
+                "phone: two ignored requests in the log, and a rooted boot left with the load inert",
+            activity.contains("UniversalRootRun.alreadyArmed()"),
         )
         assertTrue(
             "the caller check no longer compares against the helper's application id, so it answers about " +
@@ -50,7 +56,7 @@ class DfrAfterRootTest {
         )
         assertTrue(
             "the reboot is asked for before the caller is checked, so the guard is decoration",
-            activity.indexOf("if (!launchedByTheHelper())") < activity.indexOf("runRecoveryAction("),
+            activity.indexOf("if (!byLaunch && !armed)") < activity.indexOf("runRecoveryAction("),
         )
     }
 

@@ -378,6 +378,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * The Shizuku grant, asked for once as the app opens - see [ShizukuLaunch] for the rule.
+     *
+     * Called from `onCreate` rather than from a screen, because the grant is not about a screen: it is what
+     * every run and every boot launch needs, and asking here is what keeps it out of the way of a run. The flag
+     * is the once half of the rule: the activity is recreated for a rotation or a theme change, and a dialog
+     * raised again on each of those would be a dialog nobody asked for.
+     */
+    private fun maybeRequestShizukuPermission() {
+        // Once per process, not per activity: see [ShizukuLaunch.takeFirstAsk].
+        if (!ShizukuLaunch.takeFirstAsk()) return
+        val running = ShizukuController.isRunning()
+        if (ShizukuLaunch.shouldAsk(shizukuMode, running, ShizukuController.isGranted())) {
+            // Nothing is logged *here*: [ShizukuController.requestPermission] already writes both the ask and
+            // the answer it gets, and saying the same sentence beside it put two identical lines in the log
+            // for one dialog - which read as two asks. Off the main thread, the same way a run asks: the
+            // dialog is Shizuku's to raise and the answer arrives through its listener, and nothing here
+            // holds the first frame waiting for it.
+            lifecycleScope.launch(Dispatchers.IO) { ShizukuController.requestPermission() }
+        } else {
+            AppLog.info(AppLogTags.SHIZUKU, ShizukuLaunch.nothingToAskLine(shizukuMode, running))
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -407,6 +431,7 @@ class MainActivity : ComponentActivity() {
         openedRunId = intent?.getStringExtra(EXTRA_RUN_ID)
         restartShortcut = restartShortcutOf(intent?.action)
         maybeRestartAfterTheHelper(intent)
+        maybeRequestShizukuPermission()
         batteryUnrestricted = isBatteryUnrestricted()
         setContent {
             RootMyGalaxyTheme(accentColor = accentColor, themeMode = themeMode) {
@@ -626,12 +651,33 @@ class MainActivity : ComponentActivity() {
      */
     private fun maybeRestartAfterTheHelper(intent: Intent?) {
         if (intent?.getBooleanExtra(DfrInstall.STAGE_TWO_AFTER_ROOT_EXTRA, false) != true) return
-        if (!launchedByTheHelper()) {
+        // Two facts can show that the helper is the one asking, and both are needed.
+        //
+        // The launch's own identity is the precise one, and it is the one that works when the helper opens a
+        // window that did not exist. It is *not* enough on its own: the helper's ask to a window that is
+        // already up is delivered to that window (the intent arrives at `onNewIntent`, not `onCreate`), and the
+        // identity the platform exposes still describes whatever started the window first - the launcher, or
+        // this app's own earlier start. That is what made a rooted phone's restart look like a stranger's
+        // request, and it is what the two ignored lines in the log were.
+        val byLaunch = launchedByTheHelper()
+        // The second is the exploit's own mutex, `/dev/df`: the shellcode creates it as root with `O_CREAT|O_EXCL`
+        // before any of its work, it is mode 0000, and no app can create or alter it. Present means a chain has
+        // armed itself in this boot - which is the only state in which this request means anything.
+        val armed = UniversalRootRun.alreadyArmed()
+        if (!byLaunch && !armed) {
             AppLog.warn(
                 AppLogTags.RESTART,
-                "The restart-after-root extra arrived from something other than the helper, so it was ignored",
+                "The restart-after-root extra arrived from something other than the helper and " +
+                    "${UniversalRootRun.ARMED_MARKER} is absent (from=${launchFrom()}), so it was ignored",
             )
             return
+        }
+        if (!byLaunch) {
+            AppLog.info(
+                AppLogTags.RESTART,
+                "The helper's restart request arrived at a window that was already open (from=${launchFrom()}), " +
+                    "and ${UniversalRootRun.ARMED_MARKER} says this boot was hooked - taking it",
+            )
         }
         if (!AppPreferences.restartAfterRoot(this)) {
             AppLog.info(
@@ -662,13 +708,18 @@ class MainActivity : ComponentActivity() {
      * Two accessors rather than one because the older one is documented not to be the launching app in every
      * case, and this is a decision about a reboot.
      */
-    private fun launchedByTheHelper(): Boolean {
-        val from = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            launchedFromPackage
-        } else {
-            callingPackage
-        }
-        return from == DfrInstall.STAGE_TWO_PACKAGE
+    private fun launchedByTheHelper(): Boolean = launchFrom() == DfrInstall.STAGE_TWO_PACKAGE
+
+    /**
+     * The package the platform recorded for this window's launch, when it recorded one.
+     *
+     * Null is a real answer - the platform records it only for a launch that came through the activity manager
+     * as a launch, and a window that was reused keeps the identity of whatever started it first.
+     */
+    private fun launchFrom(): String? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        launchedFromPackage
+    } else {
+        callingPackage
     }
 
     private fun openInstaller(selectionId: String? = null) {
@@ -1829,6 +1880,23 @@ private fun OverviewPage(
     // guide is for the phone that has never been through it, and it is stored rather than derived so a
     // re-read from Home cannot bring it back on its own.
     var showGuide by remember { mutableStateOf(!AppPreferences.guideAccepted(context)) }
+    // The helper on the phone, when it is a different build from the one this app carries. This is the
+    // one mismatch nothing else on the phone reports: Package Manager replaces a system app only when
+    // something installs over it, so an app update leaves the older helper running the exploit until
+    // somebody re-installs it - and the flow refuses to start that older copy, so the state reads as
+    // "root at boot stopped working" with nothing on any screen saying why.
+    var helperUpdate by remember { mutableStateOf<HelperUpdate?>(null) }
+    var helperUpdateDismissed by remember { mutableStateOf(false) }
+    var helperUpdating by remember { mutableStateOf(false) }
+    var helperUpdateOutcome by remember { mutableStateOf<String?>(null) }
+    val helperUpdateScope = rememberCoroutineScope()
+    LaunchedEffect(installState.phase, resumeTick) {
+        // Both keys are the same one the readiness reading above uses: a run can install a helper, and a
+        // return to the foreground is when an app update that replaced this build's own helper is seen.
+        // Off the main thread because it unpacks the bundled APK and asks Package Manager about two
+        // version codes.
+        helperUpdate = withContext(Dispatchers.IO) { HelperUpdate.read(context) }
+    }
     // A report is two dozen readings and a log file, so the row says it is working rather than looking
     // like a tap that did nothing.
     LaunchedEffect(installState.phase, resumeTick) {
@@ -1933,6 +2001,36 @@ private fun OverviewPage(
             }
         }
         item { InstallStatusCard(installState, onInstall) }
+        // Below the run's own card and above the readings, because it is a decision rather than a
+        // reading - and one about the thing that does the rooting, which the phone's own numbers cannot
+        // show. Off the screen while a run is in flight on the update card's own rule: installing a
+        // package beside a run is CPU and a Package Manager turn that the run's timing did not ask for.
+        val pendingHelper = helperUpdate?.takeIf { !helperUpdateDismissed }
+        if (pendingHelper != null && !installState.busy) {
+            item {
+                HelperUpdateCard(
+                    update = pendingHelper,
+                    busy = helperUpdating,
+                    outcome = helperUpdateOutcome,
+                    onDismiss = { helperUpdateDismissed = true },
+                    onUpdate = {
+                        if (!helperUpdating) {
+                            helperUpdating = true
+                            helperUpdateScope.launch {
+                                val lines = withContext(Dispatchers.IO) { pendingHelper.install(context) }
+                                helperUpdateOutcome = lines
+                                helperUpdating = false
+                                // Asked of Package Manager again rather than assumed from the install's
+                                // own output: whether the phone now has this build is the card's whole
+                                // subject, and the copy of it in this page is a reading, not a state
+                                // this press is allowed to declare.
+                                helperUpdate = withContext(Dispatchers.IO) { HelperUpdate.read(context) }
+                            }
+                        }
+                    },
+                )
+            }
+        }
         // Above the readiness card, because it is about something that already happened rather than
         // something to check, and it is the only account of a restart the user asked for: the dialog
         // that started it could only say the request was made.
@@ -2111,6 +2209,135 @@ private fun FrameworkRestartCard(report: FrameworkRestartReport, onDismiss: () -
             }
             ZygoteRestartReport.describe(context, report).forEach { line ->
                 Text(text = line, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+/**
+ * The helper on this phone is a different build from the one this app carries, and this is the way out.
+ *
+ * A card on Home rather than a row in the helper's own flow, because the flow is not where somebody looks
+ * when root stops coming back after a restart: the phone reboots, no root, and the only screen that
+ * notices is the one that just opened. The update it offers is the same install the flow's own step runs
+ * - `pm install -r` over the copy that is there, which keeps the shared-user uid - so pressing it is one
+ * tap rather than a certificate, a reboot and a step list that has to be walked again.
+ *
+ * Dismissible on the update banner's own terms - this session and no longer - and it comes back by itself
+ * if it is still true, because the state it reports does not go away by being dismissed. It leaves the
+ * screen by the other route: the reading after the install is what decides, so the card goes when the
+ * phone really does have this build, and stays with the reason on it when it does not.
+ */
+@Composable
+private fun HelperUpdateCard(
+    update: HelperUpdate,
+    busy: Boolean,
+    outcome: String?,
+    onDismiss: () -> Unit,
+    onUpdate: () -> Unit,
+) {
+    val view = LocalView.current
+    // The attention palette, not the update banner's: this is not an offer to make a phone newer, it is a
+    // phone whose root at boot has stopped working. It is the same pair of colours [FrameworkRestartCard]
+    // wears when it needs attention, so the app has one face for "something is wrong" rather than a
+    // second one here - and the card is the surface the action answers to, which is what the fill below is
+    // chosen against.
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // The warning sign, on [FrameworkRestartCard]'s own rule for the same state: an icon that
+                // says what kind of card this is before the title is read.
+                Icon(
+                    Icons.Rounded.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = stringResource(R.string.helper_update_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.action_close),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.helper_update_body),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            // Both codes, under the sentence rather than in it: the card's claim is a comparison, and
+            // "a different build" is not something a person can check, while which build is on the phone
+            // and which one is in this app is. Quiet, because the summary is what is read first.
+            Text(
+                text = stringResource(R.string.helper_update_codes, update.onPhone, update.inThisBuild),
+                style = MaterialTheme.typography.bodySmall,
+                color = LocalContentColor.current.copy(alpha = 0.78f),
+            )
+            if (busy) {
+                // Indeterminate, unlike the app download: `pm install` reports nothing until it is done,
+                // so a bar that pretended to know how far along it was would be inventing the number.
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = LocalContentColor.current,
+                    trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                )
+                Text(
+                    text = stringResource(R.string.helper_update_installing),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LocalContentColor.current.copy(alpha = 0.78f),
+                )
+            } else {
+                AppActionButton(
+                    AppAction(
+                        label = R.string.helper_update_action,
+                        // [AppActionRole.Attention] and not [AppActionRole.Priority]: this answer sits on
+                        // the card's own error container, where the loud fill is the error one. Read out of
+                        // the shared roles rather than spelled here, which is the app's rule for every
+                        // answer - and the reason that rule exists is this card, where a fill chosen by
+                        // hand would be the shade nobody re-reads when the palette moves.
+                        role = AppActionRole.Attention,
+                        onClick = {
+                            clickHaptic(view)
+                            onUpdate()
+                        },
+                    ),
+                )
+            }
+            // What the press printed, in the dialog's own monospace: the one line in it that matters is
+            // Package Manager's verdict, and it is a line inside a report rather than a report of its
+            // own. Bounded, because a card is not a panel - the whole of it is in the app log.
+            outcome?.takeIf(String::isNotBlank)?.let { lines ->
+                Text(
+                    text = lines,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 6,
+                    overflow = TextOverflow.Ellipsis,
+                    color = LocalContentColor.current.copy(alpha = 0.78f),
+                )
             }
         }
     }
