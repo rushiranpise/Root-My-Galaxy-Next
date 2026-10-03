@@ -83,6 +83,17 @@ internal enum class AppActionRole {
 
     /** An answer that takes something away, in the error colours whatever else is recommended. */
     Destructive,
+
+    /**
+     * The answer on a card that is already wearing the attention colours.
+     *
+     * The one combination the two above cannot express. On an error container, [Destructive]'s fill is the
+     * same colour as the surface under it and disappears, and [Priority]'s primary is a button from an
+     * unrelated family - a blue answer on a red card, which reads as anything but a warning. So this is the
+     * strong error fill with on-error ink: the loudest thing the theme has, worn by the one answer a card
+     * like that is asking for.
+     */
+    Attention,
 }
 
 /**
@@ -285,6 +296,10 @@ private fun AppActionLabel(action: AppAction) {
 @Composable
 internal fun appActionColors(role: AppActionRole): ButtonColors = when (role) {
     AppActionRole.Priority -> ButtonDefaults.buttonColors()
+    AppActionRole.Attention -> ButtonDefaults.buttonColors(
+        containerColor = MaterialTheme.colorScheme.error,
+        contentColor = MaterialTheme.colorScheme.onError,
+    )
     AppActionRole.Destructive -> ButtonDefaults.buttonColors(
         containerColor = MaterialTheme.colorScheme.errorContainer,
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
