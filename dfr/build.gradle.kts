@@ -75,7 +75,7 @@ android {
         minSdk = 33
         targetSdk = 36
         versionCode = helperVersionCode
-        versionName = "1.0"
+        versionName = "1.1"
         // Stage one is AArch64 assembly (stage1.S), so the artifact is arm64-only; everything else in
         // the chain is portable, and on a device without that ABI the native load fails with a message
         // rather than at build time.
