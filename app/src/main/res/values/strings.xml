@@ -899,6 +899,7 @@
     <string name="dfr_apk_default">This build has no helper APK, so there is nothing to install.</string>
     <string name="dfr_apk_unwritable">The helper APK could not be copied into the app\'s storage. Free some space and try again.</string>
     <string name="dfr_apk_bundled">Using the helper APK this app ships with.</string>
+    <string name="dfr_setup_needs_payload">The helper loads KernelSU from this phone\u2019s verified payload, and none is set up here. Run the payload method once, then come back.</string>
     <string name="dfr_inject">Install Cert</string>
     <string name="dfr_clean_up">Uninstall</string>
     <string name="dfr_panel">Readings and output</string>
