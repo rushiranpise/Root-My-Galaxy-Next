@@ -27,6 +27,17 @@ plugins {
  * so moving a file is a change - because it can be one: this module's own manifest decides the process it
  * runs in.
  */
+/**
+ * The version a person reads, and the one number here that is written by hand.
+ *
+ * Deliberately *not* the whole identity any more: it is folded into the digest below, because a declared
+ * version that no code reads is a trap. Bumping this alone used to leave the version code exactly where it
+ * was - the digest covers `src/main`, and this line is in the build file - so the app went on considering
+ * the phone up to date and the upgrade it offered never appeared. Measured on this device: `1.1` shipped,
+ * every phone kept its old helper, and nothing anywhere said why. Now the two move together.
+ */
+val helperVersionName = "1.2"
+
 val helperVersionCode: Int = run {
     val digest = MessageDigest.getInstance("SHA-256")
     fileTree("src/main") {
@@ -35,6 +46,12 @@ val helperVersionCode: Int = run {
         digest.update(file.relativeTo(projectDir).invariantSeparatorsPath.toByteArray())
         digest.update(file.readBytes())
     }
+    // The declared version goes in last, under a name that cannot collide with a real file path, so the
+    // two ways this number may move are one digest: the helper's sources changing, or its version being
+    // bumped on purpose. Everything said above about the digest still holds - the same sources and the
+    // same version answer the same code on every machine.
+    digest.update("helper-version".toByteArray())
+    digest.update(helperVersionName.toByteArray())
     // 31 bits of the digest, kept inside the range every installer accepts, and never zero: a version
     // code of zero is the one value Package Manager treats as unset.
     (ByteBuffer.wrap(digest.digest(), 0, 4).int and 0x3FFFFFFF) + 1
@@ -75,7 +92,7 @@ android {
         minSdk = 33
         targetSdk = 36
         versionCode = helperVersionCode
-        versionName = "1.1"
+        versionName = helperVersionName
         // Stage one is AArch64 assembly (stage1.S), so the artifact is arm64-only; everything else in
         // the chain is portable, and on a device without that ABI the native load fails with a message
         // rather than at build time.
