@@ -29,12 +29,12 @@ fun signingProperty(envName: String, propertyName: String): String? =
 // The base version, and the only place either number is written by hand. A release tag is
 // `v$appVersionBase` and both workflows read this literal out of this file, so it has to stay a
 // plain string here rather than being assembled from somewhere else.
-val appVersionBase = "0.9"
+val appVersionBase = "0.10"
 
 // An offset under the version code, not a version of its own: the code is this plus the clock, and the
 // only rule is that it may be raised and never lowered - lowering it would put a new build below an
 // installed one and Android would refuse the install.
-val appVersionCodeBase = 13
+val appVersionCodeBase = 14
 
 // The clock the version code is derived from, read through a value source so the reading counts as
 // a build configuration input. Reading the clock directly is not enough: configuration cache
@@ -173,6 +173,10 @@ android {
             // the one used to reproduce a failure from a phone. Still unminified, and named in the README's
             // build-identity table as the reason a debug APK is the right artifact to attach to a report.
             isDebuggable = true
+            // Obfuscation is release-only, and these two lines are where that is decided rather than
+            // inherited: `proguard-rules.pro` is not even named here, because the directives in it
+            // (`-repackageclasses` above all) rename and move classes, and a debug APK exists to be the
+            // legible one - the artifact a run log and a stack trace are read from.
             isMinifyEnabled = false
             isShrinkResources = false
             // Signed with the repository key when it is configured, and with the stock debug key when
