@@ -1378,6 +1378,29 @@ private fun RootApp(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Whether the payload this phone was rooted with has been replaced by the sources since - the one thing
+    // that tells somebody already rooted that there is a newer exploit and daemon for their phone. Rooted is
+    // part of the condition rather than a detail: an update matters to the person running the old one now, and
+    // on a phone with no root the sheet already offers this payload as the thing to run.
+    //
+    // Read on the same triggers as the cache above, plus a return to the foreground, because the sources are
+    // read when the app is opened and a run is what writes the cache. [RootStatusProbe.isActive] can start a
+    // process, which is why this is on IO.
+    var payloadUpdate by remember { mutableStateOf<PayloadUpdate?>(null) }
+    var payloadUpdateDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(installState.phase, resumeTick) {
+        payloadUpdate = withContext(Dispatchers.IO) {
+            if (!RootStatusProbe.isActive()) {
+                null
+            } else {
+                PayloadUpdate.of(
+                    KnownGoodPayloadStore.describe(context),
+                    targetCatalog.profiles.resolveFor(device),
+                )
+            }
+        }
+    }
+
     // One confirmation for both kinds of run, because it is one question - start now? - asked at the same
     // point in both flows: after the choice, and before the run's first step. What differs is what there is to
     // say about the choice, and that is the body: a payload run's subject is the profile, which the sheet and
@@ -1545,6 +1568,8 @@ private fun RootApp(
                             updateStatus = updateStatus,
                             updateCardDismissed = updateCardDismissed,
                             onDismissUpdateCard = { updateCardDismissed = true },
+                            payloadUpdate = payloadUpdate.takeIf { !payloadUpdateDismissed },
+                            onDismissPayloadUpdate = { payloadUpdateDismissed = true },
                             frameworkRestart = frameworkRestart.takeIf { !frameworkRestartDismissed },
                             onDismissFrameworkRestart = { frameworkRestartDismissed = true },
                             onStartDownload = startDownload,
@@ -1831,6 +1856,15 @@ private fun OverviewPage(
      */
     kernelsuFlavor: KernelSuFlavor,
     onDismissUpdateCard: () -> Unit,
+    /**
+     * A payload this phone was rooted with that the sources have replaced, or null.
+     *
+     * Resolved by the shell rather than here, because the two readings it is made of - the cache and the
+     * catalog - are both the shell's already, and re-reading either on this page would be a second read of
+     * the same fact with its own chance of disagreeing with the first.
+     */
+    payloadUpdate: PayloadUpdate?,
+    onDismissPayloadUpdate: () -> Unit,
     /** What the last framework restart came back with, until it is dismissed. */
     frameworkRestart: FrameworkRestartReport?,
     onDismissFrameworkRestart: () -> Unit,
@@ -2034,6 +2068,18 @@ private fun OverviewPage(
         // Above the readiness card, because it is about something that already happened rather than
         // something to check, and it is the only account of a restart the user asked for: the dialog
         // that started it could only say the request was made.
+        // Above the restart report and the readiness card, because it is the one card here that asks for
+        // something to be done to the phone rather than read off it - and what it asks for is a re-root, which
+        // is the whole reason it is worth interrupting the screen for.
+        if (payloadUpdate != null && !installState.busy) {
+            item {
+                PayloadUpdateCard(
+                    update = payloadUpdate,
+                    onDismiss = onDismissPayloadUpdate,
+                    onRebootAndUnroot = onOpenReboot,
+                )
+            }
+        }
         if (frameworkRestart != null) {
             item {
                 FrameworkRestartCard(
@@ -2210,6 +2256,99 @@ private fun FrameworkRestartCard(report: FrameworkRestartReport, onDismiss: () -
             ZygoteRestartReport.describe(context, report).forEach { line ->
                 Text(text = line, style = MaterialTheme.typography.bodyMedium)
             }
+        }
+    }
+}
+
+/**
+ * The payload this phone was rooted with has been replaced by the sources, and this is the way to it.
+ *
+ * A card on Home rather than a row in the payload sheet, because the sheet is where somebody goes to *choose* a
+ * payload and the person this is for is not choosing anything - they already rooted, and the only way they
+ * would find out that the exploit and daemon have moved on is by comparing two rows by eye.
+ *
+ * The action is the app's own reboot-and-unroot, and it is the whole instruction: root lasts one boot, so
+ * unloading the payload that is live is a restart, and the run that follows takes the new one. Deliberately
+ * not a *Root now* button pressed from here - a run started from a card would skip the sheet's own resolution
+ * and the confirmation that states which payload it is about to spend, which between them are what keep a
+ * rooted phone from being re-rooted with the wrong thing.
+ *
+ * Colours and shape are the update banner's, because that is what this is: a newer build of something the
+ * phone is running. Nothing here is broken, and a card that wore the error colours would say otherwise.
+ */
+@Composable
+private fun PayloadUpdateCard(
+    update: PayloadUpdate,
+    onDismiss: () -> Unit,
+    onRebootAndUnroot: () -> Unit,
+) {
+    val view = LocalView.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.SystemUpdate,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                )
+                Text(
+                    text = stringResource(R.string.payload_update_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(
+                    onClick = {
+                        clickHaptic(view)
+                        onDismiss()
+                    },
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.action_close),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.payload_update_body, update.offeredName),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            // The version pair, when the feed declares both: what is on the phone against what is published.
+            // Quiet under the sentence, because which payload it is matters more than which KernelSU it is -
+            // and it is absent rather than guessed when either side declares no version.
+            val held = update.heldVersion
+            val offered = update.offeredVersion
+            if (held != null && offered != null && held != offered) {
+                Text(
+                    text = stringResource(R.string.payload_update_versions, held, offered),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalContentColor.current.copy(alpha = 0.78f),
+                )
+            }
+            AppActionButton(
+                AppAction(
+                    label = R.string.payload_update_action,
+                    role = AppActionRole.Priority,
+                    onClick = {
+                        clickHaptic(view)
+                        onRebootAndUnroot()
+                    },
+                ),
+            )
         }
     }
 }
