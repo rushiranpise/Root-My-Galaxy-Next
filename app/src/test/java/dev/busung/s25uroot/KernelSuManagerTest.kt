@@ -166,12 +166,12 @@ class KernelSuManagerTest {
     @Test
     fun `the offered release is the flavour's own default until one is named`() {
         assertEquals(
-            "KernelSU_Next_v3.4.0_33294-release.apk",
+            "KernelSU_Next_v3.4.1_33333-release.apk",
             KernelSuFlavor.KernelSuNext.defaultManagerRelease.assetName,
         )
         assertEquals(
-            "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.0/" +
-                "KernelSU_Next_v3.4.0_33294-release.apk",
+            "https://github.com/KernelSU-Next/KernelSU-Next/releases/download/v3.4.1/" +
+                "KernelSU_Next_v3.4.1_33333-release.apk",
             KernelSuFlavor.KernelSuNext.defaultManagerRelease.url,
         )
     }
@@ -180,7 +180,7 @@ class KernelSuManagerTest {
      * The lookup that names a version is a network read, and every caller of it is a tap.
      *
      * A tap handler runs on the main thread, where the read's own socket is refused before it opens -
-     * which is not a crash but a sentence: "could not read the KernelSU-Next 3.4.0 release", for a
+     * which is not a crash but a sentence: "could not read the KernelSU-Next 3.4.1 release", for a
      * release that was published and reachable. Nothing about the failure points at threading, and the
      * version that appears in the picker beside it comes from the listing, which does run on `IO` - so
      * the one line that decides this is worth a test of its own.
