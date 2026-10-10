@@ -34,9 +34,10 @@ enum class KernelSuFlavor(
      * builds from rather than the newest that exists - it is the manager for the daemon this project's
      * payloads stage when the feed is silent about which KernelSU that is.
      *
-     * The three are not the same number: this project's KernelSU-Next payload pins 3.4.0 (upstream's
-     * newest there), KernelSU is still 3.3.0, which is the newest release tiann/KernelSU has published,
-     * and ReSukiSU's is the pre-release its own payload was built against.
+     * The three are not the same number: this project's KernelSU-Next payload pins 3.4.0, KernelSU is
+     * still 3.3.0, which is the newest release tiann/KernelSU has published, and BakaSU's - the flavour
+     * this app still calls `resukisu`, because that is the id its feed entries and preferences use - is
+     * the pre-release its own payload was built against.
      *
      * Nothing checks this against the version on the phone - a newer manager installs and is used exactly
      * the same, and one picked by hand takes precedence.
@@ -85,18 +86,24 @@ enum class KernelSuFlavor(
     ),
     ReSukiSU(
         id = "resukisu",
-        label = "ReSukiSU",
+        // The project renamed itself to BakaSU and moved to `Baka-SU/BakaSU`; the id above and the
+        // manager's package are unchanged, and that is deliberate on both sides -
+        // `defaultManagerPackageName` is still `com.resukisu.resukisu` upstream, and the id is what this
+        // app's feed entries and stored preferences name the flavour by.
+        label = "BakaSU",
         managerPackage = "com.resukisu.resukisu",
-        repository = "ReSukiSU/ReSukiSU",
+        repository = "Baka-SU/BakaSU",
         // A pre-release, and named as one everywhere below: this project marks every release it has
-        // published as a pre-release, so the newest tag is `v4.2.0-rc2` and there is no `v4.2.0` for a
+        // published as a pre-release, so the newest tag is `v4.2.0-rc3` and there is no `v4.2.0` for a
         // lookup to resolve. The suffix is part of the release's name rather than a description of it -
         // the tag, the asset and the version the pairs declare all carry it - so keeping it is what
         // makes a version named here resolve to the same release the daemon was built from.
-        defaultManagerVersion = "4.2.0-rc2",
+        defaultManagerVersion = "4.2.0-rc3",
         // The universal APK, unlike the other two flavours' single release file: this project publishes
-        // one per ABI and a manager has to install on whatever phone asks for it.
-        defaultManagerAsset = "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+        // one per ABI and a manager has to install on whatever phone asks for it. The file names still
+        // carry the old project name, because they are the names the newest release actually published -
+        // the rename happened in the repository, not in its already-published assets.
+        defaultManagerAsset = "ReSukiSU_v4.2.0-rc3_35171-universal-release.apk",
         supportsDynamicManager = true,
         summaryRes = R.string.flavor_resukisu_summary,
     ),

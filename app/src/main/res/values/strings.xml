@@ -713,7 +713,7 @@
     -->
     <string name="flavor_kernelsu_summary">Official KernelSU by Weishu.</string>
     <string name="flavor_kernelsu_next_summary">KernelSU-Next by Rifsxd.</string>
-    <string name="flavor_resukisu_summary">ReSukiSU (SukiSU-Ultra fork).</string>
+    <string name="flavor_resukisu_summary">BakaSU, formerly ReSukiSU (a SukiSU-Ultra fork).</string>
     <string name="repo_no_profile">No payload in the catalog matches %1$s</string>
     <string name="repo_no_profile_closest">Closest: %1$s</string>
     <string name="repo_no_profile_other_kernel">%1$s covers %2$s</string>
@@ -1189,7 +1189,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="universal_confirm_payload">Payload</string>
     <string name="universal_confirm_body">This runs the %1$s exploit from this app alone : no helper, no temporary root and no Shizuku : then installs that KernelSU\'s manager, patches the kernel it writes through, loads its module and starts its service.</string>
     <string name="universal_choice_stages">stages %1$s</string>
-    <string name="universal_choice_no_entry">no %1$s entry for this phone in the enabled sources</string>
+    <string name="universal_choice_no_entry">no %1$s entry for this phone in the enabled sources, so this row stages the generic daemon instead</string>
     <string name="kernel_match_exact">Exact kernel match</string>
     <string name="kernel_match_version">Kernel version match only (%1$s)</string>
     <string name="kernel_match_none">Kernel release not listed</string>
@@ -1231,6 +1231,10 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="device_mismatch_body">This phone is %1$s, but the selected payload is for %2$s. Running it may crash or damage the phone.</string>
     <string name="kernel_version_mismatch_title">Kernel version does not match</string>
     <string name="kernel_version_mismatch_body">This phone runs kernel %1$s, but the selected payload is for %2$s. It may not work.</string>
+    <string name="payload_update_title">Payload update available</string>
+    <string name="payload_update_body">A newer payload is published for this phone: %1$s. The one it was rooted with is older. Reboot and unroot, then root again to run the new one.</string>
+    <string name="payload_update_versions">KernelSU %1$s on this phone, %2$s published</string>
+    <string name="payload_update_action">Reboot and unroot</string>
     <string name="updater_available_title">Update available</string>
     <string name="updater_available_body">Version %1$s is available</string>
     <string name="updater_available_body_short">%1$s is available</string>

@@ -614,10 +614,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             rememberResolvedKernelSu(app, plan.flavor, plan.version)
             // What this run is, written down before a byte is fetched: it is what an armed retry repeats on the
             // next boot, and by then this process is gone and often this boot with it.
-            AppPreferences.setUniversalPlan(app, UniversalPlan(plan.flavor, tier))
+            // The plan's own tier rather than the one that was asked for, because the device tier falls back
+            // to the generic daemon on a phone no source has an entry for - and a record that said "device"
+            // while a generic daemon is staged would be refused by the next boot's own check, which reads the
+            // record to decide whether the daemon it finds is the one this run chose.
+            AppPreferences.setUniversalPlan(app, UniversalPlan(plan.flavor, plan.tier))
             // And the same answer kept in memory for the run's own retry, which is asked for while this screen
             // is still open - see [retryRun], which is where an in-boot retry gets the flow it repeats.
-            mutableState.value = mutableState.value.copy(universalPlan = UniversalPlan(plan.flavor, tier))
+            mutableState.value = mutableState.value.copy(universalPlan = UniversalPlan(plan.flavor, plan.tier))
 
             // 3. The manager, *before* anything is exploited rather than after it.
             //

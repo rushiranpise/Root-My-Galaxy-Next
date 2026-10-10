@@ -113,7 +113,10 @@ internal object KsudStage {
     val MANAGER_FLAVORS: List<ManagerFlavor> = listOf(
         ManagerFlavor(id = "kernelsu", label = "KernelSU", packageName = "me.weishu.kernelsu"),
         ManagerFlavor(id = "kernelsu-next", label = "KernelSU-Next", packageName = "com.rifsxd.ksunext"),
-        ManagerFlavor(id = "resukisu", label = "ReSukiSU", packageName = "com.resukisu.resukisu"),
+        // The label is the project's current name; the id is this app's own, and the package is still the
+        // one the project builds under (`defaultManagerPackageName` upstream). Held to the app's table, all
+        // three fields, by StageTwoIdentityTest.
+        ManagerFlavor(id = "resukisu", label = "BakaSU", packageName = "com.resukisu.resukisu"),
     )
 
     /** 0700: readable and executable by the system, and by nothing else. */

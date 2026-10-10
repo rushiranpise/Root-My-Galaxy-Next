@@ -85,15 +85,19 @@ class KernelSuFlavorTest {
             KernelSuFlavor.KernelSu.defaultManagerRelease.url,
         )
 
-        // ReSukiSU's own, and the one that is not shaped like the other two: it publishes every release
+        // This flavour's own, and the one that is not shaped like the other two: it publishes every release
         // as a pre-release, so the version is a name with a suffix in it, and it ships one manager per
         // ABI, so the file the app would hand over is the universal one.
+        //
+        // The project renamed itself to BakaSU and moved to `Baka-SU/BakaSU`, so the repository here is the
+        // new one - while the manager's package and the published file names are untouched upstream, which
+        // is why they still read `resukisu`.
         assertEquals("com.resukisu.resukisu", KernelSuFlavor.ReSukiSU.managerPackage)
-        assertEquals("ReSukiSU/ReSukiSU", KernelSuFlavor.ReSukiSU.repository)
-        assertEquals("4.2.0-rc2", KernelSuFlavor.ReSukiSU.defaultManagerVersion)
+        assertEquals("Baka-SU/BakaSU", KernelSuFlavor.ReSukiSU.repository)
+        assertEquals("4.2.0-rc3", KernelSuFlavor.ReSukiSU.defaultManagerVersion)
         assertEquals(
-            "https://github.com/ReSukiSU/ReSukiSU/releases/download/v4.2.0-rc2/" +
-                "ReSukiSU_v4.2.0-rc2_35144-universal-release.apk",
+            "https://github.com/Baka-SU/BakaSU/releases/download/v4.2.0-rc3/" +
+                "ReSukiSU_v4.2.0-rc3_35171-universal-release.apk",
             KernelSuFlavor.ReSukiSU.defaultManagerRelease.url,
         )
     }

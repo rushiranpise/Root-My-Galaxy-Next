@@ -411,45 +411,42 @@ internal object UniversalRootRun {
     /**
      * Resolves which daemon this run will stage. Downloads nothing.
      *
-     * A tier that cannot serve this phone throws with the reason, before the manager step and before a byte is
-     * fetched - so a refusal costs nothing but the sentence explaining it. The refusals are deliberately
-     * different sentences: "the feed has no entry for this phone" and "its generic daemon carries no module
-     * for this kernel" call for different things from whoever reads them.
+     * The device tier asks the catalog for an entry for this phone, and **finding none is not a refusal**: this
+     * chain carries its own exploit, so the tier only decides where its *daemon* comes from, and a phone no
+     * source has an entry for takes the generic daemon - the same answer the generic tier gives, and the whole
+     * reason this flow is the one that runs on a phone the feed has never heard of. Refusing there was the bug
+     * this fallback replaces: the sentence it threw told the reader to choose the generic payload, which is
+     * exactly what the run now does for them.
+     *
+     * What can still refuse is the generic lookup, and it refuses for the one thing that is genuinely missing:
+     * no daemon covering this kernel. That sentence is deliberately different from the device tier's old one,
+     * because "the feed has no entry for this phone" and "its generic daemon carries no module for this kernel"
+     * call for different things from whoever reads them.
+     *
+     * Downloads nothing, so a refusal costs the sentence and not a byte.
      */
     internal fun plan(context: Context, flavor: KernelSuFlavor, tier: PayloadTier): Plan {
         val repository = PayloadRepository(context)
         val snapshot = DeviceSnapshot.current()
-        return when (tier) {
-            PayloadTier.Device -> {
-                val profile = repository.loadTargets().resolveFor(snapshot, flavor)
-                if (profile == null) {
-                    throw IllegalStateException(
-                        "no ${flavor.label} payload for ${snapshot.model} on kernel " +
-                            "${snapshot.kernelVersion} in the enabled sources - choose the generic payload, or " +
-                            "add a payload for this build to a source",
-                    )
-                }
-                Plan.Device(profile)
-            }
-
-            PayloadTier.Generic -> {
-                val loaded = repository.loadGenericDaemons()
-                val covering = loaded.daemons.covering(flavor, snapshot.kmi)
-                if (covering == null) {
-                    val published = loaded.daemons.firstOrNull { it.flavor == flavor }
-                    val because = when {
-                        published != null ->
-                            "the generic ${flavor.label} daemon carries ${published.coverage}, and this " +
-                                "phone's kernel is ${snapshot.kmi ?: snapshot.kernelRelease}, so it has no " +
-                                "module for this phone"
-                        loaded.failures.isNotEmpty() -> loaded.failures.joinToString("\n")
-                        else -> "no generic ${flavor.label} daemon is published by the enabled sources"
-                    }
-                    throw IllegalStateException("No generic payload: $because")
-                }
-                Plan.Generic(covering)
-            }
+        if (tier == PayloadTier.Device) {
+            val profile = repository.loadTargets().resolveFor(snapshot, flavor)
+            if (profile != null) return Plan.Device(profile)
         }
+        val loaded = repository.loadGenericDaemons()
+        val covering = loaded.daemons.covering(flavor, snapshot.kmi)
+        if (covering == null) {
+            val published = loaded.daemons.firstOrNull { it.flavor == flavor }
+            val because = when {
+                published != null ->
+                    "the generic ${flavor.label} daemon carries ${published.coverage}, and this " +
+                        "phone's kernel is ${snapshot.kmi ?: snapshot.kernelRelease}, so it has no " +
+                        "module for this phone"
+                loaded.failures.isNotEmpty() -> loaded.failures.joinToString("\n")
+                else -> "no generic ${flavor.label} daemon is published by the enabled sources"
+            }
+            throw IllegalStateException("No generic payload: $because")
+        }
+        return Plan.Generic(covering)
     }
 
     /**
