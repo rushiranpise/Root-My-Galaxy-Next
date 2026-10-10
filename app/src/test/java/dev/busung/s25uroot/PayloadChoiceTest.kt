@@ -165,14 +165,14 @@ class PayloadChoiceTest {
     }
 
     @Test
-    fun `the universal rows join the payload list below it rather than in front of it`() {
-        // Order, because it is what keeps the sheet usable for the ordinary run while still listing this one:
-        // the payloads a person opened the sheet for stay where they were, and the six rows they did not ask
-        // for are one short scroll below them instead of nothing but themselves filling the fold.
+    fun `the universal rows lead the list and the payloads follow them`() {
+        // Order, and the chain is what leads: it needs no helper and no device-specific exploit, so it is the
+        // one row that can always be run - including on a phone no source has an entry for. The payloads the
+        // sources published follow it, in full, so nothing was lost by leading with it.
         val all = rows().all
         assertEquals(9, all.size)
-        assertTrue(all.take(3).all { it is PayloadChoice.Device })
-        assertTrue(all.drop(3).all { it is PayloadChoice.Universal })
+        assertTrue(all.take(6).all { it is PayloadChoice.Universal })
+        assertTrue(all.drop(6).all { it is PayloadChoice.Device })
     }
 
     private fun snapshot(model: String, kernelRelease: String) = DeviceSnapshot(

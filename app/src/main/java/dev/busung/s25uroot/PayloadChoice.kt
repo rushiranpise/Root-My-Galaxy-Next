@@ -136,9 +136,15 @@ internal fun visibleUniversalChoices(
 }
 
 /**
- * The sheet's two groups, in the order it draws them. Device payloads first, because they are what the sheet
- * was for; the universal rows join them below, where they are a short scroll away rather than six rows in front
- * of every payload somebody came for.
+ * The sheet's two groups, in the order it draws them. The universal rows lead, then what the sources publish.
+ *
+ * The chain is the flow that works on a phone no source has an entry for - it is the one that needs no helper
+ * and no device-specific exploit, which is why it is the answer when the feed says nothing about this phone.
+ * Leading with it says that: the first row on the sheet is the one that can always be run, and the payloads a
+ * source published follow it rather than standing in front of it.
+ *
+ * The device rows are still there in full, and the device toggle, the flavour lens and the search reach both
+ * kinds as before - see [payloadRows] for which control applies to which.
  */
 internal data class PayloadRows(
     val universal: List<PayloadChoice.Universal>,
@@ -148,7 +154,7 @@ internal data class PayloadRows(
     val isEmpty: Boolean get() = universal.isEmpty() && device.isEmpty()
 
     /** Everything listed, in the order drawn - which is what [payloadRows] composes and the sheet walks. */
-    val all: List<PayloadChoice> get() = device + universal
+    val all: List<PayloadChoice> get() = universal + device
 }
 
 /**
