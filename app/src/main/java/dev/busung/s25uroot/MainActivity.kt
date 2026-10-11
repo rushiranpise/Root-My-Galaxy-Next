@@ -2104,7 +2104,17 @@ private fun OverviewPage(
         item { DeviceCard(device) }
         // After the phone's own readings, and last of the cards for that reason: everything above says what
         // this phone is doing, and this is the one thing here for a phone the catalog does not cover yet.
-        item { KernelCheckCard(device) }
+        //
+        // Hidden while this phone is rooted, because the question it asks has already been answered: the test
+        // exists to tell a phone that no payload covers yet whether its kernel still has the bug, and a phone
+        // running KernelSU this boot has proved it does. Two readings rather than one because they answer at
+        // different speeds and either is enough - the phase, which knows a run just finished, and the
+        // readiness card's own KernelSU status, which is what a phone rooted before this launch looks like.
+        val rootedThisBoot = installState.phase == InstallPhase.Installed ||
+            readiness.kernelSu == KernelSuStatus.Active
+        if (!rootedThisBoot) {
+            item { KernelCheckCard(device) }
+        }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
         // there to do". Logs is not repeated here - the bar at the bottom already goes there.
