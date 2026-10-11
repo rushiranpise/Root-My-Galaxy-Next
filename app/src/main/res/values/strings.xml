@@ -561,6 +561,8 @@
          card's, so a phase with nothing to say cannot leave the button blank. -->
     <string name="status_checking_device">Checking this device…</string>
     <string name="status_support_failed">Support check failed</string>
+    <string name="status_no_payload_chain">No payload for this phone - the DirtyFrag root covers it</string>
+    <string name="log_chain_available">[*] No payload covers this phone. The DirtyFrag chain does: it loads the %1$s daemon built for this kernel, and it carries its own exploit.</string>
     <string name="status_cache_missing">No cached payload</string>
     <string name="status_checking_github">Checking GitHub support list</string>
     <string name="status_downloading_payload">Downloading payload files</string>

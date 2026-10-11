@@ -425,6 +425,26 @@ internal object UniversalRootRun {
      *
      * Downloads nothing, so a refusal costs the sentence and not a byte.
      */
+    /**
+     * The flavour whose KMI-generic daemon can serve this phone, or null when none of them can.
+     *
+     * The question a phone with no payload entry of its own has to have answered before the app calls that a
+     * failure. The chain is this project's primary method and needs no entry: its daemon is chosen by the
+     * **running kernel's KMI** rather than by a firmware string, so a phone a source has never heard of - a new
+     * build, a region nobody ported - is still a phone it can root. Asking [plan] for the generic tier is the
+     * same resolution a run makes, so the two cannot disagree about whether this phone is rootable.
+     *
+     * Every flavour is asked, in the order the app offers them, because the chain's rows let a person pick
+     * which KernelSU to load: one flavour covering this kernel is enough for the card to stop reading as a
+     * failure, and which one it is belongs on the row the run is started from rather than here.
+     *
+     * Downloads nothing - [plan] resolves the feed and stops there - and the null it returns is the honest
+     * answer for a phone no published daemon carries a module for.
+     */
+    internal fun chainFlavor(context: Context): KernelSuFlavor? = KernelSuFlavor.entries.firstOrNull { flavor ->
+        runCatching { plan(context, flavor, PayloadTier.Generic) }.isSuccess
+    }
+
     internal fun plan(context: Context, flavor: KernelSuFlavor, tier: PayloadTier): Plan {
         val repository = PayloadRepository(context)
         val snapshot = DeviceSnapshot.current()

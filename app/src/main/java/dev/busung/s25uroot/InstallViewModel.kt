@@ -404,20 +404,34 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 )
             } catch (error: Throwable) {
                 if (!publishClaim.holds(claim)) return@launch
+                // No payload entry for this phone is not the same as no way to root it. The chain carries its
+                // own exploit and takes its daemon from the one built for the running kernel's **KMI**, so a
+                // build no source has ported - this phone's own new firmware is the case that found this - is
+                // still a phone it can root. It is asked before the lookup is called a failure, because that
+                // is what the app now treats it as: the primary method, not a fallback of last resort.
+                val offline = AppPreferences.payloadMode(app) == PayloadMode.Offline
+                val chain = if (offline) null else runCatching { UniversalRootRun.chainFlavor(app) }.getOrNull()
                 mutableState.value = InstallUiState(
-                    phase = InstallPhase.Failed,
+                    phase = if (chain != null) InstallPhase.Ready else InstallPhase.Failed,
                     // A missing cached payload and an unreachable catalog are the same failure to look
                     // up support; what differs is which of them the user can do something about, and
                     // the log line below carries the one that happened.
                     message = app.getString(
-                        if (AppPreferences.payloadMode(app) == PayloadMode.Offline) {
-                            R.string.status_cache_missing
-                        } else {
-                            R.string.status_support_failed
+                        when {
+                            offline -> R.string.status_cache_missing
+                            chain != null -> R.string.status_no_payload_chain
+                            else -> R.string.status_support_failed
                         },
                     ),
                     probeOutput = probe,
-                    log = "$probe\n[-] ${error.message ?: error.javaClass.simpleName}",
+                    log = buildString {
+                        append(probe).append('\n')
+                        if (chain != null) {
+                            append(app.getString(R.string.log_chain_available, chain.label))
+                        } else {
+                            append("[-] ${error.message ?: error.javaClass.simpleName}")
+                        }
+                    },
                 )
             }
         }
