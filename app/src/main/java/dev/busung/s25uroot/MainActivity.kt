@@ -7401,15 +7401,6 @@ private fun TargetSelectionSheet(
     // root this phone, and the Next below starts whichever one is picked.
     var selectedKey by remember { mutableStateOf<String?>(null) }
     val view = LocalView.current
-    val rows = remember(catalog.profiles, showOnlyMyDevice, device, query, flavorFilter) {
-        payloadRows(
-            profiles = catalog.profiles,
-            device = device,
-            fitsDeviceOnly = showOnlyMyDevice,
-            query = query,
-            flavor = flavorFilter,
-        )
-    }
     // What a device-tier row would stage, resolved from the catalog this sheet already holds by the same call
     // the run makes ([resolveFor]) - so the row cannot name a payload the run would not use. Resolving fetches
     // nothing; the run's resolution is the one that downloads, and it is the one that refuses.
@@ -7421,6 +7412,25 @@ private fun TargetSelectionSheet(
     // has the same empty list, and calling that a fact about the phone is the kind of wrong answer this app
     // spends its comments refusing.
     val catalogRead = !catalog.loading && catalog.error == null
+    // The flavours the chain's device tier has an entry for, and null while that is not known. This is what
+    // takes a device-tier row off the sheet rather than drawing it over a sentence saying it stages nothing:
+    // a row with no payload behind it can only lead to the run's own refusal, and the generic row under it is
+    // what covers this phone instead. Null keeps both rows listed - see [visibleUniversalChoices].
+    val deviceCoverage = if (catalogRead) {
+        catalogEntries.filterValues { it != null }.keys
+    } else {
+        null
+    }
+    val rows = remember(catalog.profiles, showOnlyMyDevice, device, query, flavorFilter, deviceCoverage) {
+        payloadRows(
+            profiles = catalog.profiles,
+            device = device,
+            fitsDeviceOnly = showOnlyMyDevice,
+            query = query,
+            flavor = flavorFilter,
+            deviceCoverage = deviceCoverage,
+        )
+    }
     val selected = rows.all.firstOrNull { it.key == selectedKey }
 
     // Preselect what the catalog prefers, so a device whose feed lists an exact kernel release
@@ -7696,12 +7706,10 @@ private fun TargetSelectionSheet(
                         UniversalPayloadRow(
                             choice = choice,
                             selected = selectedKey == choice.key,
-                            // What the device tier would stage, resolved from the catalog this sheet holds.
-                            // The row only believes it when the sources were read: an empty profile list
-                            // means "no entry for this phone" after a read, and means nothing at all while
-                            // one is in flight or after one failed.
+                            // What the device tier would stage, resolved from the catalog this sheet holds -
+                            // and never null for a device row that is listed: the row is only on the sheet
+                            // when that resolution found something.
                             entry = catalogEntries[choice.flavor],
-                            catalogRead = catalogRead,
                             onSelect = {
                                 clickHaptic(view)
                                 selectedKey = choice.key
@@ -7885,19 +7893,18 @@ private fun DevicePayloadRow(
  * between by which KernelSU they want, and a row that repeated the exploit's name three times would be noise
  * in the one place the difference between the rows matters.
  *
- * [entry] and [catalogRead] are one answer between them, and the pairing is deliberate. The device tier either
- * resolves to an entry which is shown, because a row that promised a payload the run would not use would be
- * worse than one that promised nothing or to nothing, and "nothing" is only a fact about this phone when
- * the sources were read. Before that read, or after one that failed, the row says nothing about it at all: the
- * absent entry is then the app's own missing data, and naming it as the phone's would be the app blaming the
- * device for a network it never made.
+ * [entry] is the device tier's whole story: the row names the payload the run would stage, and a flavour the
+ * read sources have no entry for is not listed at all - the sheet drops that row rather than drawing it over a
+ * sentence saying it stages nothing, because a row whose only outcome is the run's own refusal is a tap and a
+ * run's first steps spent to be told what the sheet could have said by leaving it out. Before the sources were
+ * read the row says nothing about the entry at all: the absent entry is then the app's own missing data, and
+ * naming it as the phone's would be the app blaming the device for a network it never made.
  */
 @Composable
 private fun UniversalPayloadRow(
     choice: PayloadChoice.Universal,
     selected: Boolean,
     entry: TargetProfile?,
-    catalogRead: Boolean,
     onSelect: () -> Unit,
 ) {
     Surface(
@@ -7937,23 +7944,12 @@ private fun UniversalPayloadRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (choice.tier == PayloadTier.Device) {
-                    when {
-                        entry != null -> Text(
-                            stringResource(R.string.universal_choice_stages, entry.displayName),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        // The one case that is a refusal said in advance. The run refuses the same way and
-                        // with the resolution's own sentence; this is that sentence's short form, here
-                        // because a row that leads to a failure it could have named is a row that wastes a
-                        // tap and a run's first steps.
-                        catalogRead -> Text(
-                            stringResource(R.string.universal_choice_no_entry, choice.flavor.label),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                if (choice.tier == PayloadTier.Device && entry != null) {
+                    Text(
+                        stringResource(R.string.universal_choice_stages, entry.displayName),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

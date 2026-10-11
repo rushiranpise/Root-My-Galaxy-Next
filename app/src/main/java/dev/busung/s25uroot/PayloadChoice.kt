@@ -27,9 +27,9 @@ package dev.busung.s25uroot
  * run. The list keeps that rule and moves where the answer comes from:
  *
  * - the **device** tier's entry is resolved here, from the catalog the sheet already holds, by the same
- *   [resolveFor] call the run makes so the row names what it would stage, or says that the enabled sources
- *   have no entry for this phone. Resolving does not fetch anything, which is what makes it safe to do on a
- *   list.
+ *   [resolveFor] call the run makes so the row names what it would stage. Resolving does not fetch anything,
+ *   which is what makes it safe to do on a list, and a flavour that resolves to nothing is a row the sheet
+ *   does not list: see [visibleUniversalChoices].
  * - the **generic** tier's coverage is not in this app's hands at this point: it comes from a feed the sheet
  *   does not read, and reading it here would be a network call per row. Its row describes the tier instead,
  *   and a run on a kernel the daemon has no module for refuses with the feed's own sentence after the tap,
@@ -122,18 +122,40 @@ internal val allUniversalChoices: List<PayloadChoice.Universal> =
     }
 
 /**
- * The universal rows to show, narrowed by the two controls that apply to them.
+ * The universal rows to show, narrowed by the two controls that apply to them and by what one tier stages.
  *
  * No device parameter, and that is the whole of the "always shown" rule: the toggle narrows what the sources
  * publish, and this is not published by a source. Threading the toggle in here would be the change that made
  * the sheet hide this path on a phone with no entry of its own which is `PayloadChoiceTest`'s first case.
+ *
+ * [deviceCoverage] is the one thing that does take a row away, and it is a fact about the device tier alone:
+ * the flavours the read sources have an entry for. That tier stages an entry out of a catalog and nothing else,
+ * so a flavour with none is a row whose only outcome is the refusal the run produces after the tap - and the
+ * sheet hides it rather than leading someone to that refusal by name. Null is "the sources have not been
+ * read", which is the state the sheet holds while a read is in flight and after one that failed: nothing is
+ * known about this phone then, and every row is listed rather than the app blaming a device for a read it
+ * never made.
  */
 internal fun visibleUniversalChoices(
     flavor: KernelSuFlavor?,
     query: String,
+    deviceCoverage: Set<KernelSuFlavor>? = null,
 ): List<PayloadChoice.Universal> = allUniversalChoices.filter { choice ->
-    (flavor == null || choice.flavor == flavor) && choice.matchesQuery(query)
+    (flavor == null || choice.flavor == flavor) &&
+        choice.matchesQuery(query) &&
+        choice.hasPayloadFor(deviceCoverage)
 }
+
+/**
+ * Whether the sheet has something behind this row.
+ *
+ * Only the device tier can answer no, because only it stages what the app does not already hold everywhere:
+ * the generic daemon is a feed read the run makes for itself, and a row for it is a row on any phone. A device
+ * row is an entry in a catalog the sheet has read, so a flavour that entry is missing for is a row with
+ * nothing behind it - and the tier's engine, not the row, is what covers such a phone.
+ */
+private fun PayloadChoice.Universal.hasPayloadFor(deviceCoverage: Set<KernelSuFlavor>?): Boolean =
+    tier != PayloadTier.Device || deviceCoverage == null || flavor in deviceCoverage
 
 /**
  * The sheet's two groups, in the order it draws them. The universal rows lead, then what the sources publish.
@@ -170,8 +192,10 @@ internal fun payloadRows(
     fitsDeviceOnly: Boolean,
     query: String,
     flavor: KernelSuFlavor?,
+    /** The flavours the read sources cover, or null while they have not been read - see [visibleUniversalChoices]. */
+    deviceCoverage: Set<KernelSuFlavor>? = null,
 ): PayloadRows = PayloadRows(
-    universal = visibleUniversalChoices(flavor, query),
+    universal = visibleUniversalChoices(flavor, query, deviceCoverage),
     device = visibleTargets(profiles, device, fitsDeviceOnly, query, flavor)
         .map(PayloadChoice::Device),
 )

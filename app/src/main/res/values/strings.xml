@@ -1191,7 +1191,6 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="universal_confirm_payload">Payload</string>
     <string name="universal_confirm_body">This runs the %1$s exploit from this app alone : no helper, no temporary root and no Shizuku : then installs that KernelSU\'s manager, patches the kernel it writes through, loads its module and starts its service.</string>
     <string name="universal_choice_stages">stages %1$s</string>
-    <string name="universal_choice_no_entry">no %1$s entry for this phone in the enabled sources, so this row stages the generic daemon instead</string>
     <string name="kernel_match_exact">Exact kernel match</string>
     <string name="kernel_match_version">Kernel version match only (%1$s)</string>
     <string name="kernel_match_none">Kernel release not listed</string>

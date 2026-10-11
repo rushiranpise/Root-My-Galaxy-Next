@@ -51,7 +51,8 @@ class PayloadChoiceTest {
         fitsDeviceOnly: Boolean = false,
         query: String = "",
         flavor: KernelSuFlavor? = null,
-    ) = payloadRows(profiles, device, fitsDeviceOnly, query, flavor)
+        deviceCoverage: Set<KernelSuFlavor>? = null,
+    ) = payloadRows(profiles, device, fitsDeviceOnly, query, flavor, deviceCoverage)
 
     @Test
     fun `the device toggle narrows the payloads and never the universal rows`() {
@@ -93,6 +94,34 @@ class PayloadChoiceTest {
         )
         // The chips' own order, so a row is never under a tab it does not belong to.
         assertEquals(KernelSuFlavor.entries, listed.map { it.first }.distinct())
+    }
+
+    @Test
+    fun `a device-tier row is listed only for a flavour the read sources cover`() {
+        // The row's own sentence used to carry this, and the sheet hides the row instead: the device tier
+        // stages a catalog entry or falls back to the generic daemon, so a flavour that resolves to nothing is
+        // a row whose only content is the tier it already is - and the generic row under it says that.
+        val nextOnly = rows(deviceCoverage = setOf(KernelSuFlavor.KernelSuNext))
+        assertEquals(
+            listOf(
+                KernelSuFlavor.KernelSu to PayloadTier.Generic,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Device,
+                KernelSuFlavor.KernelSuNext to PayloadTier.Generic,
+                KernelSuFlavor.ReSukiSU to PayloadTier.Generic,
+            ),
+            nextOnly.universal.map { it.flavor to it.tier },
+        )
+        // The phone this flow exists for: no source has an entry at all, so the three device rows are gone and
+        // the three generic ones stand - a sheet that is not empty, because something here can still root it.
+        val noneCovered = rows(deviceCoverage = emptySet())
+        assertEquals(3, noneCovered.universal.size)
+        assertTrue(noneCovered.universal.all { it.tier == PayloadTier.Generic })
+        assertFalse(noneCovered.isEmpty)
+        // And an unread catalog covers nobody and hides nothing: the null is "not known", not "nothing", and
+        // dropping rows over it would be the app answering from a read it never made.
+        assertEquals(6, rows(deviceCoverage = null).universal.size)
+        assertEquals(6, rows(profiles = emptyList(), deviceCoverage = null).universal.size)
+        assertEquals(3, rows(profiles = emptyList(), deviceCoverage = emptySet()).universal.size)
     }
 
     @Test
