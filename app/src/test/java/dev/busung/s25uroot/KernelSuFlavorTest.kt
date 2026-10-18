@@ -79,6 +79,15 @@ class KernelSuFlavorTest {
         // Nothing rejects a manager installed by hand in their place.
         assertEquals("3.3.1", KernelSuFlavor.KernelSu.defaultManagerVersion)
         assertEquals("3.4.2", KernelSuFlavor.KernelSuNext.defaultManagerVersion)
+        // The test line is the same project with its own tree, and it publishes no release of its own -
+        // so it offers the same manager as the release-based flavour rather than inventing a version.
+        assertEquals("kernelsu-next-test", KernelSuFlavor.KernelSuNextTest.id)
+        assertEquals(KernelSuFlavor.KernelSuNext.managerPackage, KernelSuFlavor.KernelSuNextTest.managerPackage)
+        assertEquals(KernelSuFlavor.KernelSuNext.repository, KernelSuFlavor.KernelSuNextTest.repository)
+        assertEquals(
+            KernelSuFlavor.KernelSuNext.defaultManagerRelease.url,
+            KernelSuFlavor.KernelSuNextTest.defaultManagerRelease.url,
+        )
         assertEquals(
             "https://github.com/tiann/KernelSU/releases/download/v3.3.1/" +
                 "KernelSU_v3.3.1_32680-release.apk",

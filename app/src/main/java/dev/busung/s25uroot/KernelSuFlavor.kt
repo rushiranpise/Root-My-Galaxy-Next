@@ -84,6 +84,27 @@ enum class KernelSuFlavor(
         defaultManagerAsset = "KernelSU_Next_v3.4.2_33355-release.apk",
         summaryRes = R.string.flavor_kernelsu_next_summary,
     ),
+
+    /**
+     * KernelSU-Next's `test` line, offered beside the release-based one.
+     *
+     * The same project, the same manager and the same kernel lineage - what differs is the tree it is
+     * built from: that branch carries the Samsung KDP/RKP/DEFEX support itself, so its payloads take no
+     * patch of ours. That is why it is a flavour and not a rebuild of [KernelSuNext]: the feed names one
+     * artifact per flavour, so a row of its own is the only way both builds can be offered at once.
+     *
+     * The manager is the release one, because that branch publishes no release - the manager is the same
+     * application either way, and the daemon's own version (`test`) names no release to download.
+     */
+    KernelSuNextTest(
+        id = "kernelsu-next-test",
+        label = "KernelSU-Next test",
+        managerPackage = "com.rifsxd.ksunext",
+        repository = "KernelSU-Next/KernelSU-Next",
+        defaultManagerVersion = "3.4.2",
+        defaultManagerAsset = "KernelSU_Next_v3.4.2_33355-release.apk",
+        summaryRes = R.string.flavor_kernelsu_next_test_summary,
+    ),
     ReSukiSU(
         id = "resukisu",
         // The project renamed itself to BakaSU and moved to `Baka-SU/BakaSU`; the id above and the
