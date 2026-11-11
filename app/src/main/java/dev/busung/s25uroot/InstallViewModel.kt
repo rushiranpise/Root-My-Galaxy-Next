@@ -2259,7 +2259,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             nativeHelperFile()
         }
 
-    private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "libcve43499root.so")
+    private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "librmgroot.so")
 
     /** The app-private directory the timer payload may create its scratch files in. */
     private fun timerAppHome(): String =
