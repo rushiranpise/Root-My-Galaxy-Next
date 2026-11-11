@@ -63,7 +63,12 @@ internal fun bootPayloadNeedsShell(
     preferAttempted: Boolean,
     attempted: CachedPayload?,
     cached: CachedPayload?,
-): Boolean = ((if (preferAttempted) attempted else null) ?: cached) == null
+): Boolean {
+    val selected = (if (preferAttempted) attempted else null) ?: cached ?: return true
+    // The timer payload calibrates through tracefs, which needs the shell's readtracefs group. The
+    // cached descriptor predates the feed's optional cve field, so its profile id is the answer.
+    return selected.profileId.contains(TimerVulnerability.CVE, ignoreCase = true)
+}
 
 /**
  * Whether taking back the install in front of you also takes back the retry this device has armed.

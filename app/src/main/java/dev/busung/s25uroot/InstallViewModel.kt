@@ -1333,7 +1333,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val loadKernelSu = AppPreferences.loadKernelSu(app)
                 // The run's own answer to the question above, honoured for the whole run: this is what
                 // makes "Run without Shizuku" mean it rather than asking again a moment later.
-                val shizukuRequested = AppPreferences.shizukuMode(app) && !withoutShizuku
+                // CVE-2026-98260 calibrates through tracefs, and the app UID is not in the readtracefs
+                // group. It therefore needs a shell even though the feed has no policy field for
+                // that: app-process execution would reach calibration and fail with EACCES. Prefer
+                // the already-running Shizuku session when there is one, without requiring the user
+                // to turn the global Use Shizuku setting on for an ordinary 499 payload.
+                val timerPayload = profile.isTimerPayload()
+                val shellRequired = routePolicy.policy.prefersShellTransport || timerPayload
+                val shizukuRequested = (AppPreferences.shizukuMode(app) || timerPayload) && !withoutShizuku
                 val shizukuUsable = ShizukuController.isRunning() && ShizukuController.isGranted()
                 // The gate has already waited for Shizuku, so a binder that is missing here is not the
                 // thing to fall back from: this run was started on the promise that it would go through
@@ -1343,7 +1350,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 }
                 val localAdbPaired = AdbCredentialStore.hasStoredKey(app) && AppPreferences.adbPaired(app)
                 val transport = chooseRunTransport(
-                    shellRequired = routePolicy.policy.prefersShellTransport,
+                    shellRequired = shellRequired,
                     shizukuRequested = shizukuRequested,
                     shizukuUsable = shizukuUsable,
                     localAdbPaired = localAdbPaired,
@@ -1354,9 +1361,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 // anywhere was a run that was set to go through Shizuku and went another way.
                 AppLog.info(
                     RUN_LOG_TAG,
-                    "Transport ${transport.name} (shell required=" +
-                        "${routePolicy.policy.prefersShellTransport}, Shizuku requested=$shizukuRequested, " +
-                        "usable=$shizukuUsable, pairing saved=$localAdbPaired)",
+                    "Transport ${transport.name} (shell required=$shellRequired, " +
+                        "Shizuku requested=$shizukuRequested, usable=$shizukuUsable, " +
+                        "pairing saved=$localAdbPaired)",
                 )
 
                 if (transport == RunTransport.Shizuku) {
