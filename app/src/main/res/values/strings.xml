@@ -484,6 +484,16 @@
     <string name="kernel_check_unfinished">The test did not finish</string>
     <string name="kernel_check_from_version">The fix arrives in %1$s and this phone is on %2$s.</string>
     <!--
+      CVE-2026-98260 is a second kernel row, separate from the rtmutex probe above. It is a version
+      reading only: no probe binary measures this timer bug yet.
+    -->
+    <string name="timer_check_title">CVE-2026-98260</string>
+    <string name="timer_check_body">A POSIX CPU timer use-after-free fixed in 6.6.158. This row reads the kernel version only; it does not run a test.</string>
+    <string name="timer_check_vulnerable">This kernel is below the fixed release. A payload for the exact build can be selected in the payload sheet.</string>
+    <string name="timer_check_patched">This kernel is at or above the fixed release.</string>
+    <string name="timer_check_undecided">The kernel version could not be read.</string>
+    <string name="timer_check_from_version">Fixed in %1$s; this phone is on %2$s.</string>
+    <!--
       The kernel check's own three steps, drawn in the same list the run screen's four are: the same marks,
       the same count up, and one row per thing the check actually does.
     -->

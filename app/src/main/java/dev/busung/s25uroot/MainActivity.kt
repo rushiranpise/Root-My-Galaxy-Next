@@ -2115,6 +2115,7 @@ private fun OverviewPage(
             readiness.kernelSu == KernelSuStatus.Active
         if (!rootedThisBoot) {
             item { KernelCheckCard(device) }
+            item { TimerCheckCard(device) }
         }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
@@ -3126,6 +3127,60 @@ private fun leftoverCheck(context: Context): KernelCheckState {
  * card says so without starting anything. That is the one case where asking the kernel could add nothing, and
  * a kernel above the fix is not one to wedge for confirmation.
  */
+@Composable
+private fun TimerCheckCard(device: DeviceSnapshot) {
+    val table = remember(device.kernelVersion) { TimerVulnerability.read(device.kernelVersion) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.timer_check_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.timer_check_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(
+                    when (table.verdict) {
+                        KernelVulnerability.Verdict.Vulnerable -> R.string.timer_check_vulnerable
+                        KernelVulnerability.Verdict.Patched -> R.string.timer_check_patched
+                        KernelVulnerability.Verdict.Undecided -> R.string.timer_check_undecided
+                    },
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (table.verdict == KernelVulnerability.Verdict.Vulnerable) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            table.fixedIn?.let { fixed ->
+                Text(
+                    text = stringResource(
+                        R.string.timer_check_from_version,
+                        fixed.toString(),
+                        device.kernelVersion,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun KernelCheckCard(device: DeviceSnapshot) {
     val context = LocalContext.current
