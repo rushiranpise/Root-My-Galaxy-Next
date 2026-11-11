@@ -1803,8 +1803,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         routePolicy: ExploitRoutePolicy,
     ) {
         val payload = payloads.exploit
+        val timerPayload = payloads.profile.isTimerPayload()
         if (activeRunTransport == RunTransport.LocalAdb) {
-            executeExploitOverLocalAdb(payload, payloads.kernelSu, requiresFreshP0Session, routePolicy)
+            executeExploitOverLocalAdb(payload, payloads.kernelSu, requiresFreshP0Session, routePolicy, timerPayload)
             return
         }
         val shizuku = shizukuEnabled()
@@ -1847,6 +1848,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     requiresFreshP0Session,
                     cachedP0Offset,
                     routePolicy,
+                    timerPayload,
                 ),
             )
         } else {
@@ -1857,7 +1859,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 helper.absolutePath,
                 logFile.absolutePath,
             ).redirectErrorStream(true)
-            processBuilder.environment().putAll(exploitEnvironment(cachedP0Offset))
+            val environment = exploitEnvironment(cachedP0Offset).toMutableMap()
+            if (timerPayload) environment[TIMER_HOME_ENV] = timerAppHome()
+            processBuilder.environment().putAll(environment)
             processBuilder.start()
         }
         val captured = StringBuilder()
@@ -1955,6 +1959,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         kernelSu: File,
         requiresFreshP0Session: Boolean,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
     ) {
         val logPrefix = mutableState.value.log
         val helper = nativeHelperFile()
@@ -1989,6 +1994,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         requiresFreshP0Session,
                         cachedP0Offset,
                         routePolicy,
+                        timerPayload,
                     ),
                     overallTimeoutMs = totalMillis,
                     // A fresh session is deliberately allowed to sit silent for as long as its ceiling:
@@ -2224,11 +2230,15 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         requiresFreshP0Session: Boolean,
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
         exploitEnvironment(cachedP0Offset).forEach { (name, value) ->
             append(name).append('=').append(shellQuote(value)).append(' ')
+        }
+        if (timerPayload) {
+            append(TIMER_HOME_ENV).append('=').append(shellQuote(SHIZUKU_TIMER_HOME)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
         append(" --run-payload")
@@ -2250,6 +2260,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
 
     private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "libcve43499root.so")
+
+    /** The app-private directory the timer payload may create its scratch files in. */
+    private fun timerAppHome(): String =
+        File(app.filesDir, "cve98260-app").apply { mkdirs() }.absolutePath
 
     private fun shizukuEnabled(): Boolean = activeRunShizuku ?: AppPreferences.shizukuMode(app)
 
@@ -2273,10 +2287,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         requiresFreshP0Session: Boolean,
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
     ): Array<String> = buildList {
         exploitEnvironment(cachedP0Offset).forEach { (name, value) ->
             add("$name=$value")
         }
+        if (timerPayload) add("$TIMER_HOME_ENV=$SHIZUKU_TIMER_HOME")
         add("CVE43499_ROOT_HELPER=$helperPath")
         add("LD_PRELOAD=$payloadPath")
     }.toTypedArray()
@@ -2904,6 +2920,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
+        private const val TIMER_HOME_ENV = "CVE98260_HOME"
+        private const val SHIZUKU_TIMER_HOME = "/data/local/tmp/cve98260-app"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
         private const val SHIZUKU_KSUD_PATH = KSUD_PATH
         private const val SHIZUKU_KSUD_STAGE_PATH = KSUD_STAGE_PATH
