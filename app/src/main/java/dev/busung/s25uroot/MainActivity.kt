@@ -7460,8 +7460,14 @@ private fun TargetSelectionSheet(
     // What a device-tier row would stage, resolved from the catalog this sheet already holds by the same call
     // the run makes ([resolveFor]) - so the row cannot name a payload the run would not use. Resolving fetches
     // nothing; the run's resolution is the one that downloads, and it is the one that refuses.
-    val catalogEntries = remember(catalog.profiles, device) {
-        KernelSuFlavor.entries.associateWith { catalog.profiles.resolveFor(device, it) }
+    // DirtyFrag keeps its own device tier. Timer entries are a different exploit family and must not
+    // be resolved here, or the sheet says DirtyFrag stages the timer payload and the two CVEs become
+    // one choice on screen. The timer entries are still listed as normal device payloads below.
+    val dirtyFragProfiles = remember(catalog.profiles) {
+        catalog.profiles.filterNot { it.isTimerPayload() }
+    }
+    val catalogEntries = remember(dirtyFragProfiles, device) {
+        KernelSuFlavor.entries.associateWith { dirtyFragProfiles.resolveFor(device, it) }
     }
     // Whether that resolution is an answer at all. An empty profile list means "no entry for this phone" only
     // when the sources were read: a sheet opened while they are still being read, or after a read that failed,
@@ -7733,25 +7739,48 @@ private fun TargetSelectionSheet(
                         }
                     }
                     else -> {
-                        item(key = SHEET_DEVICE_GROUP_KEY) {
-                            PayloadGroupHeader(
-                                // The flow's own name, which is the same name the run this row starts writes
-                                // into its record - the sheet and the history agree because there is one name
-                                // rather than two that have to be kept in step by hand.
-                                title = RunKind.Payload.flowName,
-                                detail = stringResource(R.string.payload_group_device),
-                            )
+                        val timerRows = rows.device.filter { it.profile.isTimerPayload() }
+                        val payloadRows = rows.device.filterNot { it.profile.isTimerPayload() }
+                        if (timerRows.isNotEmpty()) {
+                            item(key = SHEET_TIMER_GROUP_KEY) {
+                                PayloadGroupHeader(
+                                    title = TimerVulnerability.CVE,
+                                    detail = stringResource(R.string.payload_group_timer),
+                                )
+                            }
+                            items(timerRows, key = { it.key }) { choice ->
+                                DevicePayloadRow(
+                                    profile = choice.profile,
+                                    selected = selectedKey == choice.key,
+                                    device = device,
+                                    onSelect = {
+                                        clickHaptic(view)
+                                        selectedKey = choice.key
+                                    },
+                                )
+                            }
                         }
-                        items(rows.device, key = { it.key }) { choice ->
-                            DevicePayloadRow(
-                                profile = choice.profile,
-                                selected = selectedKey == choice.key,
-                                device = device,
-                                onSelect = {
-                                    clickHaptic(view)
-                                    selectedKey = choice.key
-                                },
-                            )
+                        if (payloadRows.isNotEmpty()) {
+                            item(key = SHEET_DEVICE_GROUP_KEY) {
+                                PayloadGroupHeader(
+                                    // The flow's own name, which is the same name the run this row starts writes
+                                    // into its record - the sheet and the history agree because there is one name
+                                    // rather than two that have to be kept in step by hand.
+                                    title = RunKind.Payload.flowName,
+                                    detail = stringResource(R.string.payload_group_device),
+                                )
+                            }
+                            items(payloadRows, key = { it.key }) { choice ->
+                                DevicePayloadRow(
+                                    profile = choice.profile,
+                                    selected = selectedKey == choice.key,
+                                    device = device,
+                                    onSelect = {
+                                        clickHaptic(view)
+                                        selectedKey = choice.key
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -7820,6 +7849,7 @@ private fun TargetSelectionSheet(
  * `when`, and a list can no more hold two of them than it can hold two device groups.
  */
 private const val SHEET_UNIVERSAL_GROUP_KEY = "sheet:universal-group"
+private const val SHEET_TIMER_GROUP_KEY = "sheet:timer-group"
 private const val SHEET_DEVICE_GROUP_KEY = "sheet:device-group"
 private const val SHEET_STATE_KEY = "sheet:state"
 

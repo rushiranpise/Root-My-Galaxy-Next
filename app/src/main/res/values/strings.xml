@@ -725,7 +725,6 @@
     -->
     <string name="flavor_kernelsu_summary">Official KernelSU by Weishu.</string>
     <string name="flavor_kernelsu_next_summary">KernelSU-Next by Rifsxd.</string>
-    <string name="flavor_kernelsu_next_test_summary">KernelSU-Next\'s test branch, which carries its own Samsung support.</string>
     <string name="flavor_resukisu_summary">BakaSU, formerly ReSukiSU (a SukiSU-Ultra fork).</string>
     <string name="repo_no_profile">No payload in the catalog matches %1$s</string>
     <string name="repo_no_profile_closest">Closest: %1$s</string>
@@ -1190,6 +1189,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <!-- The two group titles are the flows' own names (RunKind.flowName); these are what follows them. -->
     <string name="payload_group_universal_detail">Runs from this app alone, before anything is installed: it installs the manager itself, patches the kernel it writes through and starts its service. It still needs a payload, and the row says which.</string>
     <string name="payload_group_device">Payloads the enabled sources publish for a phone, by model and kernel release.</string>
+    <string name="payload_group_timer">CVE-2026-98260 timer payloads.</string>
     <string name="universal_choice_device">Device payload</string>
     <string name="universal_choice_generic">Generic payload</string>
     <!--
