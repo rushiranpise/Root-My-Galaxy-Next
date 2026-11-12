@@ -2274,7 +2274,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             append(name).append('=').append(shellQuote(value)).append(' ')
         }
         if (timerPayload) {
-            append(TIMER_HOME_ENV).append('=').append(shellQuote(SHIZUKU_TIMER_HOME)).append(' ')
             append(TIMER_PACKAGE_ENV).append('=').append(shellQuote(flavorPackage)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
@@ -2331,7 +2330,6 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             add("$name=$value")
         }
         if (timerPayload) {
-            add("$TIMER_HOME_ENV=$SHIZUKU_TIMER_HOME")
             add("$TIMER_PACKAGE_ENV=$flavorPackage")
         }
         add("CVE43499_ROOT_HELPER=$helperPath")
@@ -2967,9 +2965,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
+        // Only the in-process route sets this. The shell routes leave the timer payload's home to
+        // its own default, which is the payload's name to choose rather than a staged name of ours.
         private const val TIMER_HOME_ENV = "CVE98260_HOME"
         private const val TIMER_PACKAGE_ENV = "CVE98260_KSU_PACKAGE"
-        private const val SHIZUKU_TIMER_HOME = "/data/local/tmp/cve98260-app"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
         private const val SHIZUKU_KSUD_PATH = KSUD_PATH
         private const val SHIZUKU_KSUD_STAGE_PATH = KSUD_STAGE_PATH
