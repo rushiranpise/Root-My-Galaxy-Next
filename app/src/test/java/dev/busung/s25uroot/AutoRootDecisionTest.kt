@@ -162,7 +162,8 @@ class AutoRootDecisionTest {
         )
         assertTrue(
             "the run no longer prefers the attempted payload when the boot is a retry",
-            service.contains("preferAttemptedPayload = retryArmedThisBoot"),
+            service.contains("val preferAttempted = retryArmedThisBoot && !timerBootRoot") &&
+                service.contains("preferAttemptedPayload = preferAttempted"),
         )
         assertTrue(
             "the notification no longer names a retry boot as one",

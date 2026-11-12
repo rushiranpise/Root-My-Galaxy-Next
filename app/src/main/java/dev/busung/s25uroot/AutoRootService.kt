@@ -184,6 +184,26 @@ class AutoRootService : Service() {
             finish(getString(R.string.autoroot_timer_needs_payload))
             return
         }
+        // The timer payload runs only through Shizuku, not through the app process and not through a
+        // wireless pairing. A running Shizuku without this app's grant cannot carry it, so that is a
+        // refusal now rather than a wait that could never end in a usable transport. If Shizuku is down
+        // but something here can start it, the wait below is allowed to try; otherwise this boot has no
+        // transport and says so before claiming its attempt.
+        if (timerBootRoot) {
+            when (ShizukuController.availability()) {
+                ShizukuAvailability.Ready -> Unit
+                ShizukuAvailability.WithoutPermission -> {
+                    AppLog.warn(AppLogTags.BOOT, "The timer's boot gate needs permission to use Shizuku")
+                    finish(getString(R.string.autoroot_timer_shizuku_required))
+                    return
+                }
+                ShizukuAvailability.NotRunning -> if (!shizukuStartable()) {
+                    AppLog.warn(AppLogTags.BOOT, "The timer's boot gate needs Shizuku running")
+                    finish(getString(R.string.autoroot_timer_shizuku_required))
+                    return
+                }
+            }
+        }
         // The authoritative reading, not the native one: this is the decision that spends the boot's
         // single install attempt, and on this hardware the native paths can be denied by policy while
         // root is live. Asking twice costs a process; asking wrongly costs a doomed install.
@@ -286,16 +306,33 @@ class AutoRootService : Service() {
                 // of them. What it must not do is spend the boot on a transport the payload does not
                 // need: see [bootShizukuPlan], which runs the standard way instead of holding when the
                 // payload can carry itself, so a boot with no Wi-Fi and no root still makes progress.
+                // A retry is a request to repeat the payload that failed, but the timer gate is a
+                // request for the cached 98260 payload. Letting a retry choose the profile under it
+                // would let the gate run another payload, and that payload's policy could then take
+                // a transport the timer gate has just refused. The timer gate always runs its cache.
+                val preferAttempted = retryArmedThisBoot && !timerBootRoot
                 val payloadNeedsShell = AutoRootSupport.bootPayloadNeedsShell(
                     context = this@AutoRootService,
-                    preferAttempted = retryArmedThisBoot,
+                    preferAttempted = preferAttempted,
                 )
-                when (val step = shizukuStep(payloadNeedsShell)) {
+                when (val step = shizukuStep(payloadNeedsShell, requireShizuku = timerBootRoot)) {
                     is ShizukuStep.Refuse -> {
-                        finish(step.refusal.message, answers = step.refusal.answers)
+                        if (timerBootRoot) {
+                            // The ordinary answers include "use the standard method", which is not a
+                            // transport this payload has. Report the missing Shizuku without offering a
+                            // button that would only refuse again.
+                            AppLog.warn(AppLogTags.BOOT, "The timer's boot gate could not get Shizuku")
+                            finish(getString(R.string.autoroot_timer_shizuku_required))
+                        } else {
+                            finish(step.refusal.message, answers = step.refusal.answers)
+                        }
                         return@withTimeout
                     }
-                    is ShizukuStep.Run -> runInstall(bootToken, withoutShell = step.withoutShell)
+                    is ShizukuStep.Run -> runInstall(
+                        bootToken,
+                        withoutShell = step.withoutShell,
+                        preferAttemptedPayload = preferAttempted,
+                    )
                 }
             }
         } catch (timeout: TimeoutCancellationException) {
@@ -404,9 +441,12 @@ class AutoRootService : Service() {
      * one place where a boot can decide to install without Shizuku, and a device whose payload was read
      * as not needing a shell has to be able to see that it was read that way.
      */
-    private suspend fun shizukuStep(shellRequired: Boolean): ShizukuStep {
+    private suspend fun shizukuStep(shellRequired: Boolean, requireShizuku: Boolean = false): ShizukuStep {
         val plan = bootShizukuPlan(
-            requested = AppPreferences.shizukuMode(this),
+            // The timer gate does not have a fallback, so it asks for Shizuku even when the global
+            // Use Shizuku setting is off. The payload needs the shell; the setting is about the other
+            // flows and cannot turn this one into a run with no shell.
+            requested = requireShizuku || AppPreferences.shizukuMode(this),
             usable = shizukuUsable(),
             startable = shizukuStartable(),
             shellRequired = shellRequired,
@@ -421,7 +461,7 @@ class AutoRootService : Service() {
             // afterwards: the run is the same code as the screen's "run without Shizuku", so what it
             // installs is exactly what that answer would have installed.
             BootShizukuPlan.WithoutShell -> ShizukuStep.Run(withoutShell = true)
-            BootShizukuPlan.Wait -> when (awaitShizuku()) {
+            BootShizukuPlan.Wait -> when (awaitShizuku(stillRequired = requireShizuku)) {
                 ShizukuWaitEnd.Arrived -> ShizukuStep.Run(withoutShell = false)
                 // Two refusals rather than one, because they ask for different things: a Shizuku that did
                 // not come up in the time it was given may come up on a second ask, while one that was
@@ -519,7 +559,7 @@ class AutoRootService : Service() {
      * network that arrives late is used immediately, because the spacing between attempts is measured in
      * real time while the window is not.
      */
-    private suspend fun awaitShizuku(): ShizukuWaitEnd {
+    private suspend fun awaitShizuku(stillRequired: Boolean = false): ShizukuWaitEnd {
         var attempts = 0
         // Counted in ticks of this loop rather than from the clock, so the ticks spent with nothing to
         // try do not come out of the window: see the two measurements above.
@@ -530,7 +570,7 @@ class AutoRootService : Service() {
         while (true) {
             // The setting can be turned off while this waits - it is minutes in which somebody may well
             // open the app - and waiting for something no longer wanted is only a delay.
-            if (!AppPreferences.shizukuMode(this)) return ShizukuWaitEnd.Arrived
+            if (!stillRequired && !AppPreferences.shizukuMode(this)) return ShizukuWaitEnd.Arrived
             if (shizukuUsable()) return ShizukuWaitEnd.Arrived
             // Re-read every pass rather than once: this wait is long enough for the device to change
             // under it - Wi-Fi turned on, a pairing made, a token typed in - and every one of those is a
@@ -548,7 +588,7 @@ class AutoRootService : Service() {
                     // setting is otherwise checked: this branch blocks for minutes, and checking a
                     // setting that can be turned off during it at the point where it stops being true
                     // is the whole difference between respecting it and having read it once.
-                    stillWanted = { AppPreferences.shizukuMode(this) },
+                    stillWanted = { stillRequired || AppPreferences.shizukuMode(this) },
                 ) { remaining ->
                     notifyOngoing(
                         message = getString(
@@ -719,7 +759,11 @@ class AutoRootService : Service() {
      * between running as the settings ask and running the standard way, and the run is told which one it
      * is because it cannot ask.
      */
-    private suspend fun runInstall(bootToken: String, withoutShell: Boolean = false) {
+    private suspend fun runInstall(
+        bootToken: String,
+        withoutShell: Boolean = false,
+        preferAttemptedPayload: Boolean = retryArmedThisBoot,
+    ) {
         val model = InstallViewModel(application)
         viewModel = model
         progressJob = scope.launch {
@@ -746,7 +790,7 @@ class AutoRootService : Service() {
             // A retry runs the payload the failed attempt was for, from the files that attempt left on
             // the device. Root on boot has no attempt to honour by definition - it is not repeating
             // anything - so it keeps resolving from the cache.
-            preferAttemptedPayload = retryArmedThisBoot,
+            preferAttemptedPayload = preferAttemptedPayload,
             // The promise the gate could not keep, dropped before the run rather than inside it: the run
             // refuses an unattended start that was told to use Shizuku and has none, and that refusal is
             // what makes this an explicit decision instead of a silent fallback.

@@ -1324,9 +1324,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
                 // The transport is chosen here rather than beside the Shizuku check, because the
                 // profile is what decides whether a shell is required at all - and a target that
-                // requires one can be carried by a pairing instead of by Shizuku. Frozen for the
-                // whole run, so a mid-run preference change cannot mix transports between the exploit
-                // and the KernelSU staging steps.
+                // requires one can be carried by a pairing instead of by Shizuku, except for the timer
+                // payload, which is Shizuku-only. Frozen for the whole run, so a mid-run preference
+                // change cannot mix transports between the exploit and the KernelSU staging steps.
                 // Frozen here with the transport, for the same reason: a preference changed from the
                 // settings screen while this run is in flight must not be able to produce a half-load
                 // - staged on one reading and skipped on another.
@@ -1341,7 +1341,22 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val timerPayload = profile.isTimerPayload()
                 val shellRequired = routePolicy.policy.prefersShellTransport || timerPayload
                 val shizukuRequested = (AppPreferences.shizukuMode(app) || timerPayload) && !withoutShizuku
-                val shizukuUsable = ShizukuController.isRunning() && ShizukuController.isGranted()
+                val shizukuAvailability = ShizukuController.availability()
+                val shizukuUsable = shizukuAvailability == ShizukuAvailability.Ready
+                // The timer payload is stricter than the shell rule below: it was verified through
+                // Shizuku, so a pairing is not an interchangeable transport for it. Refuse before the
+                // payload is staged or started, and say which piece is missing rather than falling back
+                // to a run that would fail later in calibration.
+                val timerTransport = if (timerPayload) {
+                    activeStage = RunStage.Transport
+                    if (withoutShizuku) {
+                        error(app.getString(R.string.error_timer_shizuku_required))
+                    }
+                    timerRunTransport(shizukuAvailability)
+                        ?: error(app.getString(R.string.error_timer_shizuku_required))
+                } else {
+                    null
+                }
                 // The gate has already waited for Shizuku, so a binder that is missing here is not the
                 // thing to fall back from: this run was started on the promise that it would go through
                 // Shizuku, and a payload that runs in the app's process instead is a different run.
@@ -1349,7 +1364,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     error(app.getString(R.string.error_shizuku_unavailable))
                 }
                 val localAdbPaired = AdbCredentialStore.hasStoredKey(app) && AppPreferences.adbPaired(app)
-                val transport = chooseRunTransport(
+                val transport = timerTransport ?: chooseRunTransport(
                     shellRequired = shellRequired,
                     shizukuRequested = shizukuRequested,
                     shizukuUsable = shizukuUsable,

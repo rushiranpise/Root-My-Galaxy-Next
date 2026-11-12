@@ -74,9 +74,9 @@ that is remembered with a dozen sources configured it can hold every device its 
 the row being looked for is found by name long before it is found by scrolling.
 
 Rows whose exploit is **CVE-2026-98260** are grouped under that CVE ahead of the legacy device rows.
-They are payload runs, not DirtyFrag targets: the timer payload needs a shell, so it goes through
-Shizuku or a paired wireless ADB rather than the app's own process, and its history and notification
-name 98260 rather than 43499.
+They are payload runs, not DirtyFrag targets: the timer payload needs a shell and is verified only
+through Shizuku, so it runs through Shizuku rather than a pairing or the app's own process, and its
+history and notification name 98260 rather than 43499.
 
 Below the payload rows the same sheet lists **Dirty Frag**, the chain that needs nothing installed first:
 one row per KernelSU per payload tier, six of them, each named by the exploit and its CVE rather than
@@ -325,12 +325,12 @@ versions of one another:
 | CVE | what runs | where it is offered |
 |---|---|---|
 | **CVE-2026-43499** | the legacy payload flow, with a device-specific exploit from the feed | the device group in the payload sheet |
-| **CVE-2026-98260** | the timer payload flow, with the same steps and transport and a different exploit | its own **CVE-2026-98260** group above the device group |
+| **CVE-2026-98260** | the timer payload flow, with the same steps, a different exploit, and Shizuku as its only transport | its own **CVE-2026-98260** group above the device group |
 | **CVE-2026-43284** | the DirtyFrag chain, with the exploit compiled into the app and a daemon from the feed | the **Dirty Frag (CVE-2026-43284)** rows below the device group |
 
-A timer payload is still a payload run, not a DirtyFrag run: it shares the payload flow's steps, its
-transport and its record shape, and differs in the exploit it downloads, the CVE its record and
-notification name, and its own working directory. A feed row carrying CVE-2026-98260 is never resolved
+A timer payload is still a payload run, not a DirtyFrag run: it shares the payload flow's steps and
+its record shape, differs in the exploit it downloads, the CVE its record and notification name, and
+its own working directory, and runs only through Shizuku. A feed row carrying CVE-2026-98260 is never resolved
 as a DirtyFrag device target. The payload sheet groups those rows under their own CVE, and the run
 history names the CVE the run actually used, so a timer run does not read as 43499 and a DirtyFrag run
 does not read as either payload bug.
@@ -1234,7 +1234,7 @@ than companions, because each one decides what a boot with no root does:
 | gate | what it runs | what it needs on the phone |
 |---|---|---|
 | Auto root via payload | the cached payload, through the same code the install screen drives | a verified payload cached, and *Install KernelSU* on |
-| Auto root via timer | the cached CVE-2026-98260 payload, through the same code the install screen drives | a verified 98260 payload cached, *Install KernelSU* on, and a shell at boot: Shizuku, or a paired wireless ADB with *Use Shizuku* off |
+| Auto root via timer | the cached CVE-2026-98260 payload, through the same code the install screen drives | a verified 98260 payload cached, *Install KernelSU* on, and Shizuku running with this app's permission at boot |
 | Auto root via helper | the system-uid helper, asked to reroot | Shizuku running when the boot happens, and the helper installed |
 | Auto root via Dirty Frag | the chain, from this app alone | a daemon staged by an earlier run, or the feed when none has been |
 

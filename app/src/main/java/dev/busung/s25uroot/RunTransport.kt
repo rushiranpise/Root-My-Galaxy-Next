@@ -54,6 +54,17 @@ internal fun chooseRunTransport(
 }
 
 /**
+ * The timer payload's transport: Shizuku, or nothing.
+ *
+ * CVE-2026-98260 was verified through the Shizuku shell, and its tracefs calibration is the reason the
+ * payload needs a shell at all. That makes a paired wireless ADB session a different transport, not an
+ * interchangeable one, so this payload does not fall back to it. A caller refuses before staging when
+ * Shizuku is not both running and allowed to be used.
+ */
+internal fun timerRunTransport(availability: ShizukuAvailability): RunTransport? =
+    if (availability == ShizukuAvailability.Ready) RunTransport.Shizuku else null
+
+/**
  * What a run does about Shizuku when it asked for it and Shizuku is not there yet.
  *
  * A separate question from [chooseRunTransport], asked in a different place and by a different kind of

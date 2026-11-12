@@ -207,6 +207,7 @@
     <string name="autoroot_starting">Starting install</string>
     <string name="autoroot_universal_needs_run">Auto Root via DirtyFrag</string>
     <string name="autoroot_timer_needs_payload">Auto Root via Timer needs a saved CVE-2026-98260 payload. Run it once online first.</string>
+    <string name="autoroot_timer_shizuku_required">Auto Root via Timer needs Shizuku running and allowed for this app. Start Shizuku and grant access, then reboot.</string>
     <string name="autoroot_prior_install_required">Root on boot needs a saved payload.</string>
     <string name="autoroot_failed">Install failed: %1$s</string>
     <string name="autoroot_failed_at">Install failed at %1$s: %2$s</string>
@@ -1149,7 +1150,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="settings_boot_root_summary">Run the install again after a reboot if root is not active.</string>
     <string name="settings_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
     <string name="settings_timer_boot_root">Auto Root via Timer</string>
-    <string name="settings_timer_boot_root_summary">Run the saved CVE-2026-98260 payload after a restart. Needs a shell: Shizuku at boot, or a paired wireless ADB with Use Shizuku off.</string>
+    <string name="settings_timer_boot_root_summary">Run the saved CVE-2026-98260 payload after a restart. Needs Shizuku running and this app allowed to use it at boot.</string>
     <string name="settings_timer_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
     <!--
       The chain's boot gate, and the only one that needs nothing else installed and nothing running. It is named
@@ -1169,6 +1170,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="shizuku_not_running_body">Start Shizuku with ADB or root, give this app permission, then turn this on.</string>
     <string name="action_download_shizuku">Download Shizuku</string>
     <string name="error_shizuku_unavailable">Shizuku is not running. Start it with ADB or root first.</string>
+    <string name="error_timer_shizuku_required">CVE-2026-98260 needs Shizuku running and allowed for this app. Start Shizuku and grant access, then try again.</string>
     <!--
         The question a run asks instead of failing when Use Shizuku is on and Shizuku is down. The
         second sentence is the honest half: the app's own process is not a shell, so a target that asks
