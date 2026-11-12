@@ -86,20 +86,25 @@ class AutoRootBootReceiver : BroadcastReceiver() {
         val bootRootMode = AppPreferences.bootRootMode(context)
         val retryArmed = AppPreferences.retryArmed(context)
         val universalArmed = AppPreferences.universalRetryPendingForBoot(context) != null
-        // The chain's standing switch, which asks for every boot rather than for one - the third way this boot
+        // The chain's standing switch, which asks for every boot rather than for one - its own way this boot
         // can have been asked to gain root, and the one that needs no shell and no helper.
         val universalBootRoot = AppPreferences.universalBootRoot(context)
-        if (!bootRootMode && !retryArmed && !universalArmed && !universalBootRoot) {
+        // The timer payload's own standing switch. It runs through the payload gate's service, but it is a
+        // separate reason to start that service: a phone whose only gate is this one has root on boot off and
+        // no retry armed, and without this it would stand down before the gate could run the 98260 cache.
+        val timerBootRoot = AppPreferences.timerBootRoot(context)
+        if (!bootRootMode && !retryArmed && !universalArmed && !universalBootRoot && !timerBootRoot) {
             AppLog.debug(
                 AppLogTags.BOOT,
-                "No install this boot: root on boot is off and no retry is armed",
+                "No install this boot: no boot gate is on and no retry is armed",
             )
             return
         }
         AppLog.info(
             AppLogTags.BOOT,
             "A boot install was asked for (root on boot=$bootRootMode, retry armed=$retryArmed, " +
-                "universal retry armed=$universalArmed, chain's boot gate=$universalBootRoot)",
+                "universal retry armed=$universalArmed, chain's boot gate=$universalBootRoot, " +
+                "timer boot gate=$timerBootRoot)",
         )
 
         // The boot id is the only thing that tells a real reboot from a userspace restart that

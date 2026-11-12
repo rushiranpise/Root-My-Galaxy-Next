@@ -206,6 +206,7 @@
     <string name="autoroot_run_in_flight">Skipped: another run was already in progress.</string>
     <string name="autoroot_starting">Starting install</string>
     <string name="autoroot_universal_needs_run">Auto Root via DirtyFrag</string>
+    <string name="autoroot_timer_needs_payload">Auto Root via Timer needs a saved CVE-2026-98260 payload. Run it once online first.</string>
     <string name="autoroot_prior_install_required">Root on boot needs a saved payload.</string>
     <string name="autoroot_failed">Install failed: %1$s</string>
     <string name="autoroot_failed_at">Install failed at %1$s: %2$s</string>
@@ -1147,8 +1148,11 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="settings_boot_root">Auto Root via Payload</string>
     <string name="settings_boot_root_summary">Run the install again after a reboot if root is not active.</string>
     <string name="settings_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
+    <string name="settings_timer_boot_root">Auto Root via Timer</string>
+    <string name="settings_timer_boot_root_summary">Run the saved CVE-2026-98260 payload after a restart. Needs a shell: Shizuku at boot, or a paired wireless ADB with Use Shizuku off.</string>
+    <string name="settings_timer_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
     <!--
-      The third boot gate, and the only one that needs nothing else installed and nothing running. It is named
+      The chain's boot gate, and the only one that needs nothing else installed and nothing running. It is named
       by the flow it runs, which is the exploit and its CVE - see RunKind.flowName - and not disabled with
       KernelSU loading off: loading KernelSU is not a step of that flow, it is what the flow does.
     -->

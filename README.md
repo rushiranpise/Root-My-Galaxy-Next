@@ -9,8 +9,8 @@ kernel combinations, and an independent fork of
 app's device feed, payload contract and KernelSU-first approach, and adds to it: KernelSU-Next,
 ReSukiSU and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions,
 payloads for both CVE-2026-43499 and CVE-2026-98260 in separate groups, kernel vulnerability cards for
-both payload bugs, three ways to root an unattended boot (the payload flow, the system-uid helper, and a
-chain that needs neither), wireless ADB pairing as a shell transport, Shizuku started at
+both payload bugs, four ways to root an unattended boot (the payload flow, its timer variant, the
+system-uid helper, and a chain that needs neither), wireless ADB pairing as a shell transport, Shizuku started at
 boot, a logs tab, filterable run history, and the repair actions once the kernel is loaded.
 
 It installs as its own app (`dev.rushiranpise.rmgnext`), so it can sit beside the original:
@@ -183,13 +183,13 @@ starts open, so the page a fresh install shows is the whole page.
 | Run Management | disable KSU modules, protect image partitions, boot wait time, run limits, run plan |
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start code, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
-| Root Management | KernelSU build (a readout of the payload) and the KernelSU service file, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft restart, the three root gates (Auto Root via Payload, Auto Root via Helper, Auto Root via DirtyFrag), the System UID install card and Keep Odin reachable |
+| Root Management | KernelSU build (a readout of the payload) and the KernelSU service file, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft restart, the four root gates (Auto Root via Payload, Auto Root via Timer, Auto Root via Helper, Auto Root via DirtyFrag), the System UID install card and Keep Odin reachable |
 | Recovery Management | Reload modules, Reboot Android, Soft restart, Reboot and unroot (which also empties /data/adb and /data/local/tmp), each confirms first |
 | System Management | the battery-optimisation exemption a run with the screen off depends on, and the Trash card, which lists what the app has left on the device |
 
 The boot-time settings are filed under their own subsystem rather than together: *auto start Shizuku
-on boot* is a property of Shizuku, and the three root gates are a property of root. The three are
-alternatives rather than companions, so each one's switch turns the other two off (see
+on boot* is a property of Shizuku, and the four root gates are a property of root. The four are
+alternatives rather than companions, so each one's switch turns the other three off (see
 [Root on boot](#root-on-boot)). **About** and the update check are not here at all: they are on Home,
 beside the version they are about.
 
@@ -673,13 +673,13 @@ loaded.
 
 Everything that consumes the load is switched off with it rather than left to fail:
 
-- **Auto root via payload** cannot run, because there is nothing for a boot run to put back; the
-  switch is disabled with that reason on it, and the gate itself refuses with a reason of its own
-  (`SkipKernelSuLoadingOff`) rather than looking like the setting had been turned off. The stored
-  value is kept, so turning loading back on restores exactly what was there. The other two gates are
-  not affected, and should not be: *auto root via helper* reroots through the helper rather than
-  through this flow, and *auto root via Dirty Frag* loads KernelSU as its first act rather than as a
-  decision, so neither has anything to leave unloaded.
+- **Auto root via payload** and **Auto root via timer** cannot run, because there is nothing for a
+  boot run to put back; both switches are disabled with that reason on them, and both gates refuse
+  with a reason of their own (`SkipKernelSuLoadingOff`) rather than looking like the settings had been
+  turned off. The stored values are kept, so turning loading back on restores exactly what was there.
+  The other two gates are not affected, and should not be: *auto root via helper* reroots through the
+  helper rather than through this flow, and *auto root via Dirty Frag* loads KernelSU as its first act
+  rather than as a decision, so neither has anything to leave unloaded.
 - **The recovery actions** Reload modules, Reboot Android, Soft restart and Reboot and unroot consume
   the daemon a verified load installed, so the cards read *Needs KernelSU* and take no tap.
 - **Disable KSU modules** is inert when there is no load for modules to sit out, so it is disabled
@@ -1223,21 +1223,22 @@ flow itself, so a record and the screen it is opened from cannot describe the sa
 ## Root on boot
 
 <details>
-<summary>The three gates, what each runs, what each needs, and why nothing here roots a phone before it is unlocked.</summary>
+<summary>The four gates, what each runs, what each needs, and why nothing here roots a phone before it is unlocked.</summary>
 
 
 These targets are rooted by loading KernelSU into the running kernel, so root does not survive a power
 cycle by itself: every boot has to load it again. The Dirty Frag chain is no exception: its module lives
-in RAM too. **Settings → Root Management** has three gates for that, and they are alternatives rather
+in RAM too. **Settings → Root Management** has four gates for that, and they are alternatives rather
 than companions, because each one decides what a boot with no root does:
 
 | gate | what it runs | what it needs on the phone |
 |---|---|---|
 | Auto root via payload | the cached payload, through the same code the install screen drives | a verified payload cached, and *Install KernelSU* on |
+| Auto root via timer | the cached CVE-2026-98260 payload, through the same code the install screen drives | a verified 98260 payload cached, *Install KernelSU* on, and a shell at boot: Shizuku, or a paired wireless ADB with *Use Shizuku* off |
 | Auto root via helper | the system-uid helper, asked to reroot | Shizuku running when the boot happens, and the helper installed |
 | Auto root via Dirty Frag | the chain, from this app alone | a daemon staged by an earlier run, or the feed when none has been |
 
-Coming on, each switch turns the other two off, and stops a gate that is already waiting rather than
+Coming on, each switch turns the other three off, and stops a gate that is already waiting rather than
 only the next boot. The Dirty Frag gate stages the daemon the phone already has, recorded when it was
 staged and checked against the digest the feed declared, so a boot needs no network; a phone that has
 never staged one resolves the sources exactly as a hand run does, and a record that names another
@@ -1256,10 +1257,10 @@ this boot's single attempt has not been spent; and a verified payload is cached.
 anything of the user, and it asks once.
 
 Each flow keeps its own attempt for the boot, so one gate's run cannot spend another's: the payload
-install, the helper's reroot and the chain's run are three separate claims, keyed by the boot id. A
-one-shot **Reboot and retry** armed from a failed run is the fourth way a boot can have been asked for
-root, and it is a request for one boot rather than a setting so it takes precedence over whichever gate
-is also on. The chain's retry is resolved before the payload gate's own questions are even asked, since
+install (shared by the payload and timer gates), the helper's reroot and the chain's run are three
+separate claims, keyed by the boot id. A one-shot **Reboot and retry** armed from a failed run is
+another way a boot can have been asked for root, and it is a request for one boot rather than a setting
+so it takes precedence over whichever gate is also on. The chain's retry is resolved before the payload gate's own questions are even asked, since
 a phone whose only run has ever been a chain run has the payload gate off and no payload cached.
 
 Two of those are about telling boots apart. A userspace restart re-emits `BOOT_COMPLETED` while the
@@ -1339,10 +1340,10 @@ name, which is the point.
   whole-token matching keeps the `emulated-soft-reboot` marker in that same binary from counting. A
   daemon that did not return is stopped, and its last line is what the failure quotes, so the cause
   comes from KernelSU rather than from us.
-- **Reboot and unroot** clears all three root gates first and then reboots, because a reboot that
+- **Reboot and unroot** clears all four root gates first and then reboots, because a reboot that
   happened first would come back rooted; if the request is refused, exactly what was on is put back,
-  read and written as one set so a phone carrying two gates keeps both, and the three switches re-read
-  storage rather than following the value the screen hoped for. The reboot is only half of it: KernelSU
+  read and written as one set so a phone carrying several gates keeps all of them, and the four switches
+  re-read storage rather than following the value the screen hoped for. The reboot is only half of it: KernelSU
   lives in the running kernel and its *modules*, *superuser grants* and *daemon* live in `/data/adb`,
   and every root solution on the phone writes into the shared `/data/local/tmp`, so both directories
   are **emptied** contents only, since KernelSU and init created them with modes the platform relies

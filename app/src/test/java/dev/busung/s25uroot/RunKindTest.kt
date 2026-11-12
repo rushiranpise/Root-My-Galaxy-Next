@@ -273,7 +273,7 @@ class RunKindTest {
     fun `the boot gate runs an armed universal retry before its own payload questions`() {
         val gate = source("AutoRootService.kt")
         val universal = gate.indexOf("AppPreferences.universalRetryPendingForBoot(this)")
-        val payloadDecision = gate.indexOf("AutoRootSupport.decision(this, initialBootToken, kernelSuActive)")
+        val payloadDecision = gate.indexOf("AutoRootSupport.decision(")
 
         assertTrue("the boot gate no longer looks for an armed universal retry", universal > 0)
         assertTrue(
@@ -312,9 +312,13 @@ class RunKindTest {
             receiver.contains("val universalBootRoot = AppPreferences.universalBootRoot(context)"),
         )
         assertTrue(
+            "the boot receiver does not count the timer's boot gate, so turning it on would do nothing",
+            receiver.contains("val timerBootRoot = AppPreferences.timerBootRoot(context)"),
+        )
+        assertTrue(
             "a way a boot can be asked for root is missing from the receiver's decision to start the gate",
             receiver.contains(
-                "if (!bootRootMode && !retryArmed && !universalArmed && !universalBootRoot)",
+                "if (!bootRootMode && !retryArmed && !universalArmed && !universalBootRoot && !timerBootRoot)",
             ),
         )
     }

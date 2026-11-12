@@ -166,7 +166,7 @@ class AutoRootDecisionTest {
         )
         assertTrue(
             "the notification no longer names a retry boot as one",
-            service.contains("if (retryArmedThisBoot) R.string.autoroot_retry_title"),
+            service.contains("retryArmedThisBoot -> R.string.autoroot_retry_title"),
         )
     }
 
@@ -221,6 +221,21 @@ class AutoRootDecisionTest {
             AutoRootDecision.SkipAlreadyRooted,
             decide(kernelSuActive = true, hasVerifiedInstall = false, verifiedBootToken = null),
         )
+    }
+
+    @Test
+    fun `the timer gate runs only a saved 98260 payload`() {
+        // The timer gate borrows the payload gate's service, but not its payload: a boot that promised
+        // CVE-2026-98260 must refuse a cached 43499 target rather than run whichever payload happened to
+        // be saved last. Both the refusal and the timer-specific enable are what keep those two apart.
+        val service = source("src/main/java/dev/busung/s25uroot/AutoRootService.kt")
+        assertTrue(service.contains("AutoRootSupport.hasCachedTimerPayload(this)"))
+        assertTrue(service.contains("R.string.autoroot_timer_needs_payload"))
+        assertTrue(service.contains("AppPreferences.timerBootRoot(this@AutoRootService)"))
+
+        val support = source("src/main/java/dev/busung/s25uroot/AutoRootSupport.kt")
+        assertTrue(support.contains("TimerVulnerability.CVE"))
+        assertTrue(support.contains("enabled = AppPreferences.bootRootMode(context) || timerBootRoot"))
     }
 
     private fun source(relativeToApp: String): String = listOf(

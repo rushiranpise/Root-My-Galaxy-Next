@@ -171,16 +171,34 @@ class AutoRootService : Service() {
             finish(getString(R.string.autoroot_universal_needs_run))
             return
         }
+        // The timer gate runs the payload flow, but only the 98260 payload: its own switch is a request
+        // for that bug, not for whichever payload happened to be cached last. Refused before the boot's
+        // attempt is claimed, so a boot with the wrong payload can still be used by hand.
+        val timerBootRoot = AppPreferences.timerBootRoot(this)
+        if (timerBootRoot && !AutoRootSupport.hasCachedTimerPayload(this)) {
+            AppLog.warn(
+                AppLogTags.BOOT,
+                "The timer's boot gate needs a saved CVE-2026-98260 payload; " +
+                    "the cached payload is not one",
+            )
+            finish(getString(R.string.autoroot_timer_needs_payload))
+            return
+        }
         // The authoritative reading, not the native one: this is the decision that spends the boot's
         // single install attempt, and on this hardware the native paths can be denied by policy while
         // root is live. Asking twice costs a process; asking wrongly costs a doomed install.
         val kernelSuActive = RootStatusProbe.isActive()
         // Bound to a name so the line below can say *which* rule stood down: "skipped before starting"
         // is four different situations, and only one of them is worth doing anything about.
-        val decision = AutoRootSupport.decision(this, initialBootToken, kernelSuActive)
+        val decision = AutoRootSupport.decision(
+            this,
+            initialBootToken,
+            kernelSuActive,
+            timerBootRoot = timerBootRoot,
+        )
         AppLog.info(
             AppLogTags.BOOT,
-            "Gate decision ${decision.name} (KernelSU active=$kernelSuActive)",
+            "Gate decision ${decision.name} (KernelSU active=$kernelSuActive, timer gate=$timerBootRoot)",
         )
         when (decision) {
             // Root already active means this boot needs nothing, recorded against the boot id so the
@@ -227,9 +245,12 @@ class AutoRootService : Service() {
                 awaitSettledFloor()
                 require(
                     AppPreferences.bootRootMode(this@AutoRootService) ||
+                        AppPreferences.timerBootRoot(this@AutoRootService) ||
                         AppPreferences.retryArmed(this@AutoRootService),
                 ) {
-                    // Either way of asking this boot for an install was withdrawn while the gate waited.
+                    // One of the ways this boot was asked for an install was withdrawn while the gate
+                    // waited. The timer gate counts here like the payload gate because it runs the
+                    // same cached install; only the payload it is allowed to run differs.
                     "The automatic install was turned off while waiting"
                 }
                 val bootToken = AutoRootSupport.currentBootToken()
@@ -248,6 +269,14 @@ class AutoRootService : Service() {
                 if (RunInFlight.holder(this@AutoRootService) != null) {
                     AppLog.warn(AppLogTags.BOOT, "Root on boot stood down after the wait: a run was in flight")
                     finish(getString(R.string.autoroot_run_in_flight))
+                    return@withTimeout
+                }
+                // The cache can be cleared or replaced while a gate waits, so the timer gate asks its own
+                // question again rather than trusting the answer from before the wait.
+                if (AppPreferences.timerBootRoot(this@AutoRootService) &&
+                    !AutoRootSupport.hasCachedTimerPayload(this@AutoRootService)
+                ) {
+                    finish(getString(R.string.autoroot_timer_needs_payload))
                     return@withTimeout
                 }
                 // Shizuku first, and before the run rather than inside it: this is the one caller that
@@ -863,8 +892,13 @@ class AutoRootService : Service() {
         .setSmallIcon(android.R.drawable.stat_sys_warning)
         .setContentTitle(
             getString(
-                if (retryArmedThisBoot) R.string.autoroot_retry_title
-                else R.string.settings_boot_root,
+                when {
+                    retryArmedThisBoot -> R.string.autoroot_retry_title
+                    // The timer gate runs through this service, but its notification should name the
+                    // bug it is running rather than the general payload gate it borrowed the service from.
+                    AppPreferences.timerBootRoot(this) -> R.string.settings_timer_boot_root
+                    else -> R.string.settings_boot_root
+                },
             ),
         )
         .setContentText(message)

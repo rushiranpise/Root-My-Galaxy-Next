@@ -272,8 +272,8 @@ class RebootUnrootWipeTest {
     fun `every gate that would root the next boot is cleared`() {
         // The action's promise is that the phone comes back unrooted, and it used to clear only the payload
         // gate: a phone whose root was armed by the helper's gate or by the chain's gate ran this action,
-        // rebooted, and came back rooted. Held against the source rather than by running it, because the three
-        // preferences are Android storage - what this can check is that the action reaches all three, and the
+        // rebooted, and came back rooted. Held against the source rather than by running it, because the four
+        // preferences are Android storage - what this can check is that the action reaches all four, and the
         // decision itself is `gatesAfterRebootRequest` below.
         val actions = source("RecoveryActions.kt")
 
@@ -282,7 +282,7 @@ class RebootUnrootWipeTest {
             actions.contains("AppPreferences.rootGates(context)"),
         )
         assertTrue(
-            "reboot and unroot clears something narrower than all three gates",
+            "reboot and unroot clears something narrower than all four gates",
             actions.contains("AppPreferences.setRootGates(context, RootGates.none)"),
         )
     }
@@ -293,6 +293,7 @@ class RebootUnrootWipeTest {
             RootGates(payload = true, helper = false, universal = false),
             RootGates(payload = false, helper = true, universal = false),
             RootGates(payload = false, helper = false, universal = true),
+            RootGates(payload = false, helper = false, universal = false, timer = true),
         )
 
         single.forEach { was ->
@@ -310,22 +311,22 @@ class RebootUnrootWipeTest {
     }
 
     @Test
-    fun `a phone carrying two gates keeps both through a refused reboot`() {
+    fun `a phone carrying several gates keeps all of them through a refused reboot`() {
         // The state the setters no longer create and an older build could leave behind. The restore must not
         // enforce the exclusivity rule the setters apply: doing that here would drop a setting under a button
         // that promised to change nothing at all when the reboot fails.
-        val both = RootGates(payload = true, helper = true, universal = true)
-        val oneOfTwo = RootGates(payload = true, helper = true, universal = false)
+        val several = RootGates(payload = true, helper = true, universal = true, timer = true)
+        val two = RootGates(payload = true, helper = true, universal = false)
 
-        assertEquals(oneOfTwo, gatesAfterRebootRequest(oneOfTwo, accepted = false))
-        assertEquals(both, gatesAfterRebootRequest(both, accepted = false))
+        assertEquals(two, gatesAfterRebootRequest(two, accepted = false))
+        assertEquals(several, gatesAfterRebootRequest(several, accepted = false))
     }
 
     @Test
-    fun `the three switches follow the stored gates after the action`() {
-        // Each gate is a preference with a switch drawn over it, and the action moves all three - so the screen
-        // has to re-read all three, or two switches stay drawn as on over a phone that has just turned them
-        // off. One request from the section, one reader in the shell.
+    fun `the four switches follow the stored gates after the action`() {
+        // Each gate is a preference with a switch drawn over it, and the action moves all four - so the
+        // screen has to re-read all four, or switches stay drawn as on over a phone that has just turned
+        // them off. One request from the section, one reader in the shell.
         val recovery = source("RootRecoveryUi.kt")
         assertTrue(
             "the recovery section no longer asks for the gates to be re-read after a reboot request",
@@ -335,10 +336,11 @@ class RebootUnrootWipeTest {
         val main = source("MainActivity.kt")
         val reader = main.substringAfter("private fun refreshRootGates()").substringBefore("private fun ")
         assertTrue(
-            "the shell's reader no longer reads all three gates",
+            "the shell's reader no longer reads all four gates",
             reader.contains("AppPreferences.bootRootMode(this)") &&
                 reader.contains("AppPreferences.rerootAtBoot(this)") &&
-                reader.contains("AppPreferences.universalBootRoot(this)"),
+                reader.contains("AppPreferences.universalBootRoot(this)") &&
+                reader.contains("AppPreferences.timerBootRoot(this)"),
         )
         assertTrue(
             "the recovery section is not given the shell's reader, so the switches keep their own idea",

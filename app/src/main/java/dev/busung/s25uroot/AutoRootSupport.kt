@@ -191,6 +191,19 @@ internal object AutoRootSupport {
             .getBoolean(RECEIPT_VERIFIED, false) && KnownGoodPayloadStore.hasValid(context)
 
     /**
+     * Whether the verified payload on disk is a CVE-2026-98260 one.
+     *
+     * Read from the profile id because a payload cached before the feed carried the optional `cve`
+     * field still names its bug there. The timer gate uses this to refuse before spending the boot on
+     * the legacy payload: the two are not interchangeable, and a gate that promised 98260 must not run
+     * 43499 because that is what happened to be cached last.
+     */
+    fun hasCachedTimerPayload(context: Context): Boolean =
+        KnownGoodPayloadStore.describe(context)
+            ?.profileId
+            ?.contains(TimerVulnerability.CVE, ignoreCase = true) == true
+
+    /**
      * Whether the payload this boot is about to run says it needs a shell.
      *
      * The descriptors are read here and the rule about which of them counts is [bootPayloadNeedsShell],
@@ -318,7 +331,12 @@ internal object AutoRootSupport {
      * [kernelSuActive] is passed in rather than probed here so the rule itself has no device in it,
      * and so a caller that has already probed does not have to probe again to ask the question.
      */
-    fun decision(context: Context, bootToken: String, kernelSuActive: Boolean): AutoRootDecision {
+    fun decision(
+        context: Context,
+        bootToken: String,
+        kernelSuActive: Boolean,
+        timerBootRoot: Boolean = AppPreferences.timerBootRoot(context),
+    ): AutoRootDecision {
         // A retry armed before a reboot is the other way this boot can have been asked for one install,
         // and it is passed as its own input rather than folded into the setting - the rule says what a
         // retry is worth to a boot (the attempt) without also claiming root on boot was switched on. It
@@ -326,7 +344,7 @@ internal object AutoRootSupport {
         // it cannot start the attempt the user declined when they chose to reboot.
         val retryArmed = AppPreferences.retryPendingForBoot(context, bootToken)
         return autoRootDecision(
-            enabled = AppPreferences.bootRootMode(context),
+            enabled = AppPreferences.bootRootMode(context) || timerBootRoot,
             retryArmed = retryArmed,
             kernelSuLoadEnabled = AppPreferences.loadKernelSu(context),
             kernelSuActive = kernelSuActive,
