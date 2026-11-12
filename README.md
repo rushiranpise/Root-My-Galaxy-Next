@@ -7,9 +7,10 @@ Root My Galaxy Next is a one-click installer for explicitly supported Samsung mo
 kernel combinations, and an independent fork of
 [Root My Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy) by BuSung-dev. It keeps that
 app's device feed, payload contract and KernelSU-first approach, and adds to it: KernelSU-Next,
-ReSukiSU and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions, three
-ways to root an unattended boot (the payload flow, the system-uid helper, and a chain that needs
-neither), wireless ADB pairing as a shell transport, Shizuku started at
+ReSukiSU and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions,
+payloads for both CVE-2026-43499 and CVE-2026-98260 in separate groups, kernel vulnerability cards for
+both payload bugs, three ways to root an unattended boot (the payload flow, the system-uid helper, and a
+chain that needs neither), wireless ADB pairing as a shell transport, Shizuku started at
 boot, a logs tab, filterable run history, and the repair actions once the kernel is loaded.
 
 It installs as its own app (`dev.rushiranpise.rmgnext`), so it can sit beside the original:
@@ -29,7 +30,7 @@ Every section below is collapsed. Open the one you are reading for, or follow a 
 
 **The app**: [Application](#application) · [The app's screens](#the-apps-screens) · [Settings](#settings)
 
-**Payloads**: [Payload sources](#payload-sources) · [Local payload](#local-payload) · [Payload modes](#payload-modes)
+**Payloads**: [Payload sources](#payload-sources) · [Payload CVEs](#payload-cves) · [Local payload](#local-payload) · [Payload modes](#payload-modes)
 
 **A run, start to finish**: [Boot settle](#boot-settle) · [Run plan](#run-plan) · [The screen during a run](#the-screen-during-a-run) · [What a run does once KernelSU is verified](#what-a-run-does-once-kernelsu-is-verified) · [One run at a time](#one-run-at-a-time) · [After a run ends](#after-a-run-ends) · [When a run fails](#when-a-run-fails)
 
@@ -72,7 +73,12 @@ The sheet also carries a search box, by device, model or kernel, and a **Show on
 that is remembered with a dozen sources configured it can hold every device its catalogs know, and
 the row being looked for is found by name long before it is found by scrolling.
 
-Below those rows the same sheet lists **Dirty Frag**, the chain that needs nothing installed first:
+Rows whose exploit is **CVE-2026-98260** are grouped under that CVE ahead of the legacy device rows.
+They are payload runs, not DirtyFrag targets: the timer payload needs a shell, so it goes through
+Shizuku or a paired wireless ADB rather than the app's own process, and its history and notification
+name 98260 rather than 43499.
+
+Below the payload rows the same sheet lists **Dirty Frag**, the chain that needs nothing installed first:
 one row per KernelSU per payload tier, six of them, each named by the exploit and its CVE rather than
 by a description of a phone. The device rows are what the sources publish, so the toggle and the
 flavour chips narrow them; these rows belong to no device, are listed whatever **Show only my device**
@@ -147,10 +153,11 @@ therefore not reachable in that state (the card is the only way into it). A run 
 inert, since starting one over another is what [the one-run-at-a-time rule](#one-run-at-a-time) refuses.
 
 **History** is every run with its log, its stage and the payload source that served it, exportable as a
-zip. Each row names the exploit the run used, **CVE-2026-43499** for a payload run and **Dirty Frag
-(CVE-2026-43284)** for a chain run, from the flow the run wrote into its own record; an entry written
-before the record carried a flow shows no name rather than a guessed one, because the one such run on a
-phone may have been either. A filter row above the list narrows it by result success, root only, failed and the chips are
+zip. Each row names the exploit the run used: **CVE-2026-43499** for a legacy payload run,
+**CVE-2026-98260** for a timer payload run, and **Dirty Frag (CVE-2026-43284)** for a chain run, from
+the flow the run wrote into its own record. An entry written before the record carried a flow shows no
+name rather than a guessed one; a timer entry written after that field existed but before the timer kind
+did is named from its profile id, because that is still what the file says it ran. A filter row above the list narrows it by result success, root only, failed and the chips are
 built from the history itself, so a result nothing has ever produced is not offered. Deleting asks
 nothing and offers an **Undo** instead, because the log is on this phone and the entries are captured
 before they go.
@@ -303,6 +310,39 @@ is a tempting proxy for "this target scans pages", but in the official feed only
 four 5.15 profiles ask for a fresh session, and marked profiles also run on 5.10, 6.1 and
 6.1.157 so a version-keyed policy would impose an hour-long single-attempt budget on targets
 that never asked for it.
+
+</details>
+
+## Payload CVEs
+
+<details>
+<summary>The two payload CVEs, the DirtyFrag chain beside them, and why the app never treats one as another.</summary>
+
+
+The app can root a supported phone through two payload bugs, and they are separate targets rather than
+versions of one another:
+
+| CVE | what runs | where it is offered |
+|---|---|---|
+| **CVE-2026-43499** | the legacy payload flow, with a device-specific exploit from the feed | the device group in the payload sheet |
+| **CVE-2026-98260** | the timer payload flow, with the same steps and transport and a different exploit | its own **CVE-2026-98260** group above the device group |
+| **CVE-2026-43284** | the DirtyFrag chain, with the exploit compiled into the app and a daemon from the feed | the **Dirty Frag (CVE-2026-43284)** rows below the device group |
+
+A timer payload is still a payload run, not a DirtyFrag run: it shares the payload flow's steps, its
+transport and its record shape, and differs in the exploit it downloads, the CVE its record and
+notification name, and its own working directory. A feed row carrying CVE-2026-98260 is never resolved
+as a DirtyFrag device target. The payload sheet groups those rows under their own CVE, and the run
+history names the CVE the run actually used, so a timer run does not read as 43499 and a DirtyFrag run
+does not read as either payload bug.
+
+The Home screen keeps the two payload CVEs apart too. The **CVE-2026-43499** card can run the probe
+that measures the rtmutex bug. The **CVE-2026-98260** card is
+a version-table reading only: it says whether the kernel is at or above the fixed release, and points
+at the payload sheet rather than claiming a measured result. Neither card runs automatically, and neither
+is shown on a phone already rooted in this boot.
+
+The current feed targets for CVE-2026-98260 cover the SM-S938U1 on the DDZJB kernel. Support still comes
+from the payload sources, so another model or build needs a feed entry like any other target.
 
 </details>
 
@@ -1174,9 +1214,9 @@ on is exactly the phone where the chain's own word is not the verdict.
 What it leaves is the daemon at `/data/adb/ksud` and that `su`; the module it loaded is in RAM, so the
 next boot needs the chain again, which is what its boot gate below is for. A run of this flow is named by
 the exploit and its CVE, **Dirty Frag (CVE-2026-43284)**, in the history row it writes, under its
-notification, and over its rows in the payload sheet; the payload flow is named **CVE-2026-43499** in
-the same places. One name per flow, read from the flow itself, so a record and the screen it is opened
-from cannot describe the same run differently.
+notification, and over its rows in the payload sheet; a legacy payload run is named **CVE-2026-43499**
+and a timer payload run is named **CVE-2026-98260** in the same places. One name per flow, read from the
+flow itself, so a record and the screen it is opened from cannot describe the same run differently.
 
 </details>
 
@@ -1432,8 +1472,8 @@ carries a version name that says which one it is:
 
 | build | version name | version code |
 |---|---|---|
-| CI | `0.6+ci.<run number>.<commit>` | base + seconds since 2026-01-01 UTC |
-| local | `0.6+local.<commit>` | base + seconds since 2026-01-01 UTC |
+| CI | `0.13+ci.<run number>.<commit>` | base + seconds since 2026-01-01 UTC |
+| local | `0.13+local.<commit>` | base + seconds since 2026-01-01 UTC |
 
 `appVersionBase` in `app/build.gradle.kts` is the only version written by hand. Both workflows
 read that literal out of the file, and a release tag is `v<base>`.
