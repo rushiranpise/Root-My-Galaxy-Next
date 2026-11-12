@@ -93,7 +93,25 @@ data class InstallHistoryEntry(
      * Both flows record it, because both pass through the same two phases to get here.
      */
     val rootedInMillis: Long? = null,
-)
+) {
+    /**
+     * The exploit this record's run spent its time on.
+     *
+     * Read from the record rather than from [kind] alone, because timer runs were written as [RunKind.Payload]
+     * before the timer flow had a name of its own: their profile id is the only thing that still says which CVE
+     * they ran. Newer records say it in [kind], and this is the same answer.
+     *
+     * Only call this for a record whose kind is present. A null kind means the file does not say, and naming the
+     * payload flow over it would state a fact the record does not contain.
+     */
+    val flowName: String
+        get() {
+            val flow = kind ?: return RunKind.Payload.flowName
+            val timer = flow == RunKind.Payload &&
+                profileId?.contains(TimerVulnerability.CVE, ignoreCase = true) == true
+            return if (timer) RunKind.Timer.flowName else flow.flowName
+        }
+}
 
 /**
  * The entries a launch closes, given the run that is still in flight.

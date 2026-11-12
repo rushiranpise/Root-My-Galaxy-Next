@@ -741,7 +741,7 @@ class AutoRootService : Service() {
                 if (withoutShell) {
                     getString(R.string.autoroot_succeeded_without_shell)
                 } else {
-                    getString(R.string.autoroot_succeeded, RunKind.Payload.flowName)
+                    getString(R.string.autoroot_succeeded, state.kind.flowName)
                 },
                 offerSoftReboot = true,
             )

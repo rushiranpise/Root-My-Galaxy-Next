@@ -3,7 +3,6 @@ package dev.busung.s25uroot
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +35,7 @@ class RunKindTest {
         assertEquals(RunKind.Payload, RunKind.fromName(""))
         assertEquals(RunKind.Payload, RunKind.fromName("KernelSU"))
         assertEquals(RunKind.Universal, RunKind.fromName("Universal"))
+        assertEquals(RunKind.Timer, RunKind.fromName("Timer"))
         assertEquals(RunKind.Payload, RunKind.fromName("Payload"))
     }
 
@@ -161,22 +161,48 @@ class RunKindTest {
         // value per flow is what makes those three agree, and it is what this test can hold without reading a
         // layout.
         assertEquals("CVE-2026-43499", RunKind.Payload.flowName)
+        assertEquals("CVE-2026-98260", RunKind.Timer.flowName)
         assertEquals("DirtyFrag (CVE-2026-43284)", RunKind.Universal.flowName)
 
-        // Distinct, which is the point of naming them at all: the two flows' runs look identical on the next
-        // screen - four steps, one bar - and "which one was this" is the question the record has to answer.
-        assertNotEquals(
-            "the two flows share a name, so a record cannot say which root it was",
-            RunKind.Payload.flowName,
-            RunKind.Universal.flowName,
+        // Distinct, which is the point of naming them at all: the payload flows' runs look identical on the
+        // next screen - four steps, one bar - and "which one was this" is the question the record has to answer.
+        val names = RunKind.entries.map(RunKind::flowName)
+        assertEquals(
+            "two flows share a name, so a record cannot say which root it was",
+            names.size,
+            names.toSet().size,
         )
 
-        // And each name carries the number this repository states, rather than a copy of it: the payload's from
-        // the file that documents its bug ([KernelVulnerability]), the DirtyFrag one from the constant the
-        // helper's own bridge is held to by UniversalRootContractTest.
+        // And each name carries the number this repository states, rather than a copy of it: the payloads' from
+        // the files that document their bugs ([KernelVulnerability] and [TimerVulnerability]), the DirtyFrag
+        // one from the constant the helper's own bridge is held to by UniversalRootContractTest.
         assertTrue(RunKind.Payload.flowName.contains(KernelVulnerability.CVE))
+        assertTrue(RunKind.Timer.flowName.contains(TimerVulnerability.CVE))
         assertTrue(RunKind.Universal.flowName.contains(UniversalRootRun.CVE))
         assertTrue(RunKind.Universal.flowName.contains(UniversalRootRun.EXPLOIT_NAME))
+    }
+
+    @Test
+    fun `a timer record written before the timer kind is still named 98260`() {
+        // The successful timer run on this phone was recorded as a payload run, because the only two kinds the
+        // app had were payload and universal. Its profile id is what still says which payload it was, and the
+        // history row reads that rather than naming the legacy 499 bug over it.
+        val timer = InstallHistoryEntry(
+            id = "timer",
+            startedAtMillis = 0,
+            completedAtMillis = null,
+            result = InstallRunResult.Succeeded,
+            log = "",
+            profileId = "pa3q-S938U1UEUDDZJB-cve-2026-98260-ksu",
+            kind = RunKind.Payload,
+        )
+        assertEquals(TimerVulnerability.CVE, timer.flowName)
+        assertEquals(TimerVulnerability.CVE, timer.copy(kind = RunKind.Timer).flowName)
+        assertEquals(KernelVulnerability.CVE, timer.copy(profileId = "pa3q-S938U1UEUDDZJB-ksu").flowName)
+        assertEquals(
+            "DirtyFrag (CVE-2026-43284)",
+            timer.copy(kind = RunKind.Universal).flowName,
+        )
     }
 
     @Test
@@ -191,7 +217,7 @@ class RunKindTest {
             .substringBefore("private fun HistoryDetail(")
         assertTrue(
             "the history row no longer names the flow of the run it draws",
-            row.contains("entry.kind?.let { flow ->") && row.contains("flow.flowName"),
+            row.contains("entry.kind?.let {") && row.contains("entry.flowName"),
         )
 
         // The detail card: the line that says how the run got what it needed. Both flows have one and they are

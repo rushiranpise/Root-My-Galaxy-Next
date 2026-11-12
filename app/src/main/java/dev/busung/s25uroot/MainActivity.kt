@@ -4209,9 +4209,9 @@ private fun HistoryEntryCard(
                 // honest answer: those are the entries written before the flow joined the record, and one of the
                 // runs among them is a DirtyFrag run - so naming the payload flow over it would be a fact this
                 // app invented about a run that happened.
-                entry.kind?.let { flow ->
+                entry.kind?.let {
                     Text(
-                        flow.flowName,
+                        entry.flowName,
                         style = MaterialTheme.typography.bodyMedium,
                         color = contentColor.copy(alpha = 0.78f),
                     )

@@ -2795,15 +2795,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      * Records which target ran and which catalog defined it, including the commit that catalog was
      * read at, so a finished run can be traced back to a revision rather than to a branch name.
      */
-    private fun updateHistoryTarget(profile: TargetProfile) =
+    private fun updateHistoryTarget(profile: TargetProfile) {
+        // The timer rows are payload runs, but they are not the legacy payload: naming them after
+        // CVE-2026-43499 made a successful timer run's record and notification read as 499.
+        val kind = RunKind.forPayload(profile)
+        mutableState.value = mutableState.value.copy(kind = kind)
         updateHistory { entry ->
             entry.copy(
+                kind = kind,
                 profileId = profile.profileId,
                 sourceId = profile.sourceId.takeIf(String::isNotBlank),
                 sourceLabel = profile.sourceLabel.takeIf(String::isNotBlank),
                 sourceCommit = profile.sourceCommit.takeIf(String::isNotBlank),
             )
         }
+    }
 
     private fun finishHistory(result: InstallRunResult) {
         updateHistory { entry ->
