@@ -84,6 +84,7 @@ enum class KernelSuFlavor(
         defaultManagerAsset = "KernelSU_Next_v3.4.2_33355-release.apk",
         summaryRes = R.string.flavor_kernelsu_next_summary,
     ),
+
     ReSukiSU(
         id = "resukisu",
         // The project renamed itself to BakaSU and moved to `Baka-SU/BakaSU`; the id above and the

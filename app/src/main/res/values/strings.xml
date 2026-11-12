@@ -206,6 +206,8 @@
     <string name="autoroot_run_in_flight">Skipped: another run was already in progress.</string>
     <string name="autoroot_starting">Starting install</string>
     <string name="autoroot_universal_needs_run">Auto Root via DirtyFrag</string>
+    <string name="autoroot_timer_needs_payload">Auto Root via Timer needs a saved CVE-2026-98260 payload. Run it once online first.</string>
+    <string name="autoroot_timer_shizuku_required">Auto Root via Timer needs Shizuku running and allowed for this app. Start Shizuku and grant access, then reboot.</string>
     <string name="autoroot_prior_install_required">Root on boot needs a saved payload.</string>
     <string name="autoroot_failed">Install failed: %1$s</string>
     <string name="autoroot_failed_at">Install failed at %1$s: %2$s</string>
@@ -483,6 +485,16 @@
     <string name="kernel_check_restarted_body">Only a kernel with the bug can be restarted by this test.</string>
     <string name="kernel_check_unfinished">The test did not finish</string>
     <string name="kernel_check_from_version">The fix arrives in %1$s and this phone is on %2$s.</string>
+    <!--
+      CVE-2026-98260 is a second kernel row, separate from the rtmutex probe above. It is a version
+      reading only: no probe binary measures this timer bug yet.
+    -->
+    <string name="timer_check_title">CVE-2026-98260</string>
+    <string name="timer_check_body">A POSIX CPU timer use-after-free fixed in 6.6.158. This row reads the kernel version only; it does not run a test.</string>
+    <string name="timer_check_vulnerable">This kernel is below the fixed release. A payload for the exact build can be selected in the payload sheet.</string>
+    <string name="timer_check_patched">This kernel is at or above the fixed release.</string>
+    <string name="timer_check_undecided">The kernel version could not be read.</string>
+    <string name="timer_check_from_version">Fixed in %1$s; this phone is on %2$s.</string>
     <!--
       The kernel check's own three steps, drawn in the same list the run screen's four are: the same marks,
       the same count up, and one row per thing the check actually does.
@@ -1137,8 +1149,11 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="settings_boot_root">Auto Root via Payload</string>
     <string name="settings_boot_root_summary">Run the install again after a reboot if root is not active.</string>
     <string name="settings_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
+    <string name="settings_timer_boot_root">Auto Root via Timer</string>
+    <string name="settings_timer_boot_root_summary">Run the saved CVE-2026-98260 payload after a restart. Needs Shizuku running and this app allowed to use it at boot.</string>
+    <string name="settings_timer_boot_root_needs_load">Root on boot needs Install KernelSU to be on.</string>
     <!--
-      The third boot gate, and the only one that needs nothing else installed and nothing running. It is named
+      The chain's boot gate, and the only one that needs nothing else installed and nothing running. It is named
       by the flow it runs, which is the exploit and its CVE - see RunKind.flowName - and not disabled with
       KernelSU loading off: loading KernelSU is not a step of that flow, it is what the flow does.
     -->
@@ -1155,6 +1170,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <string name="shizuku_not_running_body">Start Shizuku with ADB or root, give this app permission, then turn this on.</string>
     <string name="action_download_shizuku">Download Shizuku</string>
     <string name="error_shizuku_unavailable">Shizuku is not running. Start it with ADB or root first.</string>
+    <string name="error_timer_shizuku_required">CVE-2026-98260 needs Shizuku running and allowed for this app. Start Shizuku and grant access, then try again.</string>
     <!--
         The question a run asks instead of failing when Use Shizuku is on and Shizuku is down. The
         second sentence is the honest half: the app's own process is not a shell, so a target that asks
@@ -1179,6 +1195,7 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
     <!-- The two group titles are the flows' own names (RunKind.flowName); these are what follows them. -->
     <string name="payload_group_universal_detail">Runs from this app alone, before anything is installed: it installs the manager itself, patches the kernel it writes through and starts its service. It still needs a payload, and the row says which.</string>
     <string name="payload_group_device">Payloads the enabled sources publish for a phone, by model and kernel release.</string>
+    <string name="payload_group_timer">CVE-2026-98260 timer payloads.</string>
     <string name="universal_choice_device">Device payload</string>
     <string name="universal_choice_generic">Generic payload</string>
     <!--

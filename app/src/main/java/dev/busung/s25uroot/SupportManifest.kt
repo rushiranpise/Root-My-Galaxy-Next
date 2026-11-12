@@ -90,6 +90,8 @@ data class TargetProfile(
      * rather than to whatever the branch held at the time.
      */
     val sourceCommit: String = "",
+    /** The CVE this entry's exploit targets, when the feed declares it. */
+    val cve: String? = null,
 ) {
     init {
         require(models.isNotEmpty()) { "Payload must support at least one model" }
@@ -229,6 +231,7 @@ data class SupportManifest(
                             kernelSu = kernelSu.artifact(),
                             kernelSuVersion = kernelSu.declaredVersion(),
                             flavor = flavor,
+                            cve = payload.optString("cve").trim().takeIf(String::isNotEmpty),
                         ),
                     )
                 }

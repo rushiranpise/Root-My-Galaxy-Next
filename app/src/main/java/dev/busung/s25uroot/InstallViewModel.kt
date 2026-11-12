@@ -1324,17 +1324,39 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
 
                 // The transport is chosen here rather than beside the Shizuku check, because the
                 // profile is what decides whether a shell is required at all - and a target that
-                // requires one can be carried by a pairing instead of by Shizuku. Frozen for the
-                // whole run, so a mid-run preference change cannot mix transports between the exploit
-                // and the KernelSU staging steps.
+                // requires one can be carried by a pairing instead of by Shizuku, except for the timer
+                // payload, which is Shizuku-only. Frozen for the whole run, so a mid-run preference
+                // change cannot mix transports between the exploit and the KernelSU staging steps.
                 // Frozen here with the transport, for the same reason: a preference changed from the
                 // settings screen while this run is in flight must not be able to produce a half-load
                 // - staged on one reading and skipped on another.
                 val loadKernelSu = AppPreferences.loadKernelSu(app)
                 // The run's own answer to the question above, honoured for the whole run: this is what
                 // makes "Run without Shizuku" mean it rather than asking again a moment later.
-                val shizukuRequested = AppPreferences.shizukuMode(app) && !withoutShizuku
-                val shizukuUsable = ShizukuController.isRunning() && ShizukuController.isGranted()
+                // CVE-2026-98260 calibrates through tracefs, and the app UID is not in the readtracefs
+                // group. It therefore needs a shell even though the feed has no policy field for
+                // that: app-process execution would reach calibration and fail with EACCES. Prefer
+                // the already-running Shizuku session when there is one, without requiring the user
+                // to turn the global Use Shizuku setting on for an ordinary 499 payload.
+                val timerPayload = profile.isTimerPayload()
+                val shellRequired = routePolicy.policy.prefersShellTransport || timerPayload
+                val shizukuRequested = (AppPreferences.shizukuMode(app) || timerPayload) && !withoutShizuku
+                val shizukuAvailability = ShizukuController.availability()
+                val shizukuUsable = shizukuAvailability == ShizukuAvailability.Ready
+                // The timer payload is stricter than the shell rule below: it was verified through
+                // Shizuku, so a pairing is not an interchangeable transport for it. Refuse before the
+                // payload is staged or started, and say which piece is missing rather than falling back
+                // to a run that would fail later in calibration.
+                val timerTransport = if (timerPayload) {
+                    activeStage = RunStage.Transport
+                    if (withoutShizuku) {
+                        error(app.getString(R.string.error_timer_shizuku_required))
+                    }
+                    timerRunTransport(shizukuAvailability)
+                        ?: error(app.getString(R.string.error_timer_shizuku_required))
+                } else {
+                    null
+                }
                 // The gate has already waited for Shizuku, so a binder that is missing here is not the
                 // thing to fall back from: this run was started on the promise that it would go through
                 // Shizuku, and a payload that runs in the app's process instead is a different run.
@@ -1342,8 +1364,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     error(app.getString(R.string.error_shizuku_unavailable))
                 }
                 val localAdbPaired = AdbCredentialStore.hasStoredKey(app) && AppPreferences.adbPaired(app)
-                val transport = chooseRunTransport(
-                    shellRequired = routePolicy.policy.prefersShellTransport,
+                val transport = timerTransport ?: chooseRunTransport(
+                    shellRequired = shellRequired,
                     shizukuRequested = shizukuRequested,
                     shizukuUsable = shizukuUsable,
                     localAdbPaired = localAdbPaired,
@@ -1354,9 +1376,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 // anywhere was a run that was set to go through Shizuku and went another way.
                 AppLog.info(
                     RUN_LOG_TAG,
-                    "Transport ${transport.name} (shell required=" +
-                        "${routePolicy.policy.prefersShellTransport}, Shizuku requested=$shizukuRequested, " +
-                        "usable=$shizukuUsable, pairing saved=$localAdbPaired)",
+                    "Transport ${transport.name} (shell required=$shellRequired, " +
+                        "Shizuku requested=$shizukuRequested, usable=$shizukuUsable, " +
+                        "pairing saved=$localAdbPaired)",
                 )
 
                 if (transport == RunTransport.Shizuku) {
@@ -1803,8 +1825,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         routePolicy: ExploitRoutePolicy,
     ) {
         val payload = payloads.exploit
+        val timerPayload = payloads.profile.isTimerPayload()
         if (activeRunTransport == RunTransport.LocalAdb) {
-            executeExploitOverLocalAdb(payload, payloads.kernelSu, requiresFreshP0Session, routePolicy)
+            executeExploitOverLocalAdb(
+                payload,
+                payloads.kernelSu,
+                requiresFreshP0Session,
+                routePolicy,
+                timerPayload,
+                payloads.profile.flavor.managerPackage,
+            )
             return
         }
         val shizuku = shizukuEnabled()
@@ -1847,6 +1877,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                     requiresFreshP0Session,
                     cachedP0Offset,
                     routePolicy,
+                    timerPayload,
+                    payloads.profile.flavor.managerPackage,
                 ),
             )
         } else {
@@ -1857,7 +1889,12 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 helper.absolutePath,
                 logFile.absolutePath,
             ).redirectErrorStream(true)
-            processBuilder.environment().putAll(exploitEnvironment(cachedP0Offset))
+            val environment = exploitEnvironment(cachedP0Offset).toMutableMap()
+            if (timerPayload) {
+                environment[TIMER_HOME_ENV] = timerAppHome()
+                environment[TIMER_PACKAGE_ENV] = payloads.profile.flavor.managerPackage
+            }
+            processBuilder.environment().putAll(environment)
             processBuilder.start()
         }
         val captured = StringBuilder()
@@ -1955,6 +1992,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         kernelSu: File,
         requiresFreshP0Session: Boolean,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
+        flavorPackage: String,
     ) {
         val logPrefix = mutableState.value.log
         val helper = nativeHelperFile()
@@ -1989,6 +2028,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                         requiresFreshP0Session,
                         cachedP0Offset,
                         routePolicy,
+                        timerPayload,
+                        flavorPackage,
                     ),
                     overallTimeoutMs = totalMillis,
                     // A fresh session is deliberately allowed to sit silent for as long as its ceiling:
@@ -2224,11 +2265,16 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         requiresFreshP0Session: Boolean,
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
+        flavorPackage: String,
     ): String = buildString {
         // The environment comes first, quoted as values, because this is a shell command rather than
         // a process spawn with an environment attached.
         exploitEnvironment(cachedP0Offset).forEach { (name, value) ->
             append(name).append('=').append(shellQuote(value)).append(' ')
+        }
+        if (timerPayload) {
+            append(TIMER_PACKAGE_ENV).append('=').append(shellQuote(flavorPackage)).append(' ')
         }
         append(shellQuote(ADB_HELPER_PATH))
         append(" --run-payload")
@@ -2249,7 +2295,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             nativeHelperFile()
         }
 
-    private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "libcve43499root.so")
+    private fun nativeHelperFile() = File(app.applicationInfo.nativeLibraryDir, "librmgroot.so")
+
+    /** The app-private directory the timer payload may create its scratch files in. */
+    private fun timerAppHome(): String =
+        File(app.filesDir, "cve98260-app").apply { mkdirs() }.absolutePath
 
     private fun shizukuEnabled(): Boolean = activeRunShizuku ?: AppPreferences.shizukuMode(app)
 
@@ -2273,9 +2323,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         requiresFreshP0Session: Boolean,
         cachedP0Offset: String?,
         routePolicy: ExploitRoutePolicy,
+        timerPayload: Boolean,
+        flavorPackage: String,
     ): Array<String> = buildList {
         exploitEnvironment(cachedP0Offset).forEach { (name, value) ->
             add("$name=$value")
+        }
+        if (timerPayload) {
+            add("$TIMER_PACKAGE_ENV=$flavorPackage")
         }
         add("CVE43499_ROOT_HELPER=$helperPath")
         add("LD_PRELOAD=$payloadPath")
@@ -2753,15 +2808,21 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
      * Records which target ran and which catalog defined it, including the commit that catalog was
      * read at, so a finished run can be traced back to a revision rather than to a branch name.
      */
-    private fun updateHistoryTarget(profile: TargetProfile) =
+    private fun updateHistoryTarget(profile: TargetProfile) {
+        // The timer rows are payload runs, but they are not the legacy payload: naming them after
+        // CVE-2026-43499 made a successful timer run's record and notification read as 499.
+        val kind = RunKind.forPayload(profile)
+        mutableState.value = mutableState.value.copy(kind = kind)
         updateHistory { entry ->
             entry.copy(
+                kind = kind,
                 profileId = profile.profileId,
                 sourceId = profile.sourceId.takeIf(String::isNotBlank),
                 sourceLabel = profile.sourceLabel.takeIf(String::isNotBlank),
                 sourceCommit = profile.sourceCommit.takeIf(String::isNotBlank),
             )
         }
+    }
 
     private fun finishHistory(result: InstallRunResult) {
         updateHistory { entry ->
@@ -2904,6 +2965,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_OFFSET_MASK = 0xffffL
         private const val SHIZUKU_LOG_PATH = "/data/local/tmp/rmgnext-shizuku-exploit.log"
         private const val SHIZUKU_HELPER_PATH = "/data/local/tmp/rmgnext-helper"
+        // Only the in-process route sets this. The shell routes leave the timer payload's home to
+        // its own default, which is the payload's name to choose rather than a staged name of ours.
+        private const val TIMER_HOME_ENV = "CVE98260_HOME"
+        private const val TIMER_PACKAGE_ENV = "CVE98260_KSU_PACKAGE"
         private const val SHIZUKU_PAYLOAD_PATH = "/data/local/tmp/rmgnext-shizuku-payload"
         private const val SHIZUKU_KSUD_PATH = KSUD_PATH
         private const val SHIZUKU_KSUD_STAGE_PATH = KSUD_STAGE_PATH

@@ -7,9 +7,10 @@ Root My Galaxy Next is a one-click installer for explicitly supported Samsung mo
 kernel combinations, and an independent fork of
 [Root My Galaxy](https://github.com/BuSung-dev/Root-My-Galaxy) by BuSung-dev. It keeps that
 app's device feed, payload contract and KernelSU-first approach, and adds to it: KernelSU-Next,
-ReSukiSU and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions, three
-ways to root an unattended boot (the payload flow, the system-uid helper, and a chain that needs
-neither), wireless ADB pairing as a shell transport, Shizuku started at
+ReSukiSU and KernelSU-Next+SUSFS payload flavours beside KernelSU, a choice of manager versions,
+payloads for both CVE-2026-43499 and CVE-2026-98260 in separate groups, kernel vulnerability cards for
+both payload bugs, four ways to root an unattended boot (the payload flow, its timer variant, the
+system-uid helper, and a chain that needs neither), wireless ADB pairing as a shell transport, Shizuku started at
 boot, a logs tab, filterable run history, and the repair actions once the kernel is loaded.
 
 It installs as its own app (`dev.rushiranpise.rmgnext`), so it can sit beside the original:
@@ -29,7 +30,7 @@ Every section below is collapsed. Open the one you are reading for, or follow a 
 
 **The app**: [Application](#application) · [The app's screens](#the-apps-screens) · [Settings](#settings)
 
-**Payloads**: [Payload sources](#payload-sources) · [Local payload](#local-payload) · [Payload modes](#payload-modes)
+**Payloads**: [Payload sources](#payload-sources) · [Payload CVEs](#payload-cves) · [Local payload](#local-payload) · [Payload modes](#payload-modes)
 
 **A run, start to finish**: [Boot settle](#boot-settle) · [Run plan](#run-plan) · [The screen during a run](#the-screen-during-a-run) · [What a run does once KernelSU is verified](#what-a-run-does-once-kernelsu-is-verified) · [One run at a time](#one-run-at-a-time) · [After a run ends](#after-a-run-ends) · [When a run fails](#when-a-run-fails)
 
@@ -72,7 +73,12 @@ The sheet also carries a search box, by device, model or kernel, and a **Show on
 that is remembered with a dozen sources configured it can hold every device its catalogs know, and
 the row being looked for is found by name long before it is found by scrolling.
 
-Below those rows the same sheet lists **Dirty Frag**, the chain that needs nothing installed first:
+Rows whose exploit is **CVE-2026-98260** are grouped under that CVE ahead of the legacy device rows.
+They are payload runs, not DirtyFrag targets: the timer payload needs a shell and is verified only
+through Shizuku, so it runs through Shizuku rather than a pairing or the app's own process, and its
+history and notification name 98260 rather than 43499.
+
+Below the payload rows the same sheet lists **Dirty Frag**, the chain that needs nothing installed first:
 one row per KernelSU per payload tier, six of them, each named by the exploit and its CVE rather than
 by a description of a phone. The device rows are what the sources publish, so the toggle and the
 flavour chips narrow them; these rows belong to no device, are listed whatever **Show only my device**
@@ -147,10 +153,11 @@ therefore not reachable in that state (the card is the only way into it). A run 
 inert, since starting one over another is what [the one-run-at-a-time rule](#one-run-at-a-time) refuses.
 
 **History** is every run with its log, its stage and the payload source that served it, exportable as a
-zip. Each row names the exploit the run used, **CVE-2026-43499** for a payload run and **Dirty Frag
-(CVE-2026-43284)** for a chain run, from the flow the run wrote into its own record; an entry written
-before the record carried a flow shows no name rather than a guessed one, because the one such run on a
-phone may have been either. A filter row above the list narrows it by result success, root only, failed and the chips are
+zip. Each row names the exploit the run used: **CVE-2026-43499** for a legacy payload run,
+**CVE-2026-98260** for a timer payload run, and **Dirty Frag (CVE-2026-43284)** for a chain run, from
+the flow the run wrote into its own record. An entry written before the record carried a flow shows no
+name rather than a guessed one; a timer entry written after that field existed but before the timer kind
+did is named from its profile id, because that is still what the file says it ran. A filter row above the list narrows it by result success, root only, failed and the chips are
 built from the history itself, so a result nothing has ever produced is not offered. Deleting asks
 nothing and offers an **Undo** instead, because the log is on this phone and the entries are captured
 before they go.
@@ -176,13 +183,13 @@ starts open, so the page a fresh install shows is the whole page.
 | Run Management | disable KSU modules, protect image partitions, boot wait time, run limits, run plan |
 | Shizuku Management | use Shizuku, start Shizuku now, Shizuku start code, auto start Shizuku on boot |
 | Wireless ADB Management | pair, test, or remove this app's wireless-debugging identity |
-| Root Management | KernelSU build (a readout of the payload) and the KernelSU service file, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft restart, the three root gates (Auto Root via Payload, Auto Root via Helper, Auto Root via DirtyFrag), the System UID install card and Keep Odin reachable |
+| Root Management | KernelSU build (a readout of the payload) and the KernelSU service file, install KernelSU, manager, manager version, the manager and KernelSU versions this phone is running, auto soft restart, the four root gates (Auto Root via Payload, Auto Root via Timer, Auto Root via Helper, Auto Root via DirtyFrag), the System UID install card and Keep Odin reachable |
 | Recovery Management | Reload modules, Reboot Android, Soft restart, Reboot and unroot (which also empties /data/adb and /data/local/tmp), each confirms first |
 | System Management | the battery-optimisation exemption a run with the screen off depends on, and the Trash card, which lists what the app has left on the device |
 
 The boot-time settings are filed under their own subsystem rather than together: *auto start Shizuku
-on boot* is a property of Shizuku, and the three root gates are a property of root. The three are
-alternatives rather than companions, so each one's switch turns the other two off (see
+on boot* is a property of Shizuku, and the four root gates are a property of root. The four are
+alternatives rather than companions, so each one's switch turns the other three off (see
 [Root on boot](#root-on-boot)). **About** and the update check are not here at all: they are on Home,
 beside the version they are about.
 
@@ -303,6 +310,39 @@ is a tempting proxy for "this target scans pages", but in the official feed only
 four 5.15 profiles ask for a fresh session, and marked profiles also run on 5.10, 6.1 and
 6.1.157 so a version-keyed policy would impose an hour-long single-attempt budget on targets
 that never asked for it.
+
+</details>
+
+## Payload CVEs
+
+<details>
+<summary>The two payload CVEs, the DirtyFrag chain beside them, and why the app never treats one as another.</summary>
+
+
+The app can root a supported phone through two payload bugs, and they are separate targets rather than
+versions of one another:
+
+| CVE | what runs | where it is offered |
+|---|---|---|
+| **CVE-2026-43499** | the legacy payload flow, with a device-specific exploit from the feed | the device group in the payload sheet |
+| **CVE-2026-98260** | the timer payload flow, with the same steps, a different exploit, and Shizuku as its only transport | its own **CVE-2026-98260** group above the device group |
+| **CVE-2026-43284** | the DirtyFrag chain, with the exploit compiled into the app and a daemon from the feed | the **Dirty Frag (CVE-2026-43284)** rows below the device group |
+
+A timer payload is still a payload run, not a DirtyFrag run: it shares the payload flow's steps and
+its record shape, differs in the exploit it downloads, the CVE its record and notification name, and
+its own working directory, and runs only through Shizuku. A feed row carrying CVE-2026-98260 is never resolved
+as a DirtyFrag device target. The payload sheet groups those rows under their own CVE, and the run
+history names the CVE the run actually used, so a timer run does not read as 43499 and a DirtyFrag run
+does not read as either payload bug.
+
+The Home screen keeps the two payload CVEs apart too. The **CVE-2026-43499** card can run the probe
+that measures the rtmutex bug. The **CVE-2026-98260** card is
+a version-table reading only: it says whether the kernel is at or above the fixed release, and points
+at the payload sheet rather than claiming a measured result. Neither card runs automatically, and neither
+is shown on a phone already rooted in this boot.
+
+The current feed targets for CVE-2026-98260 cover the SM-S938U1 on the DDZJB kernel. Support still comes
+from the payload sources, so another model or build needs a feed entry like any other target.
 
 </details>
 
@@ -633,13 +673,13 @@ loaded.
 
 Everything that consumes the load is switched off with it rather than left to fail:
 
-- **Auto root via payload** cannot run, because there is nothing for a boot run to put back; the
-  switch is disabled with that reason on it, and the gate itself refuses with a reason of its own
-  (`SkipKernelSuLoadingOff`) rather than looking like the setting had been turned off. The stored
-  value is kept, so turning loading back on restores exactly what was there. The other two gates are
-  not affected, and should not be: *auto root via helper* reroots through the helper rather than
-  through this flow, and *auto root via Dirty Frag* loads KernelSU as its first act rather than as a
-  decision, so neither has anything to leave unloaded.
+- **Auto root via payload** and **Auto root via timer** cannot run, because there is nothing for a
+  boot run to put back; both switches are disabled with that reason on them, and both gates refuse
+  with a reason of their own (`SkipKernelSuLoadingOff`) rather than looking like the settings had been
+  turned off. The stored values are kept, so turning loading back on restores exactly what was there.
+  The other two gates are not affected, and should not be: *auto root via helper* reroots through the
+  helper rather than through this flow, and *auto root via Dirty Frag* loads KernelSU as its first act
+  rather than as a decision, so neither has anything to leave unloaded.
 - **The recovery actions** Reload modules, Reboot Android, Soft restart and Reboot and unroot consume
   the daemon a verified load installed, so the cards read *Needs KernelSU* and take no tap.
 - **Disable KSU modules** is inert when there is no load for modules to sit out, so it is disabled
@@ -1174,30 +1214,31 @@ on is exactly the phone where the chain's own word is not the verdict.
 What it leaves is the daemon at `/data/adb/ksud` and that `su`; the module it loaded is in RAM, so the
 next boot needs the chain again, which is what its boot gate below is for. A run of this flow is named by
 the exploit and its CVE, **Dirty Frag (CVE-2026-43284)**, in the history row it writes, under its
-notification, and over its rows in the payload sheet; the payload flow is named **CVE-2026-43499** in
-the same places. One name per flow, read from the flow itself, so a record and the screen it is opened
-from cannot describe the same run differently.
+notification, and over its rows in the payload sheet; a legacy payload run is named **CVE-2026-43499**
+and a timer payload run is named **CVE-2026-98260** in the same places. One name per flow, read from the
+flow itself, so a record and the screen it is opened from cannot describe the same run differently.
 
 </details>
 
 ## Root on boot
 
 <details>
-<summary>The three gates, what each runs, what each needs, and why nothing here roots a phone before it is unlocked.</summary>
+<summary>The four gates, what each runs, what each needs, and why nothing here roots a phone before it is unlocked.</summary>
 
 
 These targets are rooted by loading KernelSU into the running kernel, so root does not survive a power
 cycle by itself: every boot has to load it again. The Dirty Frag chain is no exception: its module lives
-in RAM too. **Settings → Root Management** has three gates for that, and they are alternatives rather
+in RAM too. **Settings → Root Management** has four gates for that, and they are alternatives rather
 than companions, because each one decides what a boot with no root does:
 
 | gate | what it runs | what it needs on the phone |
 |---|---|---|
 | Auto root via payload | the cached payload, through the same code the install screen drives | a verified payload cached, and *Install KernelSU* on |
+| Auto root via timer | the cached CVE-2026-98260 payload, through the same code the install screen drives | a verified 98260 payload cached, *Install KernelSU* on, and Shizuku running with this app's permission at boot |
 | Auto root via helper | the system-uid helper, asked to reroot | Shizuku running when the boot happens, and the helper installed |
 | Auto root via Dirty Frag | the chain, from this app alone | a daemon staged by an earlier run, or the feed when none has been |
 
-Coming on, each switch turns the other two off, and stops a gate that is already waiting rather than
+Coming on, each switch turns the other three off, and stops a gate that is already waiting rather than
 only the next boot. The Dirty Frag gate stages the daemon the phone already has, recorded when it was
 staged and checked against the digest the feed declared, so a boot needs no network; a phone that has
 never staged one resolves the sources exactly as a hand run does, and a record that names another
@@ -1216,10 +1257,10 @@ this boot's single attempt has not been spent; and a verified payload is cached.
 anything of the user, and it asks once.
 
 Each flow keeps its own attempt for the boot, so one gate's run cannot spend another's: the payload
-install, the helper's reroot and the chain's run are three separate claims, keyed by the boot id. A
-one-shot **Reboot and retry** armed from a failed run is the fourth way a boot can have been asked for
-root, and it is a request for one boot rather than a setting so it takes precedence over whichever gate
-is also on. The chain's retry is resolved before the payload gate's own questions are even asked, since
+install (shared by the payload and timer gates), the helper's reroot and the chain's run are three
+separate claims, keyed by the boot id. A one-shot **Reboot and retry** armed from a failed run is
+another way a boot can have been asked for root, and it is a request for one boot rather than a setting
+so it takes precedence over whichever gate is also on. The chain's retry is resolved before the payload gate's own questions are even asked, since
 a phone whose only run has ever been a chain run has the payload gate off and no payload cached.
 
 Two of those are about telling boots apart. A userspace restart re-emits `BOOT_COMPLETED` while the
@@ -1299,10 +1340,10 @@ name, which is the point.
   whole-token matching keeps the `emulated-soft-reboot` marker in that same binary from counting. A
   daemon that did not return is stopped, and its last line is what the failure quotes, so the cause
   comes from KernelSU rather than from us.
-- **Reboot and unroot** clears all three root gates first and then reboots, because a reboot that
+- **Reboot and unroot** clears all four root gates first and then reboots, because a reboot that
   happened first would come back rooted; if the request is refused, exactly what was on is put back,
-  read and written as one set so a phone carrying two gates keeps both, and the three switches re-read
-  storage rather than following the value the screen hoped for. The reboot is only half of it: KernelSU
+  read and written as one set so a phone carrying several gates keeps all of them, and the four switches
+  re-read storage rather than following the value the screen hoped for. The reboot is only half of it: KernelSU
   lives in the running kernel and its *modules*, *superuser grants* and *daemon* live in `/data/adb`,
   and every root solution on the phone writes into the shared `/data/local/tmp`, so both directories
   are **emptied** contents only, since KernelSU and init created them with modes the platform relies
@@ -1432,8 +1473,8 @@ carries a version name that says which one it is:
 
 | build | version name | version code |
 |---|---|---|
-| CI | `0.6+ci.<run number>.<commit>` | base + seconds since 2026-01-01 UTC |
-| local | `0.6+local.<commit>` | base + seconds since 2026-01-01 UTC |
+| CI | `0.13+ci.<run number>.<commit>` | base + seconds since 2026-01-01 UTC |
+| local | `0.13+local.<commit>` | base + seconds since 2026-01-01 UTC |
 
 `appVersionBase` in `app/build.gradle.kts` is the only version written by hand. Both workflows
 read that literal out of the file, and a release tag is `v<base>`.

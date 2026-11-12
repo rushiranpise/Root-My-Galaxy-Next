@@ -168,6 +168,15 @@ class ShizukuWaitTest {
     }
 
     @Test
+    fun `a cached timer payload needs a shell`() {
+        // The timer payload calibrates through tracefs. Its cache entry predates the optional cve field,
+        // so the profile id is what keeps it out of the app-process transport.
+        val timer = payload().copy(profileId = "pa3q-S938U1UEUDDZJB-cve-2026-98260-ksun")
+        assertTrue(bootPayloadNeedsShell(preferAttempted = true, attempted = timer, cached = null))
+        assertTrue(bootPayloadNeedsShell(preferAttempted = false, attempted = null, cached = timer))
+    }
+
+    @Test
     fun `a device with no payload at all keeps the wait`() {
         // The conservative default, and what keeps this from reaching a boot nobody can describe: no cache
         // and no attempt means the old behaviour, which is to wait and then say what happened.

@@ -10,6 +10,16 @@ import org.junit.Test
 class RunTransportTest {
 
     @Test
+    fun `the timer payload only runs through a ready Shizuku`() {
+        // The timer's tracefs calibration was verified through Shizuku. A pairing and the app's own
+        // process are not substitutes here, so an unavailable Shizuku is a refusal rather than a
+        // different transport.
+        assertEquals(RunTransport.Shizuku, timerRunTransport(ShizukuAvailability.Ready))
+        assertNull(timerRunTransport(ShizukuAvailability.NotRunning))
+        assertNull(timerRunTransport(ShizukuAvailability.WithoutPermission))
+    }
+
+    @Test
     fun `a shell-only payload with no Shizuku uses a stored pairing`() {
         assertEquals(
             RunTransport.LocalAdb,

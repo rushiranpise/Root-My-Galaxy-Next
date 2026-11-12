@@ -36,7 +36,7 @@ plugins {
  * the phone up to date and the upgrade it offered never appeared. Measured on this device: `1.1` shipped,
  * every phone kept its old helper, and nothing anywhere said why. Now the two move together.
  */
-val helperVersionName = "1.2"
+val helperVersionName = "1.5"
 
 val helperVersionCode: Int = run {
     val digest = MessageDigest.getInstance("SHA-256")

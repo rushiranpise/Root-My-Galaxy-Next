@@ -9,6 +9,10 @@ package dev.busung.s25uroot
  * downloads only a daemon. What they share is a shape: four steps, a progress bar, a log and one Stop. What
  * they do not share is any of the words, and none of the answers.
  *
+ * A **timer payload run** is not a third way to root a phone: it is a payload run whose exploit is
+ * CVE-2026-98260 rather than the legacy CVE-2026-43499. It shares the payload flow's steps and transport and
+ * differs in the exploit it stages and the CVE its record has to name.
+ *
  * So the flow is a value, carried by the run and written into its record, and everything flow-specific reads
  * it rather than assuming:
  *
@@ -23,8 +27,11 @@ package dev.busung.s25uroot
  * offered the other flow's retry, and how its record came to have nothing to be read back as.
  */
 enum class RunKind {
-    /** A payload run: the helper or Shizuku, a device-specific payload, and the regular four steps. */
+    /** A payload run for the legacy bug, CVE-2026-43499: the helper or Shizuku, and the regular four steps. */
     Payload,
+
+    /** A payload run for CVE-2026-98260: the same steps and transport, and a different exploit and CVE. */
+    Timer,
 
     /** The universal root: the ported chain, no helper and no Shizuku, and a daemon from the feed. */
     Universal,
@@ -51,10 +58,15 @@ enum class RunKind {
     val flowName: String
         get() = when (this) {
             Payload -> KernelVulnerability.CVE
+            Timer -> TimerVulnerability.CVE
             Universal -> "${UniversalRootRun.EXPLOIT_NAME} (${UniversalRootRun.CVE})"
         }
 
     companion object {
+        /** Which payload flow a target's exploit belongs to. */
+        fun forPayload(profile: TargetProfile): RunKind =
+            if (profile.isTimerPayload()) Timer else Payload
+
         /**
          * The kind a name is, defaulting to [Payload].
          *

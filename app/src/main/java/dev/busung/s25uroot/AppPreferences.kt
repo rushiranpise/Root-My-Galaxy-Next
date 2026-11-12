@@ -31,26 +31,27 @@ enum class AppThemeMode(val storedValue: String) {
 }
 
 /**
- * The three gates that would root the next boot, as one value.
+ * The four gates that would root the next boot, as one value.
  *
  * Read and written together by the one action that has to take all of them away: the recovery screen's
  * reboot-and-unroot clears whatever would bring root back before a reboot it is about to perform, and has to
- * put back exactly what was there if that reboot is refused. As a set rather than three flags because the
+ * put back exactly what was there if that reboot is refused. As a set rather than four flags because the
  * question that action asks is "would the next boot root itself", and because a gate added later must not be
- * able to miss it. That is also why the restore is not three setter calls: each setter turns the other two
+ * able to miss it. That is also why the restore is not four setter calls: each setter turns the other gates
  * off, so a phone that carried two flags would silently lose one under a button that promised not to.
  */
 internal data class RootGates(
     val payload: Boolean,
     val helper: Boolean,
     val universal: Boolean,
+    val timer: Boolean = false,
 ) {
     /** Whether any gate would root the next boot. */
-    val any: Boolean get() = payload || helper || universal
+    val any: Boolean get() = payload || helper || universal || timer
 
     companion object {
-        /** All three off, which is what a boot nobody has asked to root looks like. */
-        val none = RootGates(payload = false, helper = false, universal = false)
+        /** All four off, which is what a boot nobody has asked to root looks like. */
+        val none = RootGates(payload = false, helper = false, universal = false, timer = false)
     }
 }
 
@@ -74,6 +75,7 @@ object AppPreferences {
     private const val UNIVERSAL_PLAN_TIER = "universal_plan_tier"
     private const val UNIVERSAL_RETRY_BOOT = "universal_retry_boot"
     private const val UNIVERSAL_BOOT_ROOT = "universal_boot_root"
+    private const val TIMER_BOOT_ROOT = "timer_boot_root"
     private const val SHIZUKU_BOOT_MODE = "shizuku_boot_mode"
     private const val BOOT_SETTLE_SECONDS = "boot_settle_seconds"
     private const val RUN_STALL_SECONDS = "run_stall_seconds"
@@ -417,6 +419,7 @@ object AppPreferences {
         if (enabled) {
             editor.putBoolean(DFR_REROOT_AT_BOOT, false)
             editor.putBoolean(UNIVERSAL_BOOT_ROOT, false)
+            editor.putBoolean(TIMER_BOOT_ROOT, false)
         }
         editor.apply()
     }
@@ -443,6 +446,7 @@ object AppPreferences {
         if (enabled) {
             editor.putBoolean(BOOT_ROOT_MODE, false)
             editor.putBoolean(UNIVERSAL_BOOT_ROOT, false)
+            editor.putBoolean(TIMER_BOOT_ROOT, false)
         }
         editor.apply()
     }
@@ -450,15 +454,15 @@ object AppPreferences {
     /**
      * Whether a boot with no root should root itself with the chain, needing no helper and no shell.
      *
-     * The third way a boot can be asked for root, and the one that fits this flow best: the payload gate loads
-     * a payload the phone already has and the helper's starts an app, while this one stages the daemon the last
-     * run left behind and drives the exploit from this APK alone - no Shizuku to be running, nothing installed
-     * first. Off by default like the other two.
+     * This is the one that fits this flow best: the payload gates load a payload the phone already has and
+     * the helper's starts an app, while this one stages the daemon the last run left behind and drives the
+     * exploit from this APK alone - no Shizuku to be running, nothing installed first. Off by default like the
+     * others.
      *
-     * It is an alternative to both, not a companion: all three are unattended, they all decide what a boot with
-     * no root does, and the chain the last two run is the same chain - so two of them on is one boot, two runs
-     * racing for one kernel, and the winner being whichever reads the boot first. Each setter turns the other
-     * two off, and a boot has exactly one answer to what it should do about root.
+     * It is an alternative to the others, not a companion: all four are unattended, they all decide what a
+     * boot with no root does, and any two of them on is one boot, two runs racing for one kernel, and the
+     * winner being whichever reads the boot first. Each setter turns the other three off, and a boot has
+     * exactly one answer to what it should do about root.
      *
      * What it needs to work is a boot's worth of state rather than a switch: the daemon staged by an earlier
      * run. [UniversalDaemonStore] is that record, and the gate refuses with a sentence when it is missing
@@ -468,38 +472,64 @@ object AppPreferences {
         prefs(context).getBoolean(UNIVERSAL_BOOT_ROOT, false)
 
     /**
-     * Turns the chain's boot gate on or off, and the other two gates off with it when this one comes on.
+     * Turns the chain's boot gate on or off, and the other three gates off with it when this one comes on.
      */
     fun setUniversalBootRoot(context: Context, enabled: Boolean) {
         val editor = prefs(context).edit().putBoolean(UNIVERSAL_BOOT_ROOT, enabled)
         if (enabled) {
             editor.putBoolean(BOOT_ROOT_MODE, false)
             editor.putBoolean(DFR_REROOT_AT_BOOT, false)
+            editor.putBoolean(TIMER_BOOT_ROOT, false)
         }
         editor.apply()
     }
 
-    /** The three gates as they stand, for the one caller that has to put them back exactly. */
+    /**
+     * Whether a boot with no root should run the saved CVE-2026-98260 payload again.
+     *
+     * The timer payload is a payload run, not a fourth exploit chain: it needs the same cached files a
+     * boot has no network to fetch, and a shell for its tracefs calibration. It is its own gate because
+     * its cached payload is the 98260 one and the user asked for that bug specifically, not because the
+     * run itself is a different flow.
+     */
+    fun timerBootRoot(context: Context): Boolean =
+        prefs(context).getBoolean(TIMER_BOOT_ROOT, false)
+
+    /** Turns the timer's boot gate on or off, and the other three gates off with it when this one comes on. */
+    fun setTimerBootRoot(context: Context, enabled: Boolean) {
+        val editor = prefs(context).edit().putBoolean(TIMER_BOOT_ROOT, enabled)
+        if (enabled) {
+            editor.putBoolean(BOOT_ROOT_MODE, false)
+            editor.putBoolean(DFR_REROOT_AT_BOOT, false)
+            editor.putBoolean(UNIVERSAL_BOOT_ROOT, false)
+        }
+        editor.apply()
+    }
+
+    /** The four gates as they stand, for the one caller that has to put them back exactly. */
     internal fun rootGates(context: Context): RootGates = RootGates(
         payload = bootRootMode(context),
         helper = rerootAtBoot(context),
         universal = universalBootRoot(context),
+        timer = timerBootRoot(context),
     )
 
     /**
-     * Sets the three gates together, in one commit and without the exclusivity the setters apply.
+     * Sets the four gates together, in one commit and without the exclusivity the setters apply.
      *
-     * The rule the individual setters enforce - turning one on turns the other two off - must not apply here,
-     * because this is a *restore*: a phone that carried two flags (an older build could write that, and both
-     * gates' comments say so) would silently lose one, and the caller would have moved the user's configuration
-     * under a button that promised not to. Off is written the same way as on, so a caller cannot leave a gate
-     * behind by taking one away - which is the whole reason this exists rather than three setter calls.
+     * The rule the individual setters enforce - turning one on turns the other three off - must not apply
+     * here, because this is a *restore*: a phone that carried two flags (an older build could write that,
+     * and both gates' comments say so) would silently lose one, and the caller would have moved the user's
+     * configuration under a button that promised not to. Off is written the same way as on, so a caller
+     * cannot leave a gate behind by taking one away - which is the whole reason this exists rather than four
+     * setter calls.
      */
     internal fun setRootGates(context: Context, gates: RootGates) {
         prefs(context).edit()
             .putBoolean(BOOT_ROOT_MODE, gates.payload)
             .putBoolean(DFR_REROOT_AT_BOOT, gates.helper)
             .putBoolean(UNIVERSAL_BOOT_ROOT, gates.universal)
+            .putBoolean(TIMER_BOOT_ROOT, gates.timer)
             .commit()
     }
 

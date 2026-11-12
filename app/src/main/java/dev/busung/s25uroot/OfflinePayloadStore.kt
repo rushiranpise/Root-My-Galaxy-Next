@@ -206,8 +206,8 @@ internal object KnownGoodPayloadStore {
     private const val EXPLOIT = "cve-2026-43499-app.so"
     private const val KSUD = "ksud-s25u-kdp"
 
-    /** Name of the root helper this app bundles, as the manifest's own metadata describes it. */
-    const val ROOT_HELPER_LIBRARY = "libcve43499root.so"
+    /** Name of the neutral root helper this app bundles. */
+    const val ROOT_HELPER_LIBRARY = "librmgroot.so"
 
     fun hasValid(context: Context): Boolean = runCatching {
         load(context)

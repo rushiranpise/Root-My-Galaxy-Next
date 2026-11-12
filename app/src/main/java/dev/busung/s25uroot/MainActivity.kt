@@ -248,6 +248,7 @@ class MainActivity : ComponentActivity() {
     private var bootRootMode by mutableStateOf(false)
     private var rerootAtBoot by mutableStateOf(false)
     private var universalBootRoot by mutableStateOf(false)
+    private var timerBootRoot by mutableStateOf(false)
     private var dmcFix by mutableStateOf(false)
     private var armedRetry by mutableStateOf<ArmedRetry?>(null)
 
@@ -447,6 +448,7 @@ class MainActivity : ComponentActivity() {
                     bootRootMode = bootRootMode,
                     rerootAtBoot = rerootAtBoot,
                     universalBootRoot = universalBootRoot,
+                    timerBootRoot = timerBootRoot,
                     dmcFix = dmcFix,
                     armedRetry = armedRetry,
                     retryPayload = retryPayload,
@@ -503,11 +505,12 @@ class MainActivity : ComponentActivity() {
                     onBootRootModeChanged = { enabled ->
                         AppPreferences.setBootRootMode(this, enabled)
                         bootRootMode = enabled
-                        // The preference turns the other two gates off with this one, so their rows have to
+                        // The preference turns the other three gates off with this one, so their rows have to
                         // move with it rather than keep showing what the phone no longer holds.
                         if (enabled) {
                             rerootAtBoot = false
                             universalBootRoot = false
+                            timerBootRoot = false
                         }
                         // Either way a gate that is already waiting has to be reached, not just the next
                         // boot: a foreground service left running would install - or start the helper -
@@ -522,11 +525,12 @@ class MainActivity : ComponentActivity() {
                     onRerootAtBootChanged = { enabled ->
                         AppPreferences.setRerootAtBoot(this, enabled)
                         rerootAtBoot = enabled
-                        // Same as the install gate's own toggle: the preference turns the other two gates
+                        // Same as the install gate's own toggle: the preference turns the other three gates
                         // off, so their rows move too.
                         if (enabled) {
                             bootRootMode = false
                             universalBootRoot = false
+                            timerBootRoot = false
                         }
                         // The same reach the install gate's own toggle has, for the same reason: a gate
                         // that is already waiting on a shell would otherwise start the helper minutes
@@ -537,16 +541,33 @@ class MainActivity : ComponentActivity() {
                     onUniversalBootRootChanged = { enabled ->
                         AppPreferences.setUniversalBootRoot(this, enabled)
                         universalBootRoot = enabled
-                        // Same as the other two toggles, in both directions: the preference turns the other
-                        // two gates off, so their rows move with this one.
+                        // Same as the other three toggles, in both directions: the preference turns the other
+                        // three gates off, so their rows move with this one.
                         if (enabled) {
                             bootRootMode = false
                             rerootAtBoot = false
+                            timerBootRoot = false
                         }
                         // And the same reach: a gate that is already waiting has to be reached, not just the
                         // next boot. Turning this one on stops the helper's gate as well, because that is one
                         // of the two alternatives it just replaced - and the install gate's service is the one
                         // the chain's own branch runs in, so it is stopped either way.
+                        if (enabled) DfrBootService.stop(this)
+                        AutoRootService.stop(this)
+                    },
+                    onTimerBootRootChanged = { enabled ->
+                        AppPreferences.setTimerBootRoot(this, enabled)
+                        timerBootRoot = enabled
+                        // A boot has one gate. Turning this one on turns the other three off, so their
+                        // rows move with this one rather than keep showing a choice the phone no longer has.
+                        if (enabled) {
+                            bootRootMode = false
+                            rerootAtBoot = false
+                            universalBootRoot = false
+                        }
+                        // The timer gate runs through the payload service, so that is the one to reach in
+                        // both directions: on, to stop a payload gate that is already waiting; off, to stop
+                        // this gate's own wait.
                         if (enabled) DfrBootService.stop(this)
                         AutoRootService.stop(this)
                     },
@@ -749,10 +770,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Re-reads the three root gates into the screen's own copies of them.
+     * Re-reads the four root gates into the screen's own copies of them.
      *
      * Each gate is a preference with a switch drawn over it, and two things write those preferences without
-     * going through the switch: each setter turns the other two off, and reboot-and-unroot turns all three off
+     * going through the switch: each setter turns the other three off, and reboot-and-unroot turns all four off
      * before a reboot it is about to perform. So there is one place that reads them - this one, used by the
      * screens that have just moved one and by the launch - rather than each caller keeping its own idea of the
      * gates it did not touch.
@@ -761,6 +782,7 @@ class MainActivity : ComponentActivity() {
         bootRootMode = AppPreferences.bootRootMode(this)
         rerootAtBoot = AppPreferences.rerootAtBoot(this)
         universalBootRoot = AppPreferences.universalBootRoot(this)
+        timerBootRoot = AppPreferences.timerBootRoot(this)
     }
 
     /** The retry this device has armed, read together with the boot it would run in. */
@@ -874,6 +896,7 @@ private fun RootApp(
     bootRootMode: Boolean,
     rerootAtBoot: Boolean,
     universalBootRoot: Boolean,
+    timerBootRoot: Boolean,
     dmcFix: Boolean,
     armedRetry: ArmedRetry?,
     retryPayload: CachedPayload?,
@@ -901,11 +924,12 @@ private fun RootApp(
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
     onBootRootModeChanged: (Boolean) -> Unit,
     /**
-     * Asks the shell to re-read all three root gates, for the one action that moves more than one of them:
-     * reboot-and-unroot clears the payload gate, the helper's and the chain's together.
+     * Asks the shell to re-read all four root gates, for the one action that moves more than one of them:
+     * reboot-and-unroot clears the payload, helper, chain, and timer gates together.
      */
     onRootGatesChanged: () -> Unit,
     onUniversalBootRootChanged: (Boolean) -> Unit,
+    onTimerBootRootChanged: (Boolean) -> Unit,
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
@@ -1620,6 +1644,7 @@ private fun RootApp(
                             bootRootMode = bootRootMode,
                             rerootAtBoot = rerootAtBoot,
                             universalBootRoot = universalBootRoot,
+                            timerBootRoot = timerBootRoot,
                             dmcFix = dmcFix,
                             restartAfterRoot = restartAfterRoot,
                             shizukuBootMode = shizukuBootMode,
@@ -1645,6 +1670,7 @@ private fun RootApp(
                             onBootRootModeChanged = onBootRootModeChanged,
                             onRootGatesChanged = onRootGatesChanged,
                             onUniversalBootRootChanged = onUniversalBootRootChanged,
+                            onTimerBootRootChanged = onTimerBootRootChanged,
                             onRestartAfterRootChanged = onRestartAfterRootChanged,
                             onShizukuBootModeChanged = onShizukuBootModeChanged,
                             onBootSettleChanged = onBootSettleChanged,
@@ -2115,6 +2141,7 @@ private fun OverviewPage(
             readiness.kernelSu == KernelSuStatus.Active
         if (!rootedThisBoot) {
             item { KernelCheckCard(device) }
+            item { TimerCheckCard(device) }
         }
         // The rows that do something rather than report something, and they come last for that
         // reason: everything above answers "what is this phone doing", these answer "what else is
@@ -3126,6 +3153,60 @@ private fun leftoverCheck(context: Context): KernelCheckState {
  * card says so without starting anything. That is the one case where asking the kernel could add nothing, and
  * a kernel above the fix is not one to wedge for confirmation.
  */
+@Composable
+private fun TimerCheckCard(device: DeviceSnapshot) {
+    val table = remember(device.kernelVersion) { TimerVulnerability.read(device.kernelVersion) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.timer_check_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = stringResource(R.string.timer_check_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(
+                    when (table.verdict) {
+                        KernelVulnerability.Verdict.Vulnerable -> R.string.timer_check_vulnerable
+                        KernelVulnerability.Verdict.Patched -> R.string.timer_check_patched
+                        KernelVulnerability.Verdict.Undecided -> R.string.timer_check_undecided
+                    },
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (table.verdict == KernelVulnerability.Verdict.Vulnerable) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            table.fixedIn?.let { fixed ->
+                Text(
+                    text = stringResource(
+                        R.string.timer_check_from_version,
+                        fixed.toString(),
+                        device.kernelVersion,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun KernelCheckCard(device: DeviceSnapshot) {
     val context = LocalContext.current
@@ -4154,9 +4235,9 @@ private fun HistoryEntryCard(
                 // honest answer: those are the entries written before the flow joined the record, and one of the
                 // runs among them is a DirtyFrag run - so naming the payload flow over it would be a fact this
                 // app invented about a run that happened.
-                entry.kind?.let { flow ->
+                entry.kind?.let {
                     Text(
-                        flow.flowName,
+                        entry.flowName,
                         style = MaterialTheme.typography.bodyMedium,
                         color = contentColor.copy(alpha = 0.78f),
                     )
@@ -4721,6 +4802,7 @@ private fun SettingsPage(
     bootRootMode: Boolean,
     rerootAtBoot: Boolean,
     universalBootRoot: Boolean,
+    timerBootRoot: Boolean,
     dmcFix: Boolean,
     restartAfterRoot: Boolean,
     shizukuBootMode: Boolean,
@@ -4753,11 +4835,12 @@ private fun SettingsPage(
     onPayloadSourcesChanged: (List<PayloadSource>) -> Unit,
     onBootRootModeChanged: (Boolean) -> Unit,
     /**
-     * Asks the shell to re-read all three root gates, for the one action that moves more than one of them:
-     * reboot-and-unroot clears the payload gate, the helper's and the chain's together.
+     * Asks the shell to re-read all four root gates, for the one action that moves more than one of them:
+     * reboot-and-unroot clears the payload, helper, chain, and timer gates together.
      */
     onRootGatesChanged: () -> Unit,
     onUniversalBootRootChanged: (Boolean) -> Unit,
+    onTimerBootRootChanged: (Boolean) -> Unit,
     onRestartAfterRootChanged: (Boolean) -> Unit,
     onShizukuBootModeChanged: (Boolean) -> Unit,
     onBootSettleChanged: (Int) -> Unit,
@@ -6161,15 +6244,39 @@ private fun SettingsPage(
                         onBootRootModeChanged(enabled)
                     },
                 )
-                // The third way a boot can be asked for root, directly under the payload gate because the two
-                // answer the same question and only one of them may be on: turning either one on turns the
-                // other off, which is why the rows sit together rather than in the two flows' own sections.
+                // The timer payload's own gate, under the general payload gate because it asks the same
+                // question about one specific bug. It keeps the 98260 payload separate from the legacy
+                // 43499 one instead of making the boot run whichever was cached last.
+                SettingsSwitchCard(
+                    icon = Icons.Rounded.Timer,
+                    title = stringResource(R.string.settings_timer_boot_root),
+                    // Disabled rather than turned off, on the same terms as the payload gate: the stored
+                    // choice survives, and the row says why it cannot act while KernelSU loading is off.
+                    description = stringResource(
+                        if (loadKernelSu) {
+                            R.string.settings_timer_boot_root_summary
+                        } else {
+                            R.string.settings_timer_boot_root_needs_load
+                        },
+                    ),
+                    checked = timerBootRoot,
+                    position = SettingsCardPosition.Middle,
+                    enabled = loadKernelSu,
+                    onCheckedChange = { enabled ->
+                        clickHaptic(view)
+                        if (enabled) onRequestNotificationPermission()
+                        onTimerBootRootChanged(enabled)
+                    },
+                )
+                // The chain's boot gate, below the payload and timer gates because the four answer the same
+                // question and only one of them may be on: turning either one on turns the others off, which
+                // is why the rows sit together rather than in the flows' own sections.
                 //
-                // It borrows the helper's arrows rather than the payload gate's bolt, because what it does is
+                // It borrows the helper's arrows rather than the payload gates' bolt, because what it does is
                 // the same thing the helper's row does - run the chain again after a restart - and the two
                 // differ in what starts it, not in what happens. Deliberately not disabled with KernelSU
-                // loading off, unlike the two above: this flow does not load KernelSU as a step, loading it is
-                // the whole of what it does.
+                // loading off, unlike the payload and timer gates above: this flow does not load KernelSU as a
+                // step, loading it is the whole of what it does.
                 SettingsSwitchCard(
                     icon = Icons.Rounded.Autorenew,
                     title = stringResource(R.string.settings_universal_boot_root),
@@ -7405,8 +7512,14 @@ private fun TargetSelectionSheet(
     // What a device-tier row would stage, resolved from the catalog this sheet already holds by the same call
     // the run makes ([resolveFor]) - so the row cannot name a payload the run would not use. Resolving fetches
     // nothing; the run's resolution is the one that downloads, and it is the one that refuses.
-    val catalogEntries = remember(catalog.profiles, device) {
-        KernelSuFlavor.entries.associateWith { catalog.profiles.resolveFor(device, it) }
+    // DirtyFrag keeps its own device tier. Timer entries are a different exploit family and must not
+    // be resolved here, or the sheet says DirtyFrag stages the timer payload and the two CVEs become
+    // one choice on screen. The timer entries are still listed as normal device payloads below.
+    val dirtyFragProfiles = remember(catalog.profiles) {
+        catalog.profiles.filterNot { it.isTimerPayload() }
+    }
+    val catalogEntries = remember(dirtyFragProfiles, device) {
+        KernelSuFlavor.entries.associateWith { dirtyFragProfiles.resolveFor(device, it) }
     }
     // Whether that resolution is an answer at all. An empty profile list means "no entry for this phone" only
     // when the sources were read: a sheet opened while they are still being read, or after a read that failed,
@@ -7678,25 +7791,48 @@ private fun TargetSelectionSheet(
                         }
                     }
                     else -> {
-                        item(key = SHEET_DEVICE_GROUP_KEY) {
-                            PayloadGroupHeader(
-                                // The flow's own name, which is the same name the run this row starts writes
-                                // into its record - the sheet and the history agree because there is one name
-                                // rather than two that have to be kept in step by hand.
-                                title = RunKind.Payload.flowName,
-                                detail = stringResource(R.string.payload_group_device),
-                            )
+                        val timerRows = rows.device.filter { it.profile.isTimerPayload() }
+                        val payloadRows = rows.device.filterNot { it.profile.isTimerPayload() }
+                        if (timerRows.isNotEmpty()) {
+                            item(key = SHEET_TIMER_GROUP_KEY) {
+                                PayloadGroupHeader(
+                                    title = TimerVulnerability.CVE,
+                                    detail = stringResource(R.string.payload_group_timer),
+                                )
+                            }
+                            items(timerRows, key = { it.key }) { choice ->
+                                DevicePayloadRow(
+                                    profile = choice.profile,
+                                    selected = selectedKey == choice.key,
+                                    device = device,
+                                    onSelect = {
+                                        clickHaptic(view)
+                                        selectedKey = choice.key
+                                    },
+                                )
+                            }
                         }
-                        items(rows.device, key = { it.key }) { choice ->
-                            DevicePayloadRow(
-                                profile = choice.profile,
-                                selected = selectedKey == choice.key,
-                                device = device,
-                                onSelect = {
-                                    clickHaptic(view)
-                                    selectedKey = choice.key
-                                },
-                            )
+                        if (payloadRows.isNotEmpty()) {
+                            item(key = SHEET_DEVICE_GROUP_KEY) {
+                                PayloadGroupHeader(
+                                    // The flow's own name, which is the same name the run this row starts writes
+                                    // into its record - the sheet and the history agree because there is one name
+                                    // rather than two that have to be kept in step by hand.
+                                    title = RunKind.Payload.flowName,
+                                    detail = stringResource(R.string.payload_group_device),
+                                )
+                            }
+                            items(payloadRows, key = { it.key }) { choice ->
+                                DevicePayloadRow(
+                                    profile = choice.profile,
+                                    selected = selectedKey == choice.key,
+                                    device = device,
+                                    onSelect = {
+                                        clickHaptic(view)
+                                        selectedKey = choice.key
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -7765,6 +7901,7 @@ private fun TargetSelectionSheet(
  * `when`, and a list can no more hold two of them than it can hold two device groups.
  */
 private const val SHEET_UNIVERSAL_GROUP_KEY = "sheet:universal-group"
+private const val SHEET_TIMER_GROUP_KEY = "sheet:timer-group"
 private const val SHEET_DEVICE_GROUP_KEY = "sheet:device-group"
 private const val SHEET_STATE_KEY = "sheet:state"
 

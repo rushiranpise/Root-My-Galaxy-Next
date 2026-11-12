@@ -377,9 +377,10 @@ class PayloadRepository(private val context: Context) {
 
     fun download(profile: TargetProfile, onProgress: (String) -> Unit): VerifiedPayloads {
         val directory = File(context.filesDir, "payloads/${cacheKey(profile)}").apply { mkdirs() }
-        val exploit = importedExploit(directory, onProgress) ?: downloadArtifact(
+        val exploitFile = File(directory, profile.exploitFileName())
+        val exploit = importedExploit(exploitFile, onProgress) ?: downloadArtifact(
             profile.exploit,
-            File(directory, "cve-2026-43499-app.so"),
+            exploitFile,
             context.getString(R.string.artifact_exploit),
             onProgress,
         )
@@ -500,7 +501,7 @@ class PayloadRepository(private val context: Context) {
      * source matched to this device, because nothing about importing an exploit changes which
      * ksud this kernel needs.
      */
-    private fun importedExploit(directory: File, onProgress: (String) -> Unit): File? {
+    private fun importedExploit(destination: File, onProgress: (String) -> Unit): File? {
         if (LocalPayload.file(context) == null) return null
         onProgress(
             context.getString(
@@ -508,7 +509,7 @@ class PayloadRepository(private val context: Context) {
                 LocalPayload.displayName(context).orEmpty(),
             ),
         )
-        return LocalPayload.stage(context, File(directory, "cve-2026-43499-app.so"))
+        return LocalPayload.stage(context, destination)
     }
 
     private fun downloadArtifact(
