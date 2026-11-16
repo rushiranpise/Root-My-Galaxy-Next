@@ -1412,6 +1412,10 @@ private fun RootApp(
     // start without being confirmed.
     confirming?.let { pending ->
         val universal = pending as? PayloadChoice.Universal
+        val candidateProfile = (pending as? PayloadChoice.Device)?.profile?.takeIf { it.isCandidate }
+        var candidateAck by remember(pending) {
+            mutableStateOf(candidateProfile == null || AppPreferences.allowExperimentalPayloads(context))
+        }
         AlertDialog(
             onDismissRequest = { confirming = null },
             icon = { Icon(Icons.Rounded.Security, contentDescription = null) },
@@ -1430,6 +1434,31 @@ private fun RootApp(
                             )
                         },
                     )
+                    if (candidateProfile != null) {
+                        Text(
+                            stringResource(R.string.candidate_warning_body),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = candidateAck,
+                                    role = Role.Checkbox,
+                                    onClick = { candidateAck = !candidateAck },
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Checkbox(checked = candidateAck, onCheckedChange = null)
+                            Text(
+                                stringResource(R.string.candidate_acknowledge),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                     // Nothing is said about the manager for a payload run, which is the sentence that used to
                     // be the whole of this body. The run installs the flavour's manager itself when the phone
                     // has none, so that dialog could only state it twice: once as an offer, which is the run's
@@ -1460,13 +1489,21 @@ private fun RootApp(
                 }
             },
             confirmButton = {
+                val canConfirm = candidateProfile == null || candidateAck
                 // Confirm is the recommended answer and Cancel is the quiet one. Confirm is not
                 // destructive even though a run replaces the kernel: what this dialog asks is whether to
                 // start, and everything a run can report comes after it.
                 AppDialogActions(
                     listOf(
-                        AppAction(R.string.action_confirm, AppActionRole.Priority) {
+                        AppAction(
+                            R.string.action_confirm,
+                            if (canConfirm) AppActionRole.Priority else AppActionRole.None,
+                        ) {
+                            if (!canConfirm) return@AppAction
                             clickHaptic(view)
+                            if (candidateProfile != null) {
+                                AppPreferences.setAllowExperimentalPayloads(context, true)
+                            }
                             confirming = null
                             when (pending) {
                                 is PayloadChoice.Device -> {
@@ -7845,6 +7882,13 @@ private fun DevicePayloadRow(
                     profile.displayName,
                     style = MaterialTheme.typography.titleMedium,
                 )
+                if (profile.isCandidate) {
+                    Text(
+                        stringResource(R.string.candidate_badge),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Text(
                     modelLabel,
                     style = MaterialTheme.typography.bodyMedium,

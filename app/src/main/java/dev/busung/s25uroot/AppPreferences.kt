@@ -121,6 +121,7 @@ object AppPreferences {
     // not yet in force. Recorded when the file was actually changed, which is the one thing the file
     // itself cannot say afterwards.
     private const val DFR_KEY_REMOVED_AT = "dfr_key_removed_at"
+    private const val ALLOW_EXPERIMENTAL_PAYLOADS = "allow_experimental_payloads"
     private const val PAYLOAD_SOURCES = "payload_sources"
     // Superseded by the source list; read once so an existing selection survives the upgrade.
     private const val LEGACY_PAYLOAD_REPOSITORY = "payload_repository"
@@ -1013,6 +1014,21 @@ object AppPreferences {
         val editor = prefs(context).edit()
         if (at == null) editor.remove(DFR_KEY_REMOVED_AT) else editor.putLong(DFR_KEY_REMOVED_AT, at)
         editor.apply()
+    }
+
+    /**
+     * Whether candidate/experimental payload profiles may be run.
+     *
+     * Off by default: experimental profiles can be unproven, device-specific, or require recovery.
+     * Running one requires an explicit in-flow confirmation that records this opt-in.
+     */
+    fun allowExperimentalPayloads(context: Context): Boolean =
+        prefs(context).getBoolean(ALLOW_EXPERIMENTAL_PAYLOADS, false)
+
+    fun setAllowExperimentalPayloads(context: Context, allowed: Boolean) {
+        prefs(context).edit()
+            .putBoolean(ALLOW_EXPERIMENTAL_PAYLOADS, allowed)
+            .apply()
     }
 
     @Synchronized

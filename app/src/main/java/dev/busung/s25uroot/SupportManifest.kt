@@ -123,6 +123,26 @@ data class TargetProfile(
 
     val supportedKernelVersions: String
         get() = kernelVersions.joinToString()
+
+    /**
+     * Whether this payload is experimental/candidate and must not be run without explicit opt-in.
+     *
+     * Feeds currently signal this in naming (e.g. displayName includes "CANDIDATE/EXPERIMENTAL")
+     * rather than schema fields; detection is therefore convention-based and intentionally
+     * conservative so future candidate entries are still gated.
+     */
+    val isCandidate: Boolean
+        get() = isCandidateProfileId(profileId) || isCandidateDisplayName(displayName)
+}
+
+internal fun isCandidateDisplayName(displayName: String): Boolean {
+    val normalized = displayName.uppercase()
+    return "CANDIDATE" in normalized || "EXPERIMENTAL" in normalized
+}
+
+internal fun isCandidateProfileId(profileId: String): Boolean {
+    val normalized = profileId.uppercase()
+    return "CANDIDATE" in normalized || "EXPERIMENTAL" in normalized || "EZIF" in normalized
 }
 
 /**

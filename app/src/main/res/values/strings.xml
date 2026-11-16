@@ -1280,4 +1280,9 @@ Hold Power and Volume Down together for 7 seconds to Reboot it from there.</stri
         <item quantity="one">This run and its log will be permanently removed.</item>
         <item quantity="other">These runs and their logs will be permanently removed.</item>
     </plurals>
+
+    <string name="candidate_badge">Experimental</string>
+    <string name="candidate_warning_title">Experimental payload</string>
+    <string name="candidate_warning_body">This profile is marked CANDIDATE/EXPERIMENTAL and is not proven stable. It may fail, behave differently across runs, or require a reboot/recovery to recover. Run it only if you understand the risk and can recover the device.</string>
+    <string name="candidate_acknowledge">I understand the risks and want to allow experimental payloads</string>
 </resources>
