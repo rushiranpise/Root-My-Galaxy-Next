@@ -38,12 +38,21 @@ data class PayloadSource(
 
     companion object {
         /**
-         * This fork's payload catalog.
+         * This fork's maintained payload catalog on the rushiranpise feed line.
          *
-         * Its own rather than the upstream one, because a fresh install has to be able to see the
-         * flavours and builds this fork publishes - the upstream catalog never will. It is only the
-         * default: a source list already saved on the device is what a run reads, and this changes
-         * only what a device with no list yet starts from.
+         * It carries the device profiles this migration ports and maintains (for example dm3q FZG1 and
+         * e1q DZG1/EZIF candidates) while keeping the rushiranpise schema and multi-source model. It is a
+         * default source so those profiles are discoverable without requiring manual source entry, but a
+         * source list already saved on the device is what a run reads.
+         */
+        const val MAINTAINED_REPOSITORY = "samson910022/Root-My-Galaxy-Payloads-Next"
+        const val MAINTAINED_BRANCH = "main"
+
+        /**
+         * Upstream rushiranpise payload catalog.
+         *
+         * Kept as a default source for compatibility and broader coverage. It is not removed or replaced
+         * implicitly for users who already have saved source lists.
          */
         const val DEFAULT_REPOSITORY = "rushiranpise/Root-My-Galaxy-Payloads"
         const val DEFAULT_BRANCH = "main"
@@ -63,6 +72,14 @@ data class PayloadSource(
 
         val COMMIT_PATTERN = Regex("^[0-9a-f]{40}$")
 
+        /** Maintained default: our ported/validated profiles are discoverable here first. */
+        val MAINTAINED = PayloadSource(
+            repository = MAINTAINED_REPOSITORY,
+            branch = MAINTAINED_BRANCH,
+            enabled = true,
+        )
+
+        /** Upstream rushiranpise feed, kept for compatibility and coverage. */
         val DEFAULT = PayloadSource(
             repository = DEFAULT_REPOSITORY,
             branch = DEFAULT_BRANCH,
@@ -93,12 +110,12 @@ data class PayloadSource(
         /**
          * What a device that has never saved a source list starts from.
          *
-         * This fork's feed first, and the only thing the order decides is what a run uses when nobody has
-         * picked a target: [resolveFor] takes the first profile that fits the device, and every profile
-         * carries the source it came from, so the second catalog is one tap away in the picker rather
-         * than the payload a plain run would load.
+         * The maintained catalog comes first so our ported profiles win first-fit auto-pick when multiple
+         * sources can satisfy the device, while upstream and official catalogs remain available for
+         * compatibility and coverage. Order only affects first-fit auto-pick; every profile keeps source
+         * attribution so users can choose explicitly.
          */
-        val DEFAULTS: List<PayloadSource> = listOf(DEFAULT, OFFICIAL)
+        val DEFAULTS: List<PayloadSource> = listOf(MAINTAINED, DEFAULT, OFFICIAL)
 
         fun isCommitValid(commit: String): Boolean = COMMIT_PATTERN.matches(commit.trim())
 

@@ -218,6 +218,15 @@ Coverage is kept for the life of the sheet and is not part of what gets saved: a
 branch is stale the moment the branch moves, and a pinned source is how a revision is frozen
 rather than a comment about it.
 
+By default the app enables three catalogs in this order: the maintained
+[samson910022/Root-My-Galaxy-Payloads-Next](https://github.com/samson910022/Root-My-Galaxy-Payloads-Next)
+feed (ported/validated profiles on the rushiranpise line), upstream
+[rushiranpise/Root-My-Galaxy-Payloads](https://github.com/rushiranpise/Root-My-Galaxy-Payloads), and the
+official [BuSung-dev/Root-My-Galaxy-Payloads](https://github.com/BuSung-dev/Root-My-Galaxy-Payloads).
+Existing saved source lists are preserved; if the maintained default is missing it is added
+non-destructively so its profiles stay discoverable. Order affects first-fit auto-pick only; each
+profile keeps source attribution.
+
 Any source can be **pinned**. The lock button on a row opens a revision picker for that source: the
 ref itself (no pin), the repository's tags, and its most recent commits, each showing the commit, the
 first line of its message and its date, with the current head marked `current` and whatever the

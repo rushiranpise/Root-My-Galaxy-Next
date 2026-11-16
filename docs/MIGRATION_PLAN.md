@@ -260,6 +260,15 @@ S23U/S24 builtin schema v4 concepts included `kernelReleases` and candidate/opt-
   - Existing default/legacy sources behavior is preserved or deliberately migrated with rationale and tests; no unintended data loss in persisted sources.
   - `applicationId` vs `namespace`/package terminology remains correct in touched docs/comments; no secrets/credentials introduced; network handling consistent with app policies.
 
+**Implementation status (2026-11-17, this workspace):**
+- **Precedence/default policy (chosen):** added `PayloadSource.MAINTAINED = samson910022/Root-My-Galaxy-Payloads-Next@main` and prepended it in `DEFAULTS` as `[MAINTAINED, DEFAULT(rushiranpise), OFFICIAL(BuSung-dev)]`. Rationale: makes our ported dm3q/e1q profiles discoverable and first-fit for auto-pick when matching, while keeping upstream and official catalogs available; source attribution remains per profile/selection.
+- **Persisted migration:** `AppPreferences.payloadSources()` now prepends the exact maintained default source when a non-empty saved list lacks that identity, without dropping/reordering existing entries or altering pins/enabled state of existing sources. Legacy single-repo migration and dedupe behavior preserved; `defaultPayloadSources()` already folds legacy choice and adds missing defaults. Users can disable/remove maintained source after migration.
+- **Legacy compatibility:** `LEGACY_REPOSITORY` raw-prefix/manifest-origin handling left unchanged (reader compatibility only); maintained source is treated as a normal source identity.
+- **HTTPS redirect hardening (Phase 4 candidate adopted early):** ported S24-style `HttpsRedirects` to `dev.busung.s25uroot` and routed `PayloadRepository.open()` through it (HTTPS-only initial URL/redirect targets, no auto-follow downgrade, capped redirects). Added unit tests (`HttpsRedirectsOpenTest`).
+- **EZIF candidate handling:** feed/app compatibility not broken; no schema change made. EZIF remains labeled `[CANDIDATE]` in upstream feed display names. Full app-side opt-in/gating for experimental profiles was not implemented in this pass (requires selection/run/settings plumbing and policy decisions per §4.4); documented as follow-up.
+- **History export:** Next already includes per-run and bulk archive export via `HistoryLogExporter`/history UI; no S24 port required beyond verification.
+- **Docs/tests updated:** `PayloadSources.kt`, `AppPreferences.kt`, `PayloadRepository.kt`, `HttpsRedirects.kt`, `PayloadSourcesTest`, `HttpsRedirectsOpenTest`, `README.md`, and this plan. Runtime/device validation and exhaustive multi-source smoke tests against live feeds were not performed in this environment.
+
 ### Phase 4 — Next app: adopt selected S23U/S24 behaviors (fit-based)
 - **Repo/branch:** `Root-My-Galaxy-Next` (phase branch).
 - **Tasks (evaluate/implement as compatible):**

@@ -18,17 +18,26 @@ class PayloadSourcesTest {
     }
 
     @Test
-    fun aDeviceStartsFromBothCatalogs() {
-        // The official catalog is a default rather than something to be typed in: every artifact in this
-        // fork's feed was copied out of it, and it still publishes the targets this fork has not rebuilt,
-        // so a list that started with one of the two would have no way to reach the other at all.
-        assertEquals(listOf(ours, official), PayloadSource.DEFAULTS)
+    fun maintainedSourceIsUsable() {
+        val maintained = PayloadSource.MAINTAINED
+        assertTrue(maintained.enabled)
+        assertEquals("samson910022/Root-My-Galaxy-Payloads-Next@main", maintained.id)
+    }
+
+    @Test
+    fun aDeviceStartsFromMaintainedAndCompatibilityCatalogs() {
+        // Maintained catalog is prepended so our ported profiles are discoverable and win first-fit
+        // auto-pick when matching, while upstream and official catalogs remain available.
+        val maintained = PayloadSource.MAINTAINED
+        assertEquals(listOf(maintained, ours, official), PayloadSource.DEFAULTS)
+        assertTrue(maintained.enabled)
+        assertEquals(PayloadSource.MAINTAINED_REPOSITORY, maintained.repository)
+        assertEquals(PayloadSource.MAINTAINED_BRANCH, maintained.branch)
         assertTrue(official.enabled)
         assertEquals(PayloadSource.LEGACY_REPOSITORY, official.repository)
         assertEquals(PayloadSource.LEGACY_BRANCH, official.branch)
-        // Two different catalogs, not one entry written twice: the ids are what a saved list, a pin and a
-        // selection are keyed by, so equal ids would mean the second source silently replacing the first.
-        assertEquals(2, PayloadSource.DEFAULTS.map { it.id }.distinct().size)
+        // Different catalogs, not duplicates: ids key saved lists, pins and selections.
+        assertEquals(3, PayloadSource.DEFAULTS.map { it.id }.distinct().size)
     }
 
     @Test

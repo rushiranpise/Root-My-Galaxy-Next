@@ -704,24 +704,31 @@ class PayloadRepository(private val context: Context) {
         return bytes
     }
 
-    private fun open(url: String, accept: String? = null): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "S25URoot/${BuildConfig.VERSION_NAME}")
-            accept?.let { setRequestProperty("Accept", it) }
-            connect()
-            require(responseCode == HttpURLConnection.HTTP_OK) {
-                // A limited API answers 403 (and 429 when it is explicit about it). Reporting the
-                // status number alone sends the reader looking for a fault in their repository.
-                if (responseCode == HttpURLConnection.HTTP_FORBIDDEN || responseCode == 429) {
-                    context.getString(R.string.repo_api_limited)
-                } else {
-                    "HTTP $responseCode"
-                }
-            }
+    private fun open(url: String, accept: String? = null): HttpURLConnection {
+        val headers = buildMap {
+            if (accept != null) put("Accept", accept)
         }
+        val connection = HttpsRedirects.open(
+            url = url,
+            connectTimeoutMillis = 15_000,
+            readTimeoutMillis = 60_000,
+            userAgent = "S25URoot/${BuildConfig.VERSION_NAME}",
+            headers = headers,
+        )
+        require(connection.responseCode == HttpURLConnection.HTTP_OK) {
+            // A limited API answers 403 (and 429 when it is explicit about it). Reporting the
+            // status number alone sends the reader looking for a fault in their repository.
+            val responseCode = connection.responseCode
+            val message = if (responseCode == HttpURLConnection.HTTP_FORBIDDEN || responseCode == 429) {
+                context.getString(R.string.repo_api_limited)
+            } else {
+                "HTTP $responseCode"
+            }
+            connection.disconnect()
+            message
+        }
+        return connection
+    }
 
     companion object {
         /** Asks for the bare commit instead of the commit object, so the answer cannot grow with it. */

@@ -171,7 +171,15 @@ object AppPreferences {
         // Saved and empty is the same answer as never saved: a list with nothing in it is one the app
         // could not read a payload from, so the defaults are what it gets rather than a sheet it can only
         // be rescued from by typing.
-        return decodePayloadSources(stored).ifEmpty { defaultPayloadSources(context) }
+        val decoded = decodePayloadSources(stored).ifEmpty { return defaultPayloadSources(context) }
+        // Migration: ensure our maintained catalog is discoverable for existing saved lists without
+        // dropping or reordering user-added sources/pins. Prepend only when the exact default maintained
+        // source identity is absent; users can still disable or remove it explicitly afterward.
+        return if (decoded.any { it.id == PayloadSource.MAINTAINED.id }) {
+            decoded
+        } else {
+            listOf(PayloadSource.MAINTAINED) + decoded
+        }
     }
 
     fun setPayloadSources(context: Context, sources: List<PayloadSource>) {
