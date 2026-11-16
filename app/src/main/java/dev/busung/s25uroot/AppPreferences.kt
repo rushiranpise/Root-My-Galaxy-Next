@@ -172,15 +172,20 @@ object AppPreferences {
         // could not read a payload from, so the defaults are what it gets rather than a sheet it can only
         // be rescued from by typing.
         val decoded = decodePayloadSources(stored).ifEmpty { return defaultPayloadSources(context) }
-        // Migration: ensure our maintained catalog is discoverable for existing saved lists without
-        // dropping or reordering user-added sources/pins. Prepend only when the exact default maintained
-        // source identity is absent; users can still disable or remove it explicitly afterward.
-        return if (decoded.any { it.id == PayloadSource.MAINTAINED.id }) {
+        return migrateSavedPayloadSources(decoded)
+    }
+
+    /**
+     * Migration for existing saved source lists: ensure the maintained catalog is discoverable without
+     * dropping or reordering user-added sources, pins, or enabled states. Prepend only when the exact
+     * default maintained source identity is absent; users can still disable or remove it afterward.
+     */
+    internal fun migrateSavedPayloadSources(decoded: List<PayloadSource>): List<PayloadSource> =
+        if (decoded.any { it.id == PayloadSource.MAINTAINED.id }) {
             decoded
         } else {
             listOf(PayloadSource.MAINTAINED) + decoded
         }
-    }
 
     fun setPayloadSources(context: Context, sources: List<PayloadSource>) {
         prefs(context).edit()
@@ -193,23 +198,40 @@ object AppPreferences {
     /**
      * The list a device that has not saved one starts from.
      *
-     * [PayloadSource.DEFAULTS] with the older single-repository preference folded in: a build before the
-     * list stored one repository and one branch, and a device that set them did so on purpose, so that
-     * source keeps its place at the front. The official catalog is added beside it rather than in place of
-     * it - the defaults are what a device starts from, not what it is forced back to.
+     * Canonical defaults are maintained-first ([PayloadSource.DEFAULTS]) so first-fit auto-pick and source
+     * precedence match intent on fresh installs and when no usable saved list exists. Older single-repository
+     * legacy preferences are folded in deterministically: if they identify a custom source, it is preserved
+     * as a high-priority choice while maintained remains first and all defaults remain discoverable.
      */
     private fun defaultPayloadSources(context: Context): List<PayloadSource> {
         val preferences = prefs(context)
-        val chosen = PayloadSource.create(
-            repository = preferences.getString(LEGACY_PAYLOAD_REPOSITORY, null)
-                ?: PayloadSource.DEFAULT_REPOSITORY,
-            branch = preferences.getString(LEGACY_PAYLOAD_BRANCH, null)
-                ?: PayloadSource.DEFAULT_BRANCH,
-        ) ?: PayloadSource.DEFAULT
-        return listOf(chosen).withSourcesAdded(PayloadSource.DEFAULTS)
+        val legacyRepository = preferences.getString(LEGACY_PAYLOAD_REPOSITORY, null)
+        val legacyBranch = preferences.getString(LEGACY_PAYLOAD_BRANCH, null)
+        return defaultPayloadSourcesForLegacy(legacyRepository, legacyBranch)
     }
 
-    private fun encodePayloadSources(sources: List<PayloadSource>): String {
+    internal fun defaultPayloadSourcesForLegacy(
+        legacyRepository: String?,
+        legacyBranch: String?,
+    ): List<PayloadSource> {
+        if (legacyRepository == null && legacyBranch == null) {
+            return PayloadSource.DEFAULTS
+        }
+        val chosen = PayloadSource.create(
+            repository = legacyRepository ?: PayloadSource.DEFAULT_REPOSITORY,
+            branch = legacyBranch ?: PayloadSource.DEFAULT_BRANCH,
+        ) ?: PayloadSource.DEFAULT
+        if (chosen.id == PayloadSource.DEFAULT.id) {
+            // Legacy prefs absent in effect or equal to the old upstream default: use canonical
+            // maintained-first defaults rather than reviving old rushiranpise-first ordering.
+            return PayloadSource.DEFAULTS
+        }
+        // Explicit legacy customization: keep maintained first, preserve the chosen source next, then
+        // include remaining defaults for compatibility/coverage without duplicates.
+        return listOf(PayloadSource.MAINTAINED, chosen).withSourcesAdded(PayloadSource.DEFAULTS)
+    }
+
+    internal fun encodePayloadSources(sources: List<PayloadSource>): String {
         val array = JSONArray()
         sources.forEach { source ->
             array.put(
@@ -223,7 +245,7 @@ object AppPreferences {
         return array.toString()
     }
 
-    private fun decodePayloadSources(stored: String): List<PayloadSource> = try {
+    internal fun decodePayloadSources(stored: String): List<PayloadSource> = try {
         val array = JSONArray(stored)
         buildList {
             for (index in 0 until array.length()) {
